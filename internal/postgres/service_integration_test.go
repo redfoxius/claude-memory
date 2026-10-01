@@ -11,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"claude-memory/internal/config"
+	"claude-memory/internal/evalset"
 	"claude-memory/internal/memory"
 	"claude-memory/internal/record"
 )
@@ -341,5 +344,80 @@ func TestServiceAddVersusJudgmentBand(t *testing.T) {
 	all, _ := store.List(ctx, memory.ListFilters{})
 	if len(all) != 2 {
 		t.Errorf("rows = %d, want 2 (nothing written in the judgment band)", len(all))
+	}
+}
+
+// Backlog item 5 acceptance: identifier recall@3 = 100% for long
+// natural-language prompts that bury an identifier, on the eval seed set.
+// Embeddings are uninformative here (identical for every record), so any hit
+// comes from full-text — the half that used to return nothing. Both the
+// full-text-only path and hybrid search must find the record.
+func TestLongPromptIdentifierRecall(t *testing.T) {
+	ctx := context.Background()
+	dsn, cleanup := startPostgresContainer(t, ctx)
+	defer cleanup()
+	store, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	seeds, err := evalset.LoadSeedRecords("../../testdata/evalset/seed_records.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases, err := evalset.LoadQueryCases("../../testdata/evalset/query_cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	flat := unitVec(3, 0.5)
+	ids := make([]string, len(seeds))
+	for i, sr := range seeds {
+		rec := sr.ToRecord(uuid.New().String())
+		rec.Namespace = testNS
+		rec.Embedding = flat
+		if _, err := store.Create(ctx, rec); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+		ids[i] = rec.ID
+	}
+
+	rank := func(res *memory.SearchResult, id string) int {
+		for i, r := range res.Records {
+			if r.ID == id {
+				return i + 1
+			}
+		}
+		return 0
+	}
+
+	n := 0
+	for _, c := range cases {
+		if c.Category != "long_prompt_identifier" {
+			continue
+		}
+		n++
+		want := ids[*c.ExpectedRecordIdx]
+		opts := memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5}
+
+		ft, err := store.Search(ctx, c.Query, nil, c.Repo, opts)
+		if err != nil {
+			t.Fatalf("%s full-text: %v", c.ID, err)
+		}
+		if r := rank(ft, want); r < 1 || r > 3 {
+			t.Errorf("%s: full-text-only rank = %d, want <= 3", c.ID, r)
+		}
+
+		hy, err := store.Search(ctx, c.Query, flat, c.Repo, opts)
+		if err != nil {
+			t.Fatalf("%s hybrid: %v", c.ID, err)
+		}
+		if r := rank(hy, want); r < 1 || r > 3 {
+			t.Errorf("%s: hybrid rank = %d, want <= 3", c.ID, r)
+		}
+	}
+	if n == 0 {
+		t.Fatal("no long_prompt_identifier cases found")
 	}
 }

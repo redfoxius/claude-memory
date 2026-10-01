@@ -51,9 +51,11 @@ func (s *Store) searchHybridRRF(
 	var args []interface{}
 	argCount := 1
 
-	// Base repo scope (same repo or "*")
-	args = append(args, embeddingVec, repo, query)
-	baseArgCount := argCount + 3
+	// Base repo scope (same repo or "*"). $3/$4 are the OR-semantics
+	// tsquery strings (all terms / identifier-like terms), NULL when empty.
+	allQ, idQ := buildFTSQueries(query)
+	args = append(args, embeddingVec, repo, nullable(allQ), nullable(idQ))
+	baseArgCount := argCount + 4
 
 	if !opts.IncludeDeprecated {
 		whereClause = " AND r.status IN ('candidate', 'active')"
@@ -86,14 +88,23 @@ func (s *Store) searchHybridRRF(
 			WHERE (repo = $2 OR repo = '*')
 				%s
 		),
-		fts_ranks AS (
+		fts_scored AS (
 			SELECT
 				id,
-				ROW_NUMBER() OVER (ORDER BY ts_rank(tsvector_content, plainto_tsquery('simple', $3)) DESC, %s, id) as fts_rank
+				ts_rank(tsvector_content, to_tsquery('simple', $3::text)) AS rk,
+				COALESCE(tsvector_content @@ to_tsquery('simple', $4::text), false) AS id_hit,
+				%s AS st
 			FROM records r
 			WHERE (repo = $2 OR repo = '*')
-				AND tsvector_content @@ plainto_tsquery('simple', $3)
+				AND tsvector_content @@ to_tsquery('simple', $3::text)
 				%s
+		),
+		fts_ranks AS (
+			-- OR-noise guard: identifier-term matches always count; others only
+			-- when close to the best match (see ftsRelativeFloor).
+			SELECT id, ROW_NUMBER() OVER (ORDER BY rk DESC, st, id) AS fts_rank
+			FROM fts_scored
+			WHERE id_hit OR rk >= %g * (SELECT MAX(rk) FROM fts_scored)
 		)
 		SELECT
 			r.id,
@@ -117,7 +128,7 @@ func (s *Store) searchHybridRRF(
 			AND (v.id IS NOT NULL OR f.id IS NOT NULL)
 		ORDER BY rrf_score DESC, %s, similarity DESC, r.id
 		LIMIT $%d
-	`, statusTieBreak, whereClause, statusTieBreak, whereClause, rffK, rffK, whereClause, statusTieBreak, baseArgCount)
+	`, statusTieBreak, whereClause, statusTieBreak, whereClause, ftsRelativeFloor, rffK, rffK, whereClause, statusTieBreak, baseArgCount)
 
 	args = append(args, limit)
 
@@ -184,8 +195,9 @@ func (s *Store) searchFullTextOnly(
 	var whereClause string
 	argCount := 1
 
-	args = append(args, query, repo)
-	baseArgCount := argCount + 2
+	allQ, idQ := buildFTSQueries(query)
+	args = append(args, nullable(allQ), repo, nullable(idQ))
+	baseArgCount := argCount + 3
 
 	// Base repo scope
 	if !opts.IncludeDeprecated {
@@ -210,25 +222,23 @@ func (s *Store) searchFullTextOnly(
 	}
 
 	sqlQuery := fmt.Sprintf(`
-		SELECT
-			id,
-			kind,
-			title,
-			repo,
-			namespace,
-			files,
-			commit_sha,
-			tags,
-			status,
-			confidence,
-			ts_rank(tsvector_content, plainto_tsquery('simple', $1)) as score
-		FROM records r
-		WHERE (repo = $2 OR repo = '*')
-			AND tsvector_content @@ plainto_tsquery('simple', $1)
-			%s
-		ORDER BY score DESC, %s, id
+		WITH scored AS (
+			SELECT
+				id, kind, title, repo, namespace, files, commit_sha, tags, status, confidence,
+				ts_rank(tsvector_content, to_tsquery('simple', $1::text)) AS score,
+				COALESCE(tsvector_content @@ to_tsquery('simple', $3::text), false) AS id_hit,
+				%s AS st
+			FROM records r
+			WHERE (repo = $2 OR repo = '*')
+				AND tsvector_content @@ to_tsquery('simple', $1::text)
+				%s
+		)
+		SELECT id, kind, title, repo, namespace, files, commit_sha, tags, status, confidence, score
+		FROM scored
+		WHERE id_hit OR score >= %g * (SELECT MAX(score) FROM scored)
+		ORDER BY score DESC, st, id
 		LIMIT $%d
-	`, whereClause, statusTieBreak, baseArgCount)
+	`, statusTieBreak, whereClause, ftsRelativeFloor, baseArgCount)
 
 	args = append(args, limit)
 

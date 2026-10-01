@@ -45,6 +45,8 @@ type AggregatedResults struct {
 	ParaphraseCases           int
 	IdentifierHit3            int
 	IdentifierCases           int
+	LongPromptCases           int // identifier buried in a long natural-language prompt
+	LongPromptHit3            int
 	NegativeBelowHook         int
 	NegativeCases             int
 	PositiveSimilarities      []float64
@@ -254,7 +256,7 @@ func Run(ctx context.Context, svc *memory.Service, dir string, out io.Writer) er
 
 				// Aggregate similarity metrics.
 				switch qc.Category {
-				case "paraphrase", "exact_identifier":
+				case "paraphrase", "exact_identifier", "long_prompt_identifier":
 					if len(searchResult.Records) > 0 {
 						results.PositiveSimilarities = append(results.PositiveSimilarities, searchResult.Records[0].Similarity)
 					}
@@ -279,6 +281,11 @@ func Run(ctx context.Context, svc *memory.Service, dir string, out io.Writer) er
 			results.IdentifierCases++
 			if result.Hit3 {
 				results.IdentifierHit3++
+			}
+		case "long_prompt_identifier":
+			results.LongPromptCases++
+			if result.Hit3 {
+				results.LongPromptHit3++
 			}
 		case "negative":
 			results.NegativeCases++
@@ -315,6 +322,13 @@ func generateReport(results *AggregatedResults, cfg *config.Config) string {
 	fmt.Fprintf(&sb, "- Exact identifier cases: %d, hit@3: %d (recall: %.2f%%)\n",
 		results.IdentifierCases, results.IdentifierHit3,
 		100*float64(results.IdentifierHit3)/float64(max(1, results.IdentifierCases)))
+	longRecall := 100 * float64(results.LongPromptHit3) / float64(max(1, results.LongPromptCases))
+	longVerdict := "PASS"
+	if results.LongPromptHit3 != results.LongPromptCases {
+		longVerdict = "FAIL (required: 100%)"
+	}
+	fmt.Fprintf(&sb, "- Long-prompt identifier cases: %d, hit@3: %d (recall: %.2f%%) — %s\n",
+		results.LongPromptCases, results.LongPromptHit3, longRecall, longVerdict)
 	fmt.Fprintf(&sb, "- Negative cases: %d, top Similarity below hook threshold %.2f: %d (precision: %.2f%%)\n",
 		results.NegativeCases, hookThreshold, results.NegativeBelowHook,
 		100*float64(results.NegativeBelowHook)/float64(max(1, results.NegativeCases)))
@@ -426,7 +440,7 @@ func generateReport(results *AggregatedResults, cfg *config.Config) string {
 	for _, cr := range results.CaseResults {
 		status := "✓"
 		switch cr.Category {
-		case "paraphrase", "exact_identifier", "near_duplicate_store":
+		case "paraphrase", "exact_identifier", "long_prompt_identifier", "near_duplicate_store":
 			if !cr.Hit3 {
 				status = "✗"
 			}
@@ -448,7 +462,7 @@ func generateReport(results *AggregatedResults, cfg *config.Config) string {
 		switch cr.Category {
 		case "near_duplicate_store":
 			fmt.Fprintf(&sb, "- Decision: %s\n", cr.Decision)
-		case "paraphrase", "exact_identifier":
+		case "paraphrase", "exact_identifier", "long_prompt_identifier":
 			fmt.Fprintf(&sb, "- Hit@3: %v\n", cr.Hit3)
 			if cr.ExpectedRank > 0 {
 				fmt.Fprintf(&sb, "- Expected record: rank %d, Similarity %.4f, Score %.4f\n",

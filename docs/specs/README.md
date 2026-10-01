@@ -83,7 +83,9 @@ is implemented. This item adds:
 - Repos to ingest = git repos under the namespace's `paths`.
 - Rough size: S per provider + S for config.
 
-### 5. full-text search for natural-language queries — small, can go first
+### 5. full-text search for natural-language queries — DONE (2026-10-01)
+
+Implemented: OR-semantics tsquery (`internal/postgres/ftsquery.go`), identifier-term matches always count, other matches must reach 25% of the best ts_rank (an absolute floor does not work: ts_rank scales with the number of OR terms), eval category `long_prompt_identifier` (4 cases, 100% recall required) and an integration test. **Not verified:** the "no paraphrase regression" half needs `claude-memory eval-retrieval` against real Ollama.
 
 Measured 2026-10-01 (eval harness): `plainto_tsquery` ANDs every word of
 the query, so any natural-language prompt (hook, `memory_search`) gets **no**
@@ -99,7 +101,9 @@ matches help only for short, identifier-style queries.
   sentence; require identifier recall@3 = 100% and no paraphrase regression.
 - Rough size: S.
 
-### 6. integration tests for UPDATE / SUPERSEDE through the service — small
+### 6. integration tests for UPDATE / SUPERSEDE through the service — DONE (2026-10-01)
+
+Implemented in `internal/postgres/service_integration_test.go` (NOOP promotion, ExtractionDecision UPDATE, SUPERSEDE + rollback, UpdateRecord reindex, judgment band); runnable locally via `MEMORY_TEST_PG_ADMIN_DSN` / `make test-integration`.
 
 `writepath.go` sent `updated_at` in UPDATE / SUPERSEDE / NOOP update maps and
 every such write failed on real Postgres; it was caught only by the eval's
@@ -114,7 +118,7 @@ call the adapter directly).
   content).
 - Rough size: S.
 
-### 7. hook latency: skip migrations on the hot path — tiny
+### 7. hook latency: skip migrations on the hot path — DONE in code (re-measure p95 on the real setup)
 
 Measured 2026-10-01 on the real setup (laptop → tailnet Postgres): hook
 round-trip 215–343 ms, at/over the AC-30 p95 budget of 300 ms. Every

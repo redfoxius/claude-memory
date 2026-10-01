@@ -1,4 +1,4 @@
-.PHONY: build test lint clean cross-build install
+.PHONY: build test test-integration lint clean cross-build install
 
 # Default target
 all: build lint test
@@ -12,6 +12,15 @@ build:
 test:
 	@echo "Running tests with race detector..."
 	go test -race ./...
+
+# Integration tests (build tag "integration"). Either have Docker running
+# (testcontainers starts pgvector/pgvector:pg16), or point
+# MEMORY_TEST_PG_ADMIN_DSN at a pgvector-enabled Postgres, e.g.
+#   MEMORY_TEST_PG_ADMIN_DSN='postgres://postgres@localhost:5432/postgres' make test-integration
+# (each test then gets its own throwaway database).
+test-integration:
+	@echo "Running integration tests..."
+	go test -tags integration -race -count=1 ./internal/postgres/...
 
 # Lint with golangci-lint (uses default config when no .golangci.yml exists).
 lint:

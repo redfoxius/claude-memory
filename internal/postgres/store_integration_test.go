@@ -1411,3 +1411,112 @@ func startScratchDatabase(t *testing.T, ctx context.Context, adminDSN string) (s
 		admin.Close(context.Background())
 	}
 }
+
+// Natural-language prompts must reach full-text matches (OR semantics), keep
+// identifier hits even when weak by rank, and shed weak noise matches.
+func TestFullTextNaturalLanguagePrompts(t *testing.T) {
+	ctx := context.Background()
+	dsn, cleanup := startPostgresContainer(t, ctx)
+	defer cleanup()
+	store, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	mk := func(title, content, tags string) string {
+		r, err := store.Create(ctx, &record.Record{
+			ID: uuid.New().String(), Namespace: testNS, Kind: record.KindGotcha,
+			Title: title, Content: content, Repo: "r", Status: record.StatusActive,
+			Source: record.SourceInline, Confidence: 0.8, Files: []string{},
+			Tags: splitTags(tags), Embedding: makeTestEmbedding(0.9),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.ID
+	}
+	idErr := mk("Order cancellation retries", "OrderService.Cancel retries three times when ERR_GATEWAY_TIMEOUT is returned", "order")
+	idRows := mk("Database empty result handling", "A query returning no rows surfaces as ErrNoRows and must not be logged as an error", "database")
+	idNoise := mk("Docker networking", "Use host networking so containers reach the tailscale address in production", "docker")
+	idNoise2 := mk("Release checklist", "Tag the release and check the changelog before production deploys", "release")
+
+	opts := memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5}
+	ids := func(res *memory.SearchResult) map[string]bool {
+		m := map[string]bool{}
+		for _, r := range res.Records {
+			m[r.ID] = true
+		}
+		return m
+	}
+
+	// 1. AND semantics used to return nothing for a long prompt; OR finds it
+	// through the buried identifier (full-text-only path: no embedding).
+	long := "why does the order cancellation keep failing in production with ERR_GATEWAY_TIMEOUT when we retry"
+	res, err := store.Search(ctx, long, nil, "r", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(res); !got[idErr] {
+		t.Errorf("long prompt with buried identifier missed the record: %v", got)
+	}
+	if res.Records[0].ID != idErr {
+		t.Errorf("identifier record should rank first, got %s", res.Records[0].Title)
+	}
+
+	// 2. A single-token identifier in content is kept although its rank is
+	// low next to multi-term matches elsewhere ("production" matches two
+	// noise records strongly).
+	res, err = store.Search(ctx, "in production we sometimes see ErrNoRows, what should the handler do", nil, "r", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(res); !got[idRows] {
+		t.Errorf("single-token identifier ErrNoRows dropped: %v", got)
+	}
+
+	// 3. Noise guard: only a weak shared word ("production") -> the weak
+	// matches are shed relative to the best, but with no strong match they
+	// remain ordered; with a strong match present the weak ones disappear.
+	res, err = store.Search(ctx, "docker networking host tailscale address production", nil, "r", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ids(res)
+	if !got[idNoise] {
+		t.Errorf("strong match missing: %v", got)
+	}
+	if got[idNoise2] {
+		t.Errorf("weak 'production'-only match was not shed next to a strong match")
+	}
+
+	// 4. Stopword-only prompt: no usable terms, no SQL error, no hits.
+	res, err = store.Search(ctx, "what is the of and to", nil, "r", opts)
+	if err != nil || len(res.Records) != 0 {
+		t.Errorf("stopword-only prompt: %v, %d records", err, len(res.Records))
+	}
+
+	// 5. Hybrid with a vector that matches nothing: the identifier still
+	// surfaces through the full-text half, ahead of unrelated records.
+	far := unitVec(7, 0.0)
+	hyb, err := store.Search(ctx, long, far, "r", opts)
+	if err != nil || hyb.Degraded {
+		t.Fatalf("hybrid: %v degraded=%v", err, hyb != nil && hyb.Degraded)
+	}
+	if hyb.Records[0].ID != idErr {
+		t.Errorf("hybrid: identifier record should lead, got %s", hyb.Records[0].Title)
+	}
+
+	// 6. Hybrid with an all-stopword query must still work (vector only).
+	hyb, err = store.Search(ctx, "what is the of and to", makeTestEmbedding(0.9), "r", opts)
+	if err != nil || hyb.Degraded || len(hyb.Records) == 0 {
+		t.Errorf("hybrid with no FTS terms: %v degraded=%v n=%d", err, hyb != nil && hyb.Degraded, len(hyb.Records))
+	}
+}
+
+func splitTags(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	return strings.Fields(s)
+}
