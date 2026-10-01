@@ -125,7 +125,7 @@ func (s *Service) Deprecate(ctx context.Context, req *memory.DeprecateRequest) (
 }
 
 // FindCandidates implements finding candidate records for testing.
-func (s *Service) FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*memory.Candidate, error) {
+func (s *Service) FindCandidates(ctx context.Context, embedding []float32, namespace, repo string, limit int) ([]*memory.Candidate, error) {
 	return s.candidates, nil
 }
 

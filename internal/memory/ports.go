@@ -35,7 +35,7 @@ type Store interface {
 	// FindCandidates fetches the top-N nearest records in the same repo (or repo="*")
 	// using the same fused ranking as Search, used before a write to check for dedup.
 	// The returned candidates include their ID, title, and fused score, but not full content.
-	FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*Candidate, error)
+	FindCandidates(ctx context.Context, embedding []float32, namespace, repo string, limit int) ([]*Candidate, error)
 
 	// List returns all records matching the given filters (all optional).
 	List(ctx context.Context, filters ListFilters) ([]*record.Record, error)
@@ -57,8 +57,8 @@ type TxStore interface {
 	// AcquireLock takes a transaction-scoped advisory lock
 	// (pg_advisory_xact_lock) keyed on repo + normalized-title hash; it is
 	// released automatically on commit/rollback (AC-16).
-	AcquireLock(ctx context.Context, repo string, titleHash string) error
-	FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*Candidate, error)
+	AcquireLock(ctx context.Context, namespace, repo string, titleHash string) error
+	FindCandidates(ctx context.Context, embedding []float32, namespace, repo string, limit int) ([]*Candidate, error)
 	Get(ctx context.Context, id string) (*record.Record, error)
 	Create(ctx context.Context, r *record.Record) (*record.Record, error)
 	Update(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error)
@@ -92,6 +92,11 @@ type Clock interface {
 type SearchOptions struct {
 	// Kind filters by record kind (optional).
 	Kind *record.Kind
+
+	// Namespaces restricts the search to these namespaces (the caller's own,
+	// plus "global"). The service always sets it; the store never searches
+	// across namespaces it was not given.
+	Namespaces []string
 
 	// Tags filters by one or more tags; a record matches if it contains any of the requested tags.
 	Tags []string
@@ -152,6 +157,10 @@ type StoreRequest struct {
 	Kind              record.Kind
 	Title             string
 	Content           string
+	// Namespace overrides the service's namespace for this write. Only
+	// record.GlobalNamespace is accepted (explicit shared facts); empty means
+	// the service's own namespace.
+	Namespace         string
 	Repo              string
 	Files             []string
 	CommitSHA         *string
@@ -208,6 +217,7 @@ type DeprecateRequest struct {
 
 // ListFilters configures the List query.
 type ListFilters struct {
+	Namespace *string
 	Repo   *string
 	Kind   *record.Kind
 	Status *record.Status

@@ -53,6 +53,13 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 		return nil, fmt.Errorf("embedding provider unavailable: %w", err)
 	}
 
+	// Resolve the target namespace: the service's own, or "global" when the
+	// caller explicitly asks for it (never automatic).
+	ns := s.namespace
+	if req.Namespace == record.GlobalNamespace {
+		ns = record.GlobalNamespace
+	}
+
 	// Compute the advisory lock key: repo + hash(normalized title) (AC-16).
 	lockKey := computeLockKey(req.Repo, scrubbedTitle)
 
@@ -65,13 +72,13 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 
 	err = s.store.WithTx(ctx, func(tx TxStore) error {
 		// Acquire advisory lock before fetching candidates (AC-16).
-		if err := tx.AcquireLock(ctx, req.Repo, lockKey); err != nil {
+		if err := tx.AcquireLock(ctx, ns, req.Repo, lockKey); err != nil {
 			return fmt.Errorf("acquire lock: %w", err)
 		}
 
 		// Fetch top-5 candidates (AC-13).
 		var fetchErr error
-		candidates, fetchErr = tx.FindCandidates(ctx, embedding, req.Repo, 5)
+		candidates, fetchErr = tx.FindCandidates(ctx, embedding, ns, req.Repo, 5)
 		if fetchErr != nil {
 			return fmt.Errorf("find candidates: %w", fetchErr)
 		}
@@ -107,6 +114,8 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 				req.Source,
 				defaultConfidenceForSource(req.Source, req.Confidence),
 			)
+
+			newRec.Namespace = ns
 
 			// Set optional fields.
 			if len(req.Files) > 0 {
@@ -428,6 +437,10 @@ func (req *StoreRequest) validate(maxContentChars int) error {
 
 	if req.Repo == "" {
 		return fmt.Errorf("repo is required")
+	}
+
+	if req.Namespace != "" && req.Namespace != record.GlobalNamespace {
+		return fmt.Errorf("namespace may only be %q (or empty for the current namespace)", record.GlobalNamespace)
 	}
 
 	if req.Source == "" || !req.Source.IsValid() {

@@ -87,6 +87,7 @@ func TestRoundTrip(t *testing.T) {
 
 	// Create a record with all fields set
 	r := &record.Record{
+		Namespace:  testNS,
 		ID:         uuid.New().String(),
 		Kind:       record.KindPattern,
 		Title:      "Test Pattern",
@@ -159,6 +160,7 @@ func TestExactIdentifierFullTextRanking(t *testing.T) {
 
 	id1 := uuid.New().String()
 	r1 := &record.Record{
+		Namespace:  testNS,
 		ID:         id1,
 		Kind:       record.KindGotcha,
 		Title:      "Error handling in API calls",
@@ -173,6 +175,7 @@ func TestExactIdentifierFullTextRanking(t *testing.T) {
 
 	id2 := uuid.New().String()
 	r2 := &record.Record{
+		Namespace:  testNS,
 		ID:         id2,
 		Kind:       record.KindGotcha,
 		Title:      "NullPointerException handling",
@@ -189,7 +192,7 @@ func TestExactIdentifierFullTextRanking(t *testing.T) {
 	_, _ = store.Create(ctx, r2)
 
 	// Search for the exact error code (keyword match)
-	results, err := store.Search(ctx, "ERR_NULL_DEREF", makeTestEmbedding(0.15), "billing-service", memory.SearchOptions{Limit: 5})
+	results, err := store.Search(ctx, "ERR_NULL_DEREF", makeTestEmbedding(0.15), "billing-service", memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -219,6 +222,7 @@ func TestCrossRepoSearch(t *testing.T) {
 	// Create a repo-specific record
 	id1 := uuid.New().String()
 	r1 := &record.Record{
+		Namespace:  testNS,
 		ID:         id1,
 		Kind:       record.KindConvention,
 		Title:      "billing-service branch naming",
@@ -233,6 +237,7 @@ func TestCrossRepoSearch(t *testing.T) {
 	// Create a cross-repo record
 	id2 := uuid.New().String()
 	r2 := &record.Record{
+		Namespace:  testNS,
 		ID:         id2,
 		Kind:       record.KindConvention,
 		Title:      "k8s label limit",
@@ -248,7 +253,7 @@ func TestCrossRepoSearch(t *testing.T) {
 	_, _ = store.Create(ctx, r2)
 
 	// Search from catalog-service (not billing-service)
-	results, err := store.Search(ctx, "kubernetes label limit", makeTestEmbedding(0.34), "catalog-service", memory.SearchOptions{Limit: 5})
+	results, err := store.Search(ctx, "kubernetes label limit", makeTestEmbedding(0.34), "catalog-service", memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -283,6 +288,7 @@ func TestFullTextOnlyFallback(t *testing.T) {
 	// Create records
 	id1 := uuid.New().String()
 	r1 := &record.Record{
+		Namespace:  testNS,
 		ID:         id1,
 		Kind:       record.KindGotcha,
 		Title:      "Nil pointer deref",
@@ -297,7 +303,7 @@ func TestFullTextOnlyFallback(t *testing.T) {
 	_, _ = store.Create(ctx, r1)
 
 	// Search with nil embedding (simulating embedding provider down)
-	results, err := store.Search(ctx, "SDK struct", nil, "billing-service", memory.SearchOptions{Limit: 5})
+	results, err := store.Search(ctx, "SDK struct", nil, "billing-service", memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -336,6 +342,7 @@ func TestConcurrentWrites(t *testing.T) {
 	id2 := uuid.New().String()
 
 	r1 := &record.Record{
+		Namespace:  testNS,
 		ID:         id1,
 		Kind:       record.KindDecision,
 		Title:      "Use JSON for config",
@@ -348,6 +355,7 @@ func TestConcurrentWrites(t *testing.T) {
 	}
 
 	r2 := &record.Record{
+		Namespace:  testNS,
 		ID:         id2,
 		Kind:       record.KindDecision,
 		Title:      "Use JSON for config files",
@@ -364,7 +372,7 @@ func TestConcurrentWrites(t *testing.T) {
 	// Launch two writes concurrently
 	go func() {
 		err := store.WithTx(ctx, func(tx memory.TxStore) error {
-			if err := tx.AcquireLock(ctx, r1.Repo, hashTitle(r1.Title)); err != nil {
+			if err := tx.AcquireLock(ctx, testNS, r1.Repo, hashTitle(r1.Title)); err != nil {
 				return err
 			}
 			_, err := tx.Create(ctx, r1)
@@ -375,7 +383,7 @@ func TestConcurrentWrites(t *testing.T) {
 
 	go func() {
 		err := store.WithTx(ctx, func(tx memory.TxStore) error {
-			if err := tx.AcquireLock(ctx, r2.Repo, hashTitle(r2.Title)); err != nil {
+			if err := tx.AcquireLock(ctx, testNS, r2.Repo, hashTitle(r2.Title)); err != nil {
 				return err
 			}
 			_, err := tx.Create(ctx, r2)
@@ -415,6 +423,7 @@ func TestSupersedeCandidateToActive(t *testing.T) {
 	// Create an active record
 	idOld := uuid.New().String()
 	rOld := &record.Record{
+		Namespace:  testNS,
 		ID:         idOld,
 		Kind:       record.KindGotcha,
 		Title:      "Third-party SDK behavior",
@@ -431,6 +440,7 @@ func TestSupersedeCandidateToActive(t *testing.T) {
 	// Create a new record that supersedes the old one
 	idNew := uuid.New().String()
 	rNew := &record.Record{
+		Namespace:  testNS,
 		ID:         idNew,
 		Kind:       record.KindGotcha,
 		Title:      "Third-party SDK behavior",
@@ -495,6 +505,7 @@ func TestTTLCleanup(t *testing.T) {
 	// Create a candidate record with old timestamps
 	idCandidate := uuid.New().String()
 	rCandidate := &record.Record{
+		Namespace:  testNS,
 		ID:         idCandidate,
 		Kind:       record.KindPattern,
 		Title:      "Old candidate",
@@ -516,6 +527,7 @@ func TestTTLCleanup(t *testing.T) {
 	// Create an active record with old timestamps
 	idActive := uuid.New().String()
 	rActive := &record.Record{
+		Namespace:  testNS,
 		ID:         idActive,
 		Kind:       record.KindPattern,
 		Title:      "Old active record",
@@ -591,6 +603,7 @@ func TestParaphraseSimilarityRegression(t *testing.T) {
 
 	id := uuid.New().String()
 	r := &record.Record{
+		Namespace:  testNS,
 		ID:         id,
 		Kind:       record.KindGotcha,
 		Title:      "Cache eviction avoids memory exhaustion",
@@ -607,7 +620,7 @@ func TestParaphraseSimilarityRegression(t *testing.T) {
 
 	// Query text shares no tokens with the stored title/content, so a
 	// full-text-only degraded fallback would not be able to surface it.
-	results, err := store.Search(ctx, "zzyx qwerty unrelated tokens", vecB, "billing-service", memory.SearchOptions{Limit: 5})
+	results, err := store.Search(ctx, "zzyx qwerty unrelated tokens", vecB, "billing-service", memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -684,6 +697,7 @@ func TestTTLBoundaryNearTTL(t *testing.T) {
 	// Just inside the TTL window (younger than the cutoff): must survive.
 	idInsideTTL := uuid.New().String()
 	rInsideTTL := &record.Record{
+		Namespace:  testNS,
 		ID:         idInsideTTL,
 		Kind:       record.KindPattern,
 		Title:      "Just inside TTL",
@@ -707,6 +721,7 @@ func TestTTLBoundaryNearTTL(t *testing.T) {
 	// Just past the TTL window (older than the cutoff): must be deleted.
 	idPastTTL := uuid.New().String()
 	rPastTTL := &record.Record{
+		Namespace:  testNS,
 		ID:         idPastTTL,
 		Kind:       record.KindPattern,
 		Title:      "Just past TTL",
@@ -756,6 +771,7 @@ func TestSearchExcludesDeprecatedByDefaultButIncludesOnRequest(t *testing.T) {
 	repo := "billing-service-ttl-deprecated-test"
 	id := uuid.New().String()
 	r := &record.Record{
+		Namespace:         testNS,
 		ID:                id,
 		Kind:              record.KindGotcha,
 		Title:             "Deprecated fact about retries",
@@ -772,7 +788,7 @@ func TestSearchExcludesDeprecatedByDefaultButIncludesOnRequest(t *testing.T) {
 	}
 
 	// Default: deprecated excluded.
-	resultDefault, err := store.Search(ctx, "retry backoff", makeTestEmbedding(0.5), repo, memory.SearchOptions{Limit: 5})
+	resultDefault, err := store.Search(ctx, "retry backoff", makeTestEmbedding(0.5), repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search (default) failed: %v", err)
 	}
@@ -783,7 +799,7 @@ func TestSearchExcludesDeprecatedByDefaultButIncludesOnRequest(t *testing.T) {
 	}
 
 	// Explicit opt-in: deprecated included.
-	resultIncluded, err := store.Search(ctx, "retry backoff", makeTestEmbedding(0.5), repo, memory.SearchOptions{Limit: 5, IncludeDeprecated: true})
+	resultIncluded, err := store.Search(ctx, "retry backoff", makeTestEmbedding(0.5), repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5, IncludeDeprecated: true})
 	if err != nil {
 		t.Fatalf("Search (IncludeDeprecated) failed: %v", err)
 	}
@@ -825,6 +841,7 @@ func TestCreateHandlesSQLSpecialCharactersInTitleAndContent(t *testing.T) {
 		`Also mentions the word gremlin for full-text findability.`
 
 	r := &record.Record{
+		Namespace:  testNS,
 		ID:         uuid.New().String(),
 		Kind:       record.KindGotcha,
 		Title:      title,
@@ -857,7 +874,7 @@ func TestCreateHandlesSQLSpecialCharactersInTitleAndContent(t *testing.T) {
 
 	// Full-text findability: the tsvector must still have been built from
 	// this content, so an ordinary word inside it is searchable.
-	results, err := store.Search(ctx, "gremlin", makeTestEmbedding(0.8), repo, memory.SearchOptions{Limit: 5})
+	results, err := store.Search(ctx, "gremlin", makeTestEmbedding(0.8), repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -894,6 +911,7 @@ func TestSearchRanksActiveAboveCandidateAtEqualRelevance(t *testing.T) {
 
 	idCandidate := uuid.New().String()
 	rCandidate := &record.Record{
+		Namespace:  testNS,
 		ID:         idCandidate,
 		Kind:       record.KindGotcha,
 		Title:      title,
@@ -910,6 +928,7 @@ func TestSearchRanksActiveAboveCandidateAtEqualRelevance(t *testing.T) {
 
 	idActive := uuid.New().String()
 	rActive := &record.Record{
+		Namespace:  testNS,
 		ID:         idActive,
 		Kind:       record.KindGotcha,
 		Title:      title,
@@ -924,7 +943,7 @@ func TestSearchRanksActiveAboveCandidateAtEqualRelevance(t *testing.T) {
 		t.Fatalf("Failed to create active record: %v", err)
 	}
 
-	results, err := store.Search(ctx, title, embedding, repo, memory.SearchOptions{Limit: 5})
+	results, err := store.Search(ctx, title, embedding, repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -997,6 +1016,7 @@ func TestUpdateRecomputesTsvectorFromNewContent(t *testing.T) {
 
 	id := uuid.New().String()
 	r := &record.Record{
+		Namespace:  testNS,
 		ID:         id,
 		Kind:       record.KindGotcha,
 		Title:      "Flaky animal bug",
@@ -1012,7 +1032,7 @@ func TestUpdateRecomputesTsvectorFromNewContent(t *testing.T) {
 	}
 
 	// Sanity: findable by the original word before the update.
-	before, err := store.Search(ctx, "zebracorn", nil, repo, memory.SearchOptions{Limit: 5})
+	before, err := store.Search(ctx, "zebracorn", nil, repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search (before update) failed: %v", err)
 	}
@@ -1025,7 +1045,7 @@ func TestUpdateRecomputesTsvectorFromNewContent(t *testing.T) {
 		t.Fatalf("Update failed: %v", err)
 	}
 
-	afterNew, err := store.Search(ctx, "quokkafin", nil, repo, memory.SearchOptions{Limit: 5})
+	afterNew, err := store.Search(ctx, "quokkafin", nil, repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search (after update, new word) failed: %v", err)
 	}
@@ -1033,7 +1053,7 @@ func TestUpdateRecomputesTsvectorFromNewContent(t *testing.T) {
 		t.Errorf("expected record to be findable by 'quokkafin' after the update")
 	}
 
-	afterOld, err := store.Search(ctx, "zebracorn", nil, repo, memory.SearchOptions{Limit: 5})
+	afterOld, err := store.Search(ctx, "zebracorn", nil, repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search (after update, old word) failed: %v", err)
 	}
@@ -1078,6 +1098,7 @@ func TestUpdatePartialTagsOnlyKeepsTitleAndContentSearchable(t *testing.T) {
 
 	id := uuid.New().String()
 	r := &record.Record{
+		Namespace:  testNS,
 		ID:         id,
 		Kind:       record.KindPattern,
 		Title:      "Walrustitle identifier",
@@ -1100,7 +1121,7 @@ func TestUpdatePartialTagsOnlyKeepsTitleAndContentSearchable(t *testing.T) {
 	}
 
 	// New tag word must now be searchable.
-	tagResult, err := store.Search(ctx, "newtagokapi", nil, repo, memory.SearchOptions{Limit: 5})
+	tagResult, err := store.Search(ctx, "newtagokapi", nil, repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search (new tag) failed: %v", err)
 	}
@@ -1110,7 +1131,7 @@ func TestUpdatePartialTagsOnlyKeepsTitleAndContentSearchable(t *testing.T) {
 
 	// Title and content words (untouched by this update) must still be
 	// searchable — the recomputed tsvector must not have dropped them.
-	titleResult, err := store.Search(ctx, "walrustitle", nil, repo, memory.SearchOptions{Limit: 5})
+	titleResult, err := store.Search(ctx, "walrustitle", nil, repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search (title word) failed: %v", err)
 	}
@@ -1118,7 +1139,7 @@ func TestUpdatePartialTagsOnlyKeepsTitleAndContentSearchable(t *testing.T) {
 		t.Errorf("expected record to remain findable by its unchanged title word 'walrustitle'")
 	}
 
-	contentResult, err := store.Search(ctx, "walruscontent", nil, repo, memory.SearchOptions{Limit: 5})
+	contentResult, err := store.Search(ctx, "walruscontent", nil, repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search (content word) failed: %v", err)
 	}
@@ -1127,7 +1148,7 @@ func TestUpdatePartialTagsOnlyKeepsTitleAndContentSearchable(t *testing.T) {
 	}
 
 	// The old tag word must no longer be attached to this record.
-	oldTagResult, err := store.Search(ctx, "old-tag-marmoset", nil, repo, memory.SearchOptions{Limit: 5})
+	oldTagResult, err := store.Search(ctx, "old-tag-marmoset", nil, repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search (old tag) failed: %v", err)
 	}
@@ -1170,6 +1191,7 @@ func TestSearchDoesNotBuryStronglyRelevantCandidate(t *testing.T) {
 
 	idCandidate := uuid.New().String()
 	if _, err := store.Create(ctx, &record.Record{
+		Namespace:  testNS,
 		ID:         idCandidate,
 		Kind:       record.KindConvention,
 		Title:      "Transcripts are JSON lines",
@@ -1185,6 +1207,7 @@ func TestSearchDoesNotBuryStronglyRelevantCandidate(t *testing.T) {
 
 	for i := 0; i < 4; i++ {
 		if _, err := store.Create(ctx, &record.Record{
+			Namespace:  testNS,
 			ID:         uuid.New().String(),
 			Kind:       record.KindGotcha,
 			Title:      fmt.Sprintf("Unrelated active record %d", i),
@@ -1200,7 +1223,7 @@ func TestSearchDoesNotBuryStronglyRelevantCandidate(t *testing.T) {
 	}
 
 	// Query text shares no tokens with any record: vector ranking only.
-	results, err := store.Search(ctx, "zzyx qwerty", query, repo, memory.SearchOptions{Limit: 5})
+	results, err := store.Search(ctx, "zzyx qwerty", query, repo, memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -1219,5 +1242,82 @@ func TestSearchDoesNotBuryStronglyRelevantCandidate(t *testing.T) {
 	}
 	if want := 1 / math.Sqrt(1.04); math.Abs(top.Similarity-want) > 1e-3 {
 		t.Errorf("expected raw cosine Similarity ≈ %f, got %f", want, top.Similarity)
+	}
+}
+
+const testNS = "test-ns"
+
+// TestNamespaceIsolation verifies records never cross namespaces in search,
+// dedup candidates, or list, while "global" is visible when requested.
+func TestNamespaceIsolation(t *testing.T) {
+	ctx := context.Background()
+	dsn, cleanup := startPostgresContainer(t, ctx)
+	defer cleanup()
+	store, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	emb := makeTestEmbedding(0.2)
+	for _, ns := range []string{"ns-a", "ns-b", "global"} {
+		if _, err := store.Create(ctx, &record.Record{
+			ID: uuid.New().String(), Namespace: ns, Kind: record.KindGotcha,
+			Title: "shared-title " + ns, Content: "isolationprobe content", Repo: "*",
+			Status: record.StatusActive, Source: record.SourceInline, Confidence: 0.8,
+			Embedding: emb, Files: []string{}, Tags: []string{},
+		}); err != nil {
+			t.Fatalf("create %s: %v", ns, err)
+		}
+	}
+
+	titles := func(rs []*memory.SearchRecord) map[string]bool {
+		m := map[string]bool{}
+		for _, r := range rs {
+			m[r.Title] = true
+		}
+		return m
+	}
+
+	res, err := store.Search(ctx, "isolationprobe", emb, "r", memory.SearchOptions{Namespaces: []string{"ns-a"}, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := titles(res.Records); len(got) != 1 || !got["shared-title ns-a"] {
+		t.Errorf("ns-a search = %v, want only ns-a", got)
+	}
+
+	res, err = store.Search(ctx, "isolationprobe", emb, "r", memory.SearchOptions{Namespaces: []string{"ns-a", "global"}, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := titles(res.Records); len(got) != 2 || !got["shared-title ns-a"] || !got["shared-title global"] {
+		t.Errorf("ns-a+global search = %v", got)
+	}
+
+	// Full-text-only path (nil embedding) is isolated too.
+	res, err = store.Search(ctx, "isolationprobe", nil, "r", memory.SearchOptions{Namespaces: []string{"ns-b"}, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := titles(res.Records); len(got) != 1 || !got["shared-title ns-b"] {
+		t.Errorf("ns-b full-text search = %v, want only ns-b", got)
+	}
+
+	cands, err := store.FindCandidates(ctx, emb, "ns-a", "r", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 1 || cands[0].Title != "shared-title ns-a" {
+		t.Errorf("ns-a candidates = %+v, want only ns-a", cands)
+	}
+
+	nsB := "ns-b"
+	list, err := store.List(ctx, memory.ListFilters{Namespace: &nsB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Namespace != "ns-b" {
+		t.Errorf("ns-b list = %d records", len(list))
 	}
 }

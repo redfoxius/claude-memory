@@ -88,6 +88,7 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 		Kind:       kind,
 		Title:      in.Title,
 		Content:    in.Content,
+		Namespace:  in.Namespace,
 		Repo:       repo,
 		Files:      in.Files,
 		Tags:       in.Tags,

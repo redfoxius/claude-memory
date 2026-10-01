@@ -49,6 +49,7 @@ type StoreInput struct {
 	Title      string              `json:"title" jsonschema:"short title"`
 	Content    string              `json:"content" jsonschema:"markdown content"`
 	Repo       string              `json:"repo,omitempty" jsonschema:"repo name, or '*' for cross-repo; defaults to '*'"`
+	Namespace  string              `json:"namespace,omitempty" jsonschema:"omit to store in the current namespace; 'global' shares a stack-generic fact with every namespace (only when explicitly intended; never put company-specific content there)"`
 	Files      []string            `json:"files,omitempty"`
 	CommitSHA  string              `json:"commit_sha,omitempty"`
 	Ticket     string              `json:"ticket,omitempty"`

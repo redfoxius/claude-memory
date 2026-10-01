@@ -59,6 +59,11 @@ func (s *Store) searchHybridRRF(
 		whereClause = " AND r.status IN ('candidate', 'active')"
 	}
 
+	// Namespace isolation: only the caller's namespace(s) are ever visible.
+	whereClause += fmt.Sprintf(" AND r.namespace = ANY($%d)", baseArgCount)
+	args = append(args, opts.Namespaces)
+	baseArgCount++
+
 	if opts.Kind != nil {
 		whereClause += fmt.Sprintf(" AND r.kind = $%d", baseArgCount)
 		args = append(args, string(*opts.Kind))
@@ -177,6 +182,11 @@ func (s *Store) searchFullTextOnly(
 	if !opts.IncludeDeprecated {
 		whereClause = " AND status IN ('candidate', 'active')"
 	}
+
+	// Namespace isolation: only the caller's namespace(s) are ever visible.
+	whereClause += fmt.Sprintf(" AND namespace = ANY($%d)", baseArgCount)
+	args = append(args, opts.Namespaces)
+	baseArgCount++
 
 	if opts.Kind != nil {
 		whereClause += fmt.Sprintf(" AND kind = $%d", baseArgCount)

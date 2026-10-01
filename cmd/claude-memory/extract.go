@@ -15,6 +15,7 @@ import (
 
 	"claude-memory/internal/config"
 	"claude-memory/internal/extraction"
+	"claude-memory/internal/transcript"
 )
 
 // defaultHaikuTimeout bounds a single `claude -p` subprocess call made by
@@ -133,6 +134,14 @@ func runExtract(cfg *config.Config, transcriptPath string) error {
 		return nil
 	}
 	defer cleanup()
+
+	// The session's own working directory decides the namespace; if the
+	// transcript can't be read here, ProcessSession reports it below.
+	if tr, perr := transcript.Parse(transcriptPath, transcript.Config{CharBudget: cfg.MaxContentChars}); perr == nil && tr.Cwd != "" {
+		svc = svc.WithNamespace(resolveNamespace(tr.Cwd))
+	} else {
+		svc = svc.WithNamespace(resolveNamespace(""))
+	}
 
 	extractionCfg := extraction.Config{
 		MinMessages:  cfg.ExtractMinMessages,

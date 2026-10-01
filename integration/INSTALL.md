@@ -180,3 +180,13 @@ rm ~/.local/bin/claude-memory ~/.local/bin/claude-memory-run-with-env.sh
 Ollama itself (`brew services stop ollama`, `brew uninstall ollama`) is
 left running by design — other tools on the laptop may depend on it;
 stop it manually if you're sure nothing else uses it.
+
+## Namespaces
+
+Records are partitioned by namespace (e.g. a company vs. a side project).
+Copy `integration/namespaces.example.yaml` to
+`~/.config/claude-memory/namespaces.yaml` and map your project directories to
+namespaces; `MEMORY_NAMESPACE` overrides it per repo. With no file, everything
+lives in `acme`. The upgrade migration backfills existing records to
+`acme` automatically. See the example file for the resolution rules and the
+explicit-only `global` namespace.

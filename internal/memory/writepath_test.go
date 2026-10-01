@@ -143,7 +143,7 @@ func TestStore_Inline_ExactlyAtUpdateThreshold_NOOP(t *testing.T) {
 			return []*Candidate{{ID: "cand-1", Title: "Existing", Similarity: 0.85, Score: 0.01}}, nil
 		},
 		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
-			return &record.Record{ID: id, Status: record.StatusActive, SeenCount: 3}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusActive, SeenCount: 3}, nil
 		},
 		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 			updateCalls = append(updateCalls, updates)
@@ -212,7 +212,7 @@ func TestStore_Inline_DecisionUsesSimilarityNotScore(t *testing.T) {
 				return []*Candidate{{ID: "cand-1", Score: 0.001, Similarity: 0.95}}, nil
 			},
 			GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
-				return &record.Record{ID: id, Status: record.StatusActive, SeenCount: 0}, nil
+				return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusActive, SeenCount: 0}, nil
 			},
 			UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 				return &record.Record{ID: id}, nil
@@ -530,7 +530,7 @@ func TestStore_NoopPromotesCandidateToActiveAtSeenCountTwo(t *testing.T) {
 			return []*Candidate{{ID: "cand-1", Similarity: 0.9}}, nil
 		},
 		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
-			return &record.Record{ID: id, Status: record.StatusCandidate, SeenCount: 1}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusCandidate, SeenCount: 1}, nil
 		},
 		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 			lastUpdates = updates
@@ -561,7 +561,7 @@ func TestStore_NoopDoesNotPromoteBelowSeenCountTwo(t *testing.T) {
 			return []*Candidate{{ID: "cand-1", Similarity: 0.9}}, nil
 		},
 		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
-			return &record.Record{ID: id, Status: record.StatusCandidate, SeenCount: 0}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusCandidate, SeenCount: 0}, nil
 		},
 		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 			lastUpdates = updates

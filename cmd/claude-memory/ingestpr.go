@@ -12,6 +12,7 @@ import (
 
 	"claude-memory/internal/config"
 	"claude-memory/internal/extraction"
+	"claude-memory/internal/memory"
 	"claude-memory/internal/prcursor"
 	"claude-memory/internal/prsource"
 )
@@ -76,6 +77,11 @@ func ingestOneRepo(
 	}
 	ref.LocalPath = repoPath
 	ref.Name = filepath.Base(repoPath)
+
+	// Each repo is ingested into the namespace its path maps to.
+	if sc, ok := svc.(interface{ WithNamespace(string) *memory.Service }); ok {
+		svc = sc.WithNamespace(resolveNamespace(repoPath))
+	}
 
 	if provider != prsource.ProviderAzureDevOps {
 		// AC-58: unsupported provider (GitHub, GitLab, or unknown) is

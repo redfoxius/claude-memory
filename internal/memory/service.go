@@ -18,7 +18,12 @@ type Service struct {
 	scrubber          Scrubber
 	clock             Clock
 	cfg               *config.Config
+	namespace         string
 }
+
+// DefaultNamespace is used when no namespace is configured. It matches the
+// namespace existing records were backfilled to by migration 0002.
+const DefaultNamespace = "acme"
 
 // New constructs a Service with all required dependencies.
 // All adapters must implement the port interfaces declared in ports.go.
@@ -29,13 +34,57 @@ func New(
 	clock Clock,
 	cfg *config.Config,
 ) *Service {
+	ns := cfg.Namespace
+	if ns == "" {
+		ns = DefaultNamespace
+	}
 	return &Service{
 		store:             store,
 		embeddingProvider: embeddingProvider,
 		scrubber:          scrubber,
 		clock:             clock,
 		cfg:               cfg,
+		namespace:         ns,
 	}
+}
+
+// WithNamespace returns a copy of the service scoped to another namespace.
+// Used by callers (PR ingest) that handle several namespaces in one run.
+func (s *Service) WithNamespace(ns string) *Service {
+	c := *s
+	c.namespace = ns
+	return &c
+}
+
+// Namespace reports the namespace the service reads and writes.
+func (s *Service) Namespace() string { return s.namespace }
+
+// searchNamespaces is the set a search covers: the service's own namespace
+// plus the explicit "global" one.
+func (s *Service) searchNamespaces() []string {
+	if s.namespace == record.GlobalNamespace {
+		return []string{record.GlobalNamespace}
+	}
+	return []string{s.namespace, record.GlobalNamespace}
+}
+
+// accessible reports whether a record may be read or modified by this
+// service: it must belong to the service's namespace or to "global".
+func (s *Service) accessible(r *record.Record) bool {
+	return r.Namespace == s.namespace || r.Namespace == record.GlobalNamespace
+}
+
+// getAccessible loads a record by id and hides records of other namespaces
+// behind ErrNotFound, so ids never leak across namespaces.
+func (s *Service) getAccessible(ctx context.Context, id string) (*record.Record, error) {
+	rec, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !s.accessible(rec) {
+		return nil, ErrNotFound
+	}
+	return rec, nil
 }
 
 // Cfg exposes the service's configuration (thresholds, limits) for callers
@@ -70,6 +119,7 @@ func (s *Service) Search(ctx context.Context, req *SearchRequest) (*SearchResult
 		Tags:              req.Tags,
 		Limit:             req.Limit,
 		IncludeDeprecated: false,
+		Namespaces:        s.searchNamespaces(),
 	}
 	if opts.Limit == 0 {
 		opts.Limit = 5
@@ -92,7 +142,7 @@ func (s *Service) FindCandidates(ctx context.Context, embedding []float32, repo 
 	if limit <= 0 {
 		limit = 5
 	}
-	candidates, err := s.store.FindCandidates(ctx, embedding, repo, limit)
+	candidates, err := s.store.FindCandidates(ctx, embedding, s.namespace, repo, limit)
 	if err != nil {
 		return nil, fmt.Errorf("find candidates: %w", err)
 	}

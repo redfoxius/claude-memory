@@ -20,11 +20,11 @@ type txStoreImpl struct {
 	tx pgx.Tx
 }
 
-// AcquireLock takes a transaction-scoped advisory lock keyed on repo + titleHash.
+// AcquireLock takes a transaction-scoped advisory lock keyed on namespace + repo + titleHash.
 // Uses pg_advisory_xact_lock which is automatically released on commit/rollback (AC-16).
-func (t *txStoreImpl) AcquireLock(ctx context.Context, repo string, titleHash string) error {
-	// Generate a lock ID by hashing repo||':'||titleHash
-	hashKey := repo + ":" + titleHash
+func (t *txStoreImpl) AcquireLock(ctx context.Context, namespace, repo string, titleHash string) error {
+	// Generate a lock ID by hashing namespace||':'||repo||':'||titleHash
+	hashKey := namespace + ":" + repo + ":" + titleHash
 	lockID := hashFNV(hashKey)
 
 	query := "SELECT pg_advisory_xact_lock($1)"
@@ -39,7 +39,7 @@ func (t *txStoreImpl) AcquireLock(ctx context.Context, repo string, titleHash st
 // It fetches top-N nearest records by vector (cosine) similarity within the
 // transaction. See Store.FindCandidates for why this is vector-only, not
 // RRF-fused with full-text (no query-text parameter on this port).
-func (t *txStoreImpl) FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*memory.Candidate, error) {
+func (t *txStoreImpl) FindCandidates(ctx context.Context, embedding []float32, namespace, repo string, limit int) ([]*memory.Candidate, error) {
 	if limit <= 0 {
 		limit = 5
 	}
@@ -58,12 +58,13 @@ func (t *txStoreImpl) FindCandidates(ctx context.Context, embedding []float32, r
 			COALESCE(1.0 - (embedding <=> $1), 0) as similarity
 		FROM records
 		WHERE (repo = $2 OR repo = '*')
+			AND namespace = $4
 			AND status IN ('candidate', 'active')
 		ORDER BY embedding <=> $1
 		LIMIT $3
 	`
 
-	rows, err := t.tx.Query(ctx, query, embeddingVec, repo, limit)
+	rows, err := t.tx.Query(ctx, query, embeddingVec, repo, limit, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("query candidates: %w", err)
 	}
@@ -97,7 +98,7 @@ func (t *txStoreImpl) Get(ctx context.Context, id string) (*record.Record, error
 
 	query := `
 		SELECT
-			id, kind, title, content, repo, files, commit_sha, ticket, tags,
+			id, kind, title, content, repo, namespace, files, commit_sha, ticket, tags,
 			status, deprecation_reason, superseded_by, source, confidence,
 			seen_count, used_count, created_at, updated_at, last_used_at, embedding
 		FROM records
@@ -106,7 +107,7 @@ func (t *txStoreImpl) Get(ctx context.Context, id string) (*record.Record, error
 
 	var embeddingVec pgvector.Vector
 	err := t.tx.QueryRow(ctx, query, id).Scan(
-		&r.ID, (*string)(&r.Kind), &r.Title, &r.Content, &r.Repo, &r.Files, &r.CommitSHA, &r.Ticket, &r.Tags,
+		&r.ID, (*string)(&r.Kind), &r.Title, &r.Content, &r.Repo, &r.Namespace, &r.Files, &r.CommitSHA, &r.Ticket, &r.Tags,
 		(*string)(&r.Status), &r.DeprecationReason, &r.SupersededBy, (*string)(&r.Source), &r.Confidence,
 		&r.SeenCount, &r.UsedCount, &r.CreatedAt, &r.UpdatedAt, &r.LastUsedAt, &embeddingVec,
 	)
@@ -151,12 +152,12 @@ func (t *txStoreImpl) Create(ctx context.Context, r *record.Record) (*record.Rec
 		INSERT INTO records (
 			id, kind, title, content, repo, files, commit_sha, ticket, tags,
 			status, deprecation_reason, superseded_by, source, confidence,
-			seen_count, used_count, created_at, updated_at, last_used_at, embedding, tsvector_content
+			seen_count, used_count, created_at, updated_at, last_used_at, embedding, tsvector_content, namespace
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11, $12, $13, $14,
 			$15, $16, $17, $18, $19, $20,
-			` + tsvec + `
+			` + tsvec + `, $24
 		) RETURNING id
 	`
 
@@ -164,7 +165,7 @@ func (t *txStoreImpl) Create(ctx context.Context, r *record.Record) (*record.Rec
 		r.ID, string(r.Kind), r.Title, r.Content, r.Repo, r.Files, r.CommitSHA, r.Ticket, r.Tags,
 		string(r.Status), r.DeprecationReason, r.SupersededBy, string(r.Source), r.Confidence,
 		r.SeenCount, r.UsedCount, r.CreatedAt, r.UpdatedAt, r.LastUsedAt, embeddingVec,
-		r.Title, tagsStr, r.Content,
+		r.Title, tagsStr, r.Content, r.Namespace,
 	).Scan(&r.ID)
 
 	if err != nil {
@@ -264,7 +265,7 @@ func (t *txStoreImpl) Update(ctx context.Context, id string, updates map[string]
 		UPDATE records
 		SET %s
 		WHERE id = $%d
-		RETURNING id, kind, title, content, repo, files, commit_sha, ticket, tags,
+		RETURNING id, kind, title, content, repo, namespace, files, commit_sha, ticket, tags,
 		          status, deprecation_reason, superseded_by, source, confidence,
 		          seen_count, used_count, created_at, updated_at, last_used_at, embedding
 	`, strings.Join(setClauses, ", "), argCount)
@@ -272,7 +273,7 @@ func (t *txStoreImpl) Update(ctx context.Context, id string, updates map[string]
 	r := &record.Record{}
 	var embeddingVec pgvector.Vector
 	err := t.tx.QueryRow(ctx, query, args...).Scan(
-		&r.ID, (*string)(&r.Kind), &r.Title, &r.Content, &r.Repo, &r.Files, &r.CommitSHA, &r.Ticket, &r.Tags,
+		&r.ID, (*string)(&r.Kind), &r.Title, &r.Content, &r.Repo, &r.Namespace, &r.Files, &r.CommitSHA, &r.Ticket, &r.Tags,
 		(*string)(&r.Status), &r.DeprecationReason, &r.SupersededBy, (*string)(&r.Source), &r.Confidence,
 		&r.SeenCount, &r.UsedCount, &r.CreatedAt, &r.UpdatedAt, &r.LastUsedAt, &embeddingVec,
 	)

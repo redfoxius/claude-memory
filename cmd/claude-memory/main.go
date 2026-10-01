@@ -104,6 +104,14 @@ func buildService(ctx context.Context, cfg *config.Config, migrate bool) (*memor
 		return nil, nil, err
 	}
 
+	// Default namespace for this process: the working directory's. The MCP
+	// server is started per project by Claude Code, so this scopes serve;
+	// hook, extract and ingest-pr re-scope per call from their own paths.
+	if cfg.Namespace == "" {
+		wd, _ := os.Getwd()
+		cfg.Namespace = resolveNamespace(wd)
+	}
+
 	// Create HTTP client for Ollama with a reasonable timeout.
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,

@@ -17,14 +17,16 @@ type mockTxStore struct {
 	store *mockStore
 }
 
-func (m *mockTxStore) AcquireLock(ctx context.Context, repo string, titleHash string) error {
+func (m *mockTxStore) AcquireLock(ctx context.Context, namespace, repo string, titleHash string) error {
+	m.store.lockNamespace = namespace
 	if m.store.AcquireLockFunc != nil {
 		return m.store.AcquireLockFunc(ctx, repo, titleHash)
 	}
 	return nil
 }
 
-func (m *mockTxStore) FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*Candidate, error) {
+func (m *mockTxStore) FindCandidates(ctx context.Context, embedding []float32, namespace, repo string, limit int) ([]*Candidate, error) {
+	m.store.candidatesNamespace = namespace
 	if m.store.FindCandidatesFunc != nil {
 		return m.store.FindCandidatesFunc(ctx, embedding, repo, limit)
 	}
@@ -62,6 +64,12 @@ type mockStore struct {
 	WithTxFunc                func(ctx context.Context, fn func(tx TxStore) error) error
 	AcquireLockFunc           func(ctx context.Context, repo string, titleHash string) error
 	DeleteCandidatesByTTLFunc func(ctx context.Context, ttlDays int) (int, error)
+
+	// Recorded by the mocks so namespace tests can assert scoping.
+	lockNamespace       string
+	candidatesNamespace string
+	searchOpts          SearchOptions
+	listFilters         ListFilters
 }
 
 func (m *mockStore) Create(ctx context.Context, r *record.Record) (*record.Record, error) {
@@ -86,13 +94,14 @@ func (m *mockStore) Update(ctx context.Context, id string, updates map[string]in
 }
 
 func (m *mockStore) Search(ctx context.Context, query string, embedding []float32, repo string, options SearchOptions) (*SearchResult, error) {
+	m.searchOpts = options
 	if m.SearchFunc != nil {
 		return m.SearchFunc(ctx, query, embedding, repo, options)
 	}
 	return &SearchResult{Records: []*SearchRecord{}}, nil
 }
 
-func (m *mockStore) FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*Candidate, error) {
+func (m *mockStore) FindCandidates(ctx context.Context, embedding []float32, namespace, repo string, limit int) ([]*Candidate, error) {
 	if m.FindCandidatesFunc != nil {
 		return m.FindCandidatesFunc(ctx, embedding, repo, limit)
 	}
@@ -100,6 +109,7 @@ func (m *mockStore) FindCandidates(ctx context.Context, embedding []float32, rep
 }
 
 func (m *mockStore) List(ctx context.Context, filters ListFilters) ([]*record.Record, error) {
+	m.listFilters = filters
 	if m.ListFunc != nil {
 		return m.ListFunc(ctx, filters)
 	}
@@ -117,7 +127,7 @@ func (m *mockStore) WithTx(ctx context.Context, fn func(tx TxStore) error) error
 	return fn(tx)
 }
 
-func (m *mockStore) AcquireLock(ctx context.Context, repo string, titleHash string) error {
+func (m *mockStore) AcquireLock(ctx context.Context, namespace, repo string, titleHash string) error {
 	if m.AcquireLockFunc != nil {
 		return m.AcquireLockFunc(ctx, repo, titleHash)
 	}
@@ -177,6 +187,7 @@ func TestService_GetRecord(t *testing.T) {
 
 	t.Run("get existing record", func(t *testing.T) {
 		expectedRecord := &record.Record{
+			Namespace: DefaultNamespace,
 			ID:        "test-id-1",
 			Kind:      record.KindPattern,
 			Title:     "Test Pattern",
@@ -304,6 +315,7 @@ func TestService_DeprecateRecord(t *testing.T) {
 
 	t.Run("deprecate existing record", func(t *testing.T) {
 		deprecatedRec := &record.Record{
+			Namespace:         DefaultNamespace,
 			ID:                "rec1",
 			Status:            record.StatusDeprecated,
 			DeprecationReason: ptrString("Record is outdated"),
@@ -311,6 +323,9 @@ func TestService_DeprecateRecord(t *testing.T) {
 		}
 
 		store := &mockStore{
+			GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
+				return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusActive}, nil
+			},
 			UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 				if id == "rec1" {
 					return deprecatedRec, nil
@@ -377,17 +392,19 @@ func TestService_UpdateRecord(t *testing.T) {
 
 	t.Run("update with new content", func(t *testing.T) {
 		existingRec := &record.Record{
-			ID:      "rec1",
-			Title:   "Original Title",
-			Content: "Original content",
-			Tags:    []string{"tag1", "tag2"},
-			Status:  record.StatusActive,
+			Namespace: DefaultNamespace,
+			ID:        "rec1",
+			Title:     "Original Title",
+			Content:   "Original content",
+			Tags:      []string{"tag1", "tag2"},
+			Status:    record.StatusActive,
 		}
 		updatedRec := &record.Record{
-			ID:      "rec1",
-			Title:   "Original Title",
-			Content: "Updated content",
-			Status:  record.StatusActive,
+			Namespace: DefaultNamespace,
+			ID:        "rec1",
+			Title:     "Original Title",
+			Content:   "Updated content",
+			Status:    record.StatusActive,
 		}
 
 		store := &mockStore{
@@ -551,11 +568,12 @@ func TestService_UpdateRecord_ContentChangeRecomputesEmbedding(t *testing.T) {
 	}
 
 	existingRec := &record.Record{
-		ID:      "rec1",
-		Title:   "Existing Title",
-		Content: "Existing content",
-		Tags:    []string{"tagA", "tagB"},
-		Status:  record.StatusActive,
+		Namespace: DefaultNamespace,
+		ID:        "rec1",
+		Title:     "Existing Title",
+		Content:   "Existing content",
+		Tags:      []string{"tagA", "tagB"},
+		Status:    record.StatusActive,
 	}
 
 	var capturedUpdates map[string]interface{}
@@ -574,7 +592,7 @@ func TestService_UpdateRecord_ContentChangeRecomputesEmbedding(t *testing.T) {
 			}
 			capturedUpdates = updates
 			content, _ := updates["content"].(string)
-			return &record.Record{ID: id, Content: content, Status: record.StatusActive}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Content: content, Status: record.StatusActive}, nil
 		},
 	}
 
@@ -611,11 +629,12 @@ func TestService_UpdateRecord_ContentOnlyEmbedsExistingTitleAndTags(t *testing.T
 	cfg := &config.Config{MaxContentChars: 20000, EmbedMaxTokens: 2048}
 
 	existingRec := &record.Record{
-		ID:      "rec1",
-		Title:   "Existing Title",
-		Content: "Existing content",
-		Tags:    []string{"tagA", "tagB"},
-		Status:  record.StatusActive,
+		Namespace: DefaultNamespace,
+		ID:        "rec1",
+		Title:     "Existing Title",
+		Content:   "Existing content",
+		Tags:      []string{"tagA", "tagB"},
+		Status:    record.StatusActive,
 	}
 
 	store := &mockStore{
@@ -623,7 +642,7 @@ func TestService_UpdateRecord_ContentOnlyEmbedsExistingTitleAndTags(t *testing.T
 			return existingRec, nil
 		},
 		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
-			return &record.Record{ID: id, Status: record.StatusActive}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusActive}, nil
 		},
 	}
 
@@ -657,11 +676,12 @@ func TestService_UpdateRecord_TagsOnlyRecomputesEmbedding(t *testing.T) {
 	cfg := &config.Config{MaxContentChars: 20000, EmbedMaxTokens: 2048}
 
 	existingRec := &record.Record{
-		ID:      "rec1",
-		Title:   "Existing Title",
-		Content: "Existing content",
-		Tags:    []string{"tagA"},
-		Status:  record.StatusActive,
+		Namespace: DefaultNamespace,
+		ID:        "rec1",
+		Title:     "Existing Title",
+		Content:   "Existing content",
+		Tags:      []string{"tagA"},
+		Status:    record.StatusActive,
 	}
 
 	store := &mockStore{
@@ -669,7 +689,7 @@ func TestService_UpdateRecord_TagsOnlyRecomputesEmbedding(t *testing.T) {
 			return existingRec, nil
 		},
 		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
-			return &record.Record{ID: id, Status: record.StatusActive}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusActive}, nil
 		},
 	}
 
@@ -708,11 +728,12 @@ func TestService_UpdateRecord_NoEmbedInputChangeSkipsEmbed(t *testing.T) {
 	cfg := &config.Config{MaxContentChars: 20000, EmbedMaxTokens: 2048}
 
 	existingRec := &record.Record{
-		ID:      "rec1",
-		Title:   "Existing Title",
-		Content: "Existing content",
-		Tags:    []string{"tagA"},
-		Status:  record.StatusActive,
+		Namespace: DefaultNamespace,
+		ID:        "rec1",
+		Title:     "Existing Title",
+		Content:   "Existing content",
+		Tags:      []string{"tagA"},
+		Status:    record.StatusActive,
 	}
 
 	store := &mockStore{
@@ -723,7 +744,7 @@ func TestService_UpdateRecord_NoEmbedInputChangeSkipsEmbed(t *testing.T) {
 			if _, ok := updates["embedding"]; ok {
 				t.Error("did not expect 'embedding' in the updates map for a ticket-only update")
 			}
-			return &record.Record{ID: id, Status: record.StatusActive}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusActive}, nil
 		},
 	}
 

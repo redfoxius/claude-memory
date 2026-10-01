@@ -35,7 +35,7 @@ func (f *fakeHookStore) Get(ctx context.Context, id string) (*record.Record, err
 func (f *fakeHookStore) Update(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 	panic("Update should not be called by the hook (read-only path)")
 }
-func (f *fakeHookStore) FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*memory.Candidate, error) {
+func (f *fakeHookStore) FindCandidates(ctx context.Context, embedding []float32, namespace, repo string, limit int) ([]*memory.Candidate, error) {
 	panic("FindCandidates should not be called by the hook (read-only path)")
 }
 func (f *fakeHookStore) List(ctx context.Context, filters memory.ListFilters) ([]*record.Record, error) {

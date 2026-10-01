@@ -79,6 +79,9 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service) error
 	// Derive repo from cwd: repo = basename of git toplevel, or basename of cwd if not in a git repo.
 	repo := deriveRepo(ctx, input.CWD)
 
+	// Scope the search to the namespace of the prompt's project directory.
+	svc = svc.WithNamespace(resolveNamespace(input.CWD))
+
 	// Perform search with the full prompt (model-side truncation via AC-56).
 	// Use nil embedding to let the service compute it (AC-56).
 	searchReq := &memory.SearchRequest{

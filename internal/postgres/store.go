@@ -20,7 +20,14 @@ import (
 )
 
 //go:embed migrations/0001_init.sql
-var migrationSQL string
+var migrationInitSQL string
+
+//go:embed migrations/0002_namespaces.sql
+var migrationNamespacesSQL string
+
+// migrationSQL is every migration, applied in order. Each statement is
+// idempotent, so re-running on an already-migrated database is a no-op.
+var migrationSQL = migrationInitSQL + ";\n" + migrationNamespacesSQL
 
 // Store is the Postgres adapter implementing memory.Store.
 type Store struct {
@@ -118,12 +125,12 @@ func (s *Store) Create(ctx context.Context, r *record.Record) (*record.Record, e
 		INSERT INTO records (
 			id, kind, title, content, repo, files, commit_sha, ticket, tags,
 			status, deprecation_reason, superseded_by, source, confidence,
-			seen_count, used_count, created_at, updated_at, last_used_at, embedding, tsvector_content
+			seen_count, used_count, created_at, updated_at, last_used_at, embedding, tsvector_content, namespace
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11, $12, $13, $14,
 			$15, $16, $17, $18, $19, $20,
-			` + tsvec + `
+			` + tsvec + `, $24
 		) RETURNING id
 	`
 
@@ -131,7 +138,7 @@ func (s *Store) Create(ctx context.Context, r *record.Record) (*record.Record, e
 		r.ID, string(r.Kind), r.Title, r.Content, r.Repo, r.Files, r.CommitSHA, r.Ticket, r.Tags,
 		string(r.Status), r.DeprecationReason, r.SupersededBy, string(r.Source), r.Confidence,
 		r.SeenCount, r.UsedCount, r.CreatedAt, r.UpdatedAt, r.LastUsedAt, embeddingVec,
-		r.Title, tagsStr, r.Content,
+		r.Title, tagsStr, r.Content, r.Namespace,
 	).Scan(&r.ID)
 
 	if err != nil {
@@ -147,7 +154,7 @@ func (s *Store) Get(ctx context.Context, id string) (*record.Record, error) {
 
 	query := `
 		SELECT
-			id, kind, title, content, repo, files, commit_sha, ticket, tags,
+			id, kind, title, content, repo, namespace, files, commit_sha, ticket, tags,
 			status, deprecation_reason, superseded_by, source, confidence,
 			seen_count, used_count, created_at, updated_at, last_used_at, embedding
 		FROM records
@@ -156,7 +163,7 @@ func (s *Store) Get(ctx context.Context, id string) (*record.Record, error) {
 
 	var embeddingVec pgvector.Vector
 	err := s.pool.QueryRow(ctx, query, id).Scan(
-		&r.ID, (*string)(&r.Kind), &r.Title, &r.Content, &r.Repo, &r.Files, &r.CommitSHA, &r.Ticket, &r.Tags,
+		&r.ID, (*string)(&r.Kind), &r.Title, &r.Content, &r.Repo, &r.Namespace, &r.Files, &r.CommitSHA, &r.Ticket, &r.Tags,
 		(*string)(&r.Status), &r.DeprecationReason, &r.SupersededBy, (*string)(&r.Source), &r.Confidence,
 		&r.SeenCount, &r.UsedCount, &r.CreatedAt, &r.UpdatedAt, &r.LastUsedAt, &embeddingVec,
 	)
@@ -267,7 +274,7 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]interf
 		UPDATE records
 		SET %s
 		WHERE id = $%d
-		RETURNING id, kind, title, content, repo, files, commit_sha, ticket, tags,
+		RETURNING id, kind, title, content, repo, namespace, files, commit_sha, ticket, tags,
 		          status, deprecation_reason, superseded_by, source, confidence,
 		          seen_count, used_count, created_at, updated_at, last_used_at, embedding
 	`, strings.Join(setClauses, ", "), argCount)
@@ -275,7 +282,7 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]interf
 	r := &record.Record{}
 	var embeddingVec pgvector.Vector
 	err := s.pool.QueryRow(ctx, query, args...).Scan(
-		&r.ID, (*string)(&r.Kind), &r.Title, &r.Content, &r.Repo, &r.Files, &r.CommitSHA, &r.Ticket, &r.Tags,
+		&r.ID, (*string)(&r.Kind), &r.Title, &r.Content, &r.Repo, &r.Namespace, &r.Files, &r.CommitSHA, &r.Ticket, &r.Tags,
 		(*string)(&r.Status), &r.DeprecationReason, &r.SupersededBy, (*string)(&r.Source), &r.Confidence,
 		&r.SeenCount, &r.UsedCount, &r.CreatedAt, &r.UpdatedAt, &r.LastUsedAt, &embeddingVec,
 	)
@@ -335,7 +342,7 @@ func (s *Store) Search(ctx context.Context, query string, embedding []float32, r
 // is the true cosine similarity (1 - cosine distance via `<=>`, matching
 // the records.embedding HNSW index's vector_cosine_ops), which is what
 // AC-15's dedup thresholds (0.80/0.92) compare against.
-func (s *Store) FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*memory.Candidate, error) {
+func (s *Store) FindCandidates(ctx context.Context, embedding []float32, namespace, repo string, limit int) ([]*memory.Candidate, error) {
 	if limit <= 0 {
 		limit = 5
 	}
@@ -355,12 +362,13 @@ func (s *Store) FindCandidates(ctx context.Context, embedding []float32, repo st
 			COALESCE(1.0 - (embedding <=> $1), 0) as similarity
 		FROM records
 		WHERE (repo = $2 OR repo = '*')
+			AND namespace = $4
 			AND status IN ('candidate', 'active')
 		ORDER BY embedding <=> $1
 		LIMIT $3
 	`
 
-	rows, err := s.pool.Query(ctx, query, embeddingVec, repo, limit)
+	rows, err := s.pool.Query(ctx, query, embeddingVec, repo, limit, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("query candidates: %w", err)
 	}
@@ -390,9 +398,15 @@ func (s *Store) FindCandidates(ctx context.Context, embedding []float32, repo st
 
 // List returns all records matching the given filters (all optional).
 func (s *Store) List(ctx context.Context, filters memory.ListFilters) ([]*record.Record, error) {
-	query := "SELECT id, kind, title, content, repo, files, commit_sha, ticket, tags, status, deprecation_reason, superseded_by, source, confidence, seen_count, used_count, created_at, updated_at, last_used_at, embedding FROM records WHERE 1=1"
+	query := "SELECT id, kind, title, content, repo, namespace, files, commit_sha, ticket, tags, status, deprecation_reason, superseded_by, source, confidence, seen_count, used_count, created_at, updated_at, last_used_at, embedding FROM records WHERE 1=1"
 	var args []interface{}
 	argCount := 1
+
+	if filters.Namespace != nil {
+		query += " AND namespace = $" + fmt.Sprint(argCount)
+		args = append(args, *filters.Namespace)
+		argCount++
+	}
 
 	if filters.Repo != nil {
 		query += " AND repo = $" + fmt.Sprint(argCount)
@@ -424,7 +438,7 @@ func (s *Store) List(ctx context.Context, filters memory.ListFilters) ([]*record
 		r := &record.Record{}
 		var embeddingVec pgvector.Vector
 		if err := rows.Scan(
-			&r.ID, (*string)(&r.Kind), &r.Title, &r.Content, &r.Repo, &r.Files, &r.CommitSHA, &r.Ticket, &r.Tags,
+			&r.ID, (*string)(&r.Kind), &r.Title, &r.Content, &r.Repo, &r.Namespace, &r.Files, &r.CommitSHA, &r.Ticket, &r.Tags,
 			(*string)(&r.Status), &r.DeprecationReason, &r.SupersededBy, (*string)(&r.Source), &r.Confidence,
 			&r.SeenCount, &r.UsedCount, &r.CreatedAt, &r.UpdatedAt, &r.LastUsedAt, &embeddingVec,
 		); err != nil {

@@ -15,7 +15,7 @@ func (s *Service) GetRecord(ctx context.Context, id string) (*record.Record, err
 		return nil, fmt.Errorf("id is required")
 	}
 
-	rec, err := s.store.Get(ctx, id)
+	rec, err := s.getAccessible(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get record: %w", err)
 	}
@@ -45,7 +45,7 @@ func (s *Service) UpdateRecord(ctx context.Context, req *UpdateRequest) (*record
 
 	// Fetch the existing record so a partial update can still recompute the
 	// embedding from the full (merged) title+tags+content (AC-55).
-	existing, err := s.store.Get(ctx, req.ID)
+	existing, err := s.getAccessible(ctx, req.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get record: %w", err)
 	}
@@ -141,6 +141,10 @@ func (s *Service) DeprecateRecord(ctx context.Context, req *DeprecateRequest) (*
 		return nil, fmt.Errorf("reason is required for deprecation")
 	}
 
+	if _, err := s.getAccessible(ctx, req.ID); err != nil {
+		return nil, fmt.Errorf("deprecate record: %w", err)
+	}
+
 	updates := map[string]interface{}{
 		"status":              record.StatusDeprecated,
 		"deprecation_reason": req.Reason,
@@ -162,6 +166,9 @@ func (s *Service) DeprecateRecord(ctx context.Context, req *DeprecateRequest) (*
 // If no filters are provided, returns all records.
 // Filters apply with AND logic (AC-11).
 func (s *Service) ListRecords(ctx context.Context, filters ListFilters) ([]*record.Record, error) {
+	// Listing is always confined to the service's own namespace.
+	ns := s.namespace
+	filters.Namespace = &ns
 	recs, err := s.store.List(ctx, filters)
 	if err != nil {
 		return nil, fmt.Errorf("list records: %w", err)

@@ -93,7 +93,18 @@ type Config struct {
 	// configured; ingest-pr has nothing to do).
 	// Env: MEMORY_PR_INGEST_REPOS (comma-separated absolute paths)
 	PRIngestRepos []string
+
+	// Namespace is the record namespace this process reads and writes. It is
+	// not read by Load: the composition root resolves it per invocation
+	// (MEMORY_NAMESPACE override, else namespaces.yaml by project directory)
+	// and sets it before building the service.
+	Namespace string
 }
+
+// NamespaceEnv is the environment variable that explicitly overrides the
+// namespace resolved from namespaces.yaml (e.g. set in a repo's
+// .claude/settings.json env).
+const NamespaceEnv = "MEMORY_NAMESPACE"
 
 // Load reads configuration from environment variables, with fallback defaults.
 // It returns an error if any required value is missing or malformed.

@@ -1,0 +1,19 @@
+# Copy to ~/.config/claude-memory/namespaces.yaml
+#
+# Resolution order for the namespace of a project directory:
+#   1. MEMORY_NAMESPACE env var (e.g. in a repo's .claude/settings.json "env")
+#   2. the most specific matching path glob below (longest literal prefix wins;
+#      "**" matches any number of directories; "~" is your home directory)
+#   3. `default:`
+#   4. built-in "acme" (what existing records were backfilled to)
+#
+# Records from different namespaces never mix: search, dedup, list and
+# lookups by id are all scoped to the resolved namespace. The special
+# "global" namespace is searched in addition to your own; nothing is ever
+# written to it automatically — pass namespace="global" to memory_store.
+default: acme
+namespaces:
+  - namespace: acme
+    paths: ["~/work/acme/**"]
+  - namespace: pet-game
+    paths: ["~/src/pet-game", "~/src/pet-game/**"]
