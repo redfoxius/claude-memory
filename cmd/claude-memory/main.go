@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"claude-memory/internal/azuredevops"
 	"claude-memory/internal/config"
 	"claude-memory/internal/extraction"
+	"claude-memory/internal/gitlog"
 	"claude-memory/internal/memory"
 	"claude-memory/internal/ollama"
 	"claude-memory/internal/postgres"
@@ -158,6 +160,7 @@ func cmdServe(cfg *config.Config) error {
 }
 
 func cmdHook(cfg *config.Config) error {
+	hookStart := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.HookTimeout)
 	defer cancel()
 
@@ -170,7 +173,8 @@ func cmdHook(cfg *config.Config) error {
 	}
 	defer cleanup()
 
-	return hookCmd(ctx, cfg, svc)
+	deps := hookDeps{History: buildCodeHistory(cfg)}
+	return hookCmd(ctx, cfg, svc, deps, hookStart)
 }
 
 // cmdExtract is implemented in extract.go (WI-12).
@@ -239,4 +243,21 @@ func cmdEvalRetrieval(cfg *config.Config) error {
 
 	// Fixtures are synthetic: keep them out of every real namespace.
 	return evalCmd(ctx, args, svc.WithNamespace("eval"))
+}
+
+// sessionIDRe bounds session ids used in cache file names.
+var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// buildCodeHistory returns the hook's per-session git adapter factory: the
+// exec adapter wrapped in a verdict cache — a file per session when the id
+// is safe to use as a file name, otherwise an in-process map. This is the
+// composition root: the only place gitlog is constructed.
+func buildCodeHistory(cfg *config.Config) func(sessionID string) memory.CodeHistory {
+	return func(sessionID string) memory.CodeHistory {
+		var store gitlog.Store = gitlog.NewMapCache()
+		if sessionIDRe.MatchString(sessionID) {
+			store = gitlog.NewFileCache(filepath.Join(stateDir(), "stale-cache", sessionID+".json"))
+		}
+		return gitlog.Cached(gitlog.Exec{}, store, cfg.StaleTimeoutHook)
+	}
 }

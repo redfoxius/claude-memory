@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"claude-memory/internal/config"
 	"claude-memory/internal/memory"
@@ -16,8 +16,25 @@ import (
 
 // userPromptSubmitInput matches Claude Code's UserPromptSubmit hook JSON format.
 type userPromptSubmitInput struct {
-	Prompt string `json:"prompt"`
-	CWD    string `json:"cwd"`
+	Prompt    string `json:"prompt"`
+	CWD       string `json:"cwd"`
+	SessionID string `json:"session_id"`
+}
+
+// hookTotalBudget is the hook's latency target (MVP AC-30 p95); the stale
+// check must finish before hookTotalBudget - hookReserve of the hook's life,
+// leaving the reserve for rendering and output.
+const (
+	hookTotalBudget = 300 * time.Millisecond
+	hookReserve     = 20 * time.Millisecond
+)
+
+// hookDeps are the adapters the hook needs, built in main.go (the
+// composition root) so hook.go never constructs one.
+type hookDeps struct {
+	// History returns the git adapter for a session (wrapped in that
+	// session's verdict cache). nil disables staleness checking.
+	History func(sessionID string) memory.CodeHistory
 }
 
 // hookOutput is the top-level envelope Claude Code's UserPromptSubmit hook
@@ -38,6 +55,23 @@ type card struct {
 	Title string `json:"title"`
 	Repo  string `json:"repo"`
 	ID    string `json:"id"`
+	// Stale is set when the record's files changed since it was recorded.
+	Stale *memory.StaleHint `json:"-"`
+}
+
+// staleSuffix is the fixed text appended to a stale card (AC-5).
+func staleSuffix(h *memory.StaleHint) string {
+	const base = " ⚠ code changed since this was recorded"
+	switch {
+	case h.Commits <= 0:
+		return base
+	case h.Commits == 1:
+		return base + " (1 commit)"
+	case h.Commits >= 100:
+		return base + " (100+ commits)"
+	default:
+		return fmt.Sprintf("%s (%d commits)", base, h.Commits)
+	}
 }
 
 // additionalContextHeader prefixes the rendered card list so Claude treats
@@ -58,7 +92,11 @@ func renderAdditionalContext(cards []card) string {
 	lines := make([]string, 0, len(cards)+1)
 	lines = append(lines, additionalContextHeader)
 	for _, c := range cards {
-		lines = append(lines, fmt.Sprintf("- [memory] %s (repo: %s, id: %s)", c.Title, c.Repo, c.ID))
+		line := fmt.Sprintf("- [memory] %s (repo: %s, id: %s)", c.Title, c.Repo, c.ID)
+		if c.Stale != nil {
+			line += staleSuffix(c.Stale)
+		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -67,7 +105,7 @@ func renderAdditionalContext(cards []card) string {
 // It reads stdin for Claude Code's UserPromptSubmit JSON, searches memory with the prompt,
 // and outputs additional context (at most 3 cards with title/repo/id) where Similarity >= threshold.
 // On error or timeout, it exits 0 with no output (silent failure per AC-31).
-func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service) error {
+func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, deps hookDeps, hookStart time.Time) error {
 	// Read JSON from stdin.
 	input := &userPromptSubmitInput{}
 	if err := json.NewDecoder(os.Stdin).Decode(input); err != nil {
@@ -76,11 +114,23 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service) error
 		return nil
 	}
 
-	// Derive repo from cwd: repo = basename of git toplevel, or basename of cwd if not in a git repo.
-	repo := deriveRepo(ctx, input.CWD)
-
 	// Scope the search to the namespace of the prompt's project directory.
 	svc = svc.WithNamespace(resolveNamespace(input.CWD))
+
+	// One git call resolves the checkout (repo = basename of its top level)
+	// and HEAD; with no card found, no further git process runs. Outside a
+	// checkout the repo is the cwd's basename.
+	repo := filepath.Base(input.CWD)
+	if deps.History != nil {
+		h := deps.History(input.SessionID)
+		if co, head, ok, err := h.Resolve(ctx, input.CWD); err == nil && ok {
+			repo = co.Repo
+			svc = svc.WithCheckout(co).
+				WithPinnedHead(head).
+				WithCodeHistory(h, cfg.StaleTimeoutHook).
+				WithStaleDeadline(hookStart.Add(hookTotalBudget - hookReserve))
+		}
+	}
 
 	// Perform search with the full prompt (model-side truncation via AC-56).
 	// Use nil embedding to let the service compute it (AC-56).
@@ -105,6 +155,7 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service) error
 				Title: rec.Title,
 				Repo:  rec.Repo,
 				ID:    rec.ID,
+				Stale: rec.Stale,
 			})
 		}
 	}
@@ -134,23 +185,4 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service) error
 	}
 
 	return nil
-}
-
-// deriveRepo derives the repo name from cwd:
-// - First tries to get the git toplevel of cwd, takes its basename.
-// - Falls back to the basename of cwd if not in a git repo.
-func deriveRepo(ctx context.Context, cwd string) string {
-	// Try git rev-parse --show-toplevel to get the repo root.
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
-	cmd.Dir = cwd
-
-	output, err := cmd.Output()
-	if err == nil && len(output) > 0 {
-		// Successfully got git root; return its basename.
-		root := filepath.Clean(string(output)[:len(output)-1]) // Trim newline.
-		return filepath.Base(root)
-	}
-
-	// Fall back to basename of cwd.
-	return filepath.Base(cwd)
 }

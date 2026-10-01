@@ -94,6 +94,15 @@ type Config struct {
 	// Env: MEMORY_PR_INGEST_REPOS (comma-separated absolute paths)
 	PRIngestRepos []string
 
+	// StaleTimeoutHook is the ceiling for the hook's staleness checks
+	// (they also stop at the hook's overall latency budget).
+	// Default: 50ms. Env: MEMORY_STALE_TIMEOUT_HOOK
+	StaleTimeoutHook time.Duration
+
+	// StaleTimeout is the ceiling for staleness checks in the MCP server.
+	// Default: 500ms. Env: MEMORY_STALE_TIMEOUT
+	StaleTimeout time.Duration
+
 	// Namespace is the record namespace this process reads and writes. It is
 	// not read by Load: the composition root resolves it per invocation
 	// (MEMORY_NAMESPACE override, else namespaces.yaml by project directory)
@@ -122,6 +131,8 @@ func Load() (*Config, error) {
 		OllamaURL:           getStringEnv("MEMORY_OLLAMA_URL", "http://127.0.0.1:11434"),
 		OllamaModel:         getStringEnv("MEMORY_OLLAMA_MODEL", "bge-m3"),
 		PRIngestRepos:       getStringListEnv("MEMORY_PR_INGEST_REPOS"),
+		StaleTimeoutHook:    getDurationEnv("MEMORY_STALE_TIMEOUT_HOOK", 50*time.Millisecond),
+		StaleTimeout:        getDurationEnv("MEMORY_STALE_TIMEOUT", 500*time.Millisecond),
 	}
 
 	// PGDSN is required and never has a default.
