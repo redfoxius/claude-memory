@@ -7,10 +7,14 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/url"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
@@ -20,6 +24,13 @@ import (
 
 // startPostgresContainer starts a pgvector container and returns the DSN and a cleanup function.
 func startPostgresContainer(t *testing.T, ctx context.Context) (string, func()) {
+	// MEMORY_TEST_PG_ADMIN_DSN points at an existing pgvector-enabled
+	// Postgres (e.g. a local install, where Docker is unavailable): each test
+	// gets its own freshly created database instead of a container.
+	if admin := os.Getenv("MEMORY_TEST_PG_ADMIN_DSN"); admin != "" {
+		return startScratchDatabase(t, ctx, admin)
+	}
+
 	req := testcontainers.ContainerRequest{
 		Image:        "pgvector/pgvector:pg16",
 		ExposedPorts: []string{"5432/tcp"},
@@ -1370,4 +1381,33 @@ func TestSearchReturnsFilesAndCommitSHA_UpdateRebaselines(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("cleared", emb, "")
+}
+
+// startScratchDatabase creates a uniquely named database on the server at
+// adminDSN and returns its DSN plus a cleanup that drops it.
+func startScratchDatabase(t *testing.T, ctx context.Context, adminDSN string) (string, func()) {
+	t.Helper()
+	cfg, err := pgx.ParseConfig(adminDSN)
+	if err != nil {
+		t.Fatalf("parse MEMORY_TEST_PG_ADMIN_DSN: %v", err)
+	}
+	admin, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	name := "mt_" + strings.ReplaceAll(uuid.New().String(), "-", "")[:16]
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err != nil {
+		admin.Close(ctx)
+		t.Fatalf("create database: %v", err)
+	}
+	u, err := url.Parse(adminDSN)
+	if err != nil {
+		t.Fatalf("MEMORY_TEST_PG_ADMIN_DSN must be a postgres:// URL: %v", err)
+	}
+	u.Path = "/" + name
+	dsn := u.String()
+	return dsn, func() {
+		_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+		admin.Close(context.Background())
+	}
 }
