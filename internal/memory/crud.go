@@ -115,7 +115,11 @@ func (s *Service) UpdateRecord(ctx context.Context, req *UpdateRequest) (*record
 		if *req.CommitSHA != "" && !ValidCommitSHA(*req.CommitSHA) {
 			return nil, fmt.Errorf("invalid commit_sha %q", *req.CommitSHA)
 		}
-		updates["commit_sha"] = *req.CommitSHA
+		if *req.CommitSHA == "" {
+			updates["commit_sha"] = nil // clear the baseline
+		} else {
+			updates["commit_sha"] = *req.CommitSHA
+		}
 	} else if contentChanged || len(req.Files) > 0 {
 		files := existing.Files
 		if len(req.Files) > 0 {

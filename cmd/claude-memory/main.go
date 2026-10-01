@@ -256,6 +256,10 @@ func cmdEvalRetrieval(cfg *config.Config) error {
 	return evalCmd(ctx, args, svc.WithNamespace("eval"))
 }
 
+// newCodeHistory builds the git adapter for one-shot processes that need no
+// verdict cache (session extraction's commit baselines). Composition root.
+func newCodeHistory() memory.CodeHistory { return gitlog.Exec{} }
+
 // sessionIDRe bounds session ids used in cache file names.
 var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 

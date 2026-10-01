@@ -25,6 +25,7 @@ type Service struct {
 	history       CodeHistory
 	checkout      *Checkout
 	pinnedHead    string
+	headPinned    bool
 	staleCeiling  time.Duration
 	staleDeadline time.Time
 }
@@ -139,7 +140,7 @@ func (s *Service) Search(ctx context.Context, req *SearchRequest) (*SearchResult
 		return nil, fmt.Errorf("search: %w", err)
 	}
 
-	s.annotateStale(ctx, result.Records)
+	s.annotateStale(ctx, result.Records, req.MinSimilarity)
 
 	return result, nil
 }
@@ -204,4 +205,9 @@ type SearchRequest struct {
 	Kind      *record.Kind
 	Tags      []string
 	Limit     int // Default 5.
+
+	// MinSimilarity is the lowest cosine similarity the caller will show
+	// (the hook's card threshold). Results below it are not staleness-
+	// checked. 0 checks every result.
+	MinSimilarity float64
 }

@@ -138,6 +138,8 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, deps 
 		Query: input.Prompt,
 		Repo:  repo,
 		Limit: 3, // At most 3 cards per AC-46.
+		// Only results that can become cards are staleness-checked.
+		MinSimilarity: cfg.HookSimThreshold,
 	}
 
 	searchResult, err := svc.Search(ctx, searchReq)

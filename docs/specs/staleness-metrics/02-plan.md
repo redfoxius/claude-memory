@@ -1,8 +1,18 @@
 # Claude Memory — Staleness Check & Usage Metrics
 
-**Status:** not started. Plan revised for spec v0.2 after
-`03-architecture-review.md` (gate: revise before implementing; all
-blockers addressed in the spec).
+**Status:** PR A (staleness) implemented and reviewed
+(`04-pr-a-review.md`); its blockers are fixed. PR B (events + stats) not
+started. Plan revised for spec v0.2 after `03-architecture-review.md`.
+
+**PR A implementation status:** WI-1..6 and WI-13a DONE (unit-tested; SQL
+changes covered only by integration tests that need Docker/CI). WI-15 not
+built (optional). Still manual/open: **WI-0** latency baseline (build
+`40a7fb7` for the "before" numbers), **WI-14** re-measure, and the
+**AC-11** check `git merge-base --is-ancestor <MergeCommit> origin/main`
+on a real completed squash PR (result decides whether PR records can ever
+be checked). Known deviation from AC-12: a write-path UPDATE whose request
+has no `files` never re-baselines (the candidate carries no files and the
+baseline is computed before the transaction); `memory_update` does.
 
 ## Spec
 - `docs/specs/staleness-metrics/01-spec.md` (SPEC-2026-10-01-staleness-metrics,

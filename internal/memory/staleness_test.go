@@ -86,7 +86,7 @@ func TestAnnotateStale_RowsAndNoAdapterCalls(t *testing.T) {
 	t.Run("changed", func(t *testing.T) {
 		f := &fakeHistory{head: "H1", changedFn: changed}
 		r := rec("repo", goodSHA, "a.go")
-		staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{r})
+		staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{r}, 0)
 		if r.Stale == nil || r.Stale.Commits != 2 {
 			t.Fatalf("Stale = %+v, want commits 2", r.Stale)
 		}
@@ -95,7 +95,7 @@ func TestAnnotateStale_RowsAndNoAdapterCalls(t *testing.T) {
 	t.Run("fresh", func(t *testing.T) {
 		f := &fakeHistory{head: "H1", changedFn: func(context.Context, string, []string) (bool, int, error) { return false, 0, nil }}
 		r := rec("repo", goodSHA, "a.go")
-		staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{r})
+		staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{r}, 0)
 		if r.Stale != nil {
 			t.Fatalf("Stale = %+v, want nil", r.Stale)
 		}
@@ -104,7 +104,7 @@ func TestAnnotateStale_RowsAndNoAdapterCalls(t *testing.T) {
 	t.Run("adapter error is unchecked", func(t *testing.T) {
 		f := &fakeHistory{head: "H1", changedFn: func(context.Context, string, []string) (bool, int, error) { return true, 3, errors.New("boom") }}
 		r := rec("repo", goodSHA, "a.go")
-		staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{r})
+		staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{r}, 0)
 		if r.Stale != nil {
 			t.Fatalf("an errored check must not flag: %+v", r.Stale)
 		}
@@ -122,7 +122,7 @@ func TestAnnotateStale_RowsAndNoAdapterCalls(t *testing.T) {
 		"empty repo":   rec("", goodSHA, "a.go"),
 	} {
 		f := &fakeHistory{head: "H1", changedFn: changed}
-		staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{r})
+		staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{r}, 0)
 		if f.changedCalls.Load() != 0 || f.headCalls.Load() != 0 || r.Stale != nil {
 			t.Errorf("%s: changed=%d head=%d stale=%v, want no adapter calls and no flag", name, f.changedCalls.Load(), f.headCalls.Load(), r.Stale)
 		}
@@ -131,7 +131,7 @@ func TestAnnotateStale_RowsAndNoAdapterCalls(t *testing.T) {
 	t.Run("no checkout or history", func(t *testing.T) {
 		svc := New(&mockStore{}, &mockEmbeddingProvider{}, &mockScrubber{}, &mockClock{}, writepathCfg())
 		r := rec("repo", goodSHA, "a.go")
-		svc.annotateStale(context.Background(), []*SearchRecord{r})
+		svc.annotateStale(context.Background(), []*SearchRecord{r}, 0)
 		if r.Stale != nil {
 			t.Error("flagged without a checkout")
 		}
@@ -140,7 +140,7 @@ func TestAnnotateStale_RowsAndNoAdapterCalls(t *testing.T) {
 	t.Run("empty HEAD (unborn) is unchecked", func(t *testing.T) {
 		f := &fakeHistory{head: "", changedFn: changed}
 		r := rec("repo", goodSHA, "a.go")
-		staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{r})
+		staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{r}, 0)
 		if f.changedCalls.Load() != 0 || r.Stale != nil {
 			t.Error("checked against an empty HEAD")
 		}
@@ -153,7 +153,7 @@ func TestAnnotateStale_OnlyTopTenAndOneHeadRead(t *testing.T) {
 	for i := range recs {
 		recs[i] = rec("repo", goodSHA, "a.go")
 	}
-	staleSvc(f, time.Second).annotateStale(context.Background(), recs)
+	staleSvc(f, time.Second).annotateStale(context.Background(), recs, 0)
 	if got := f.changedCalls.Load(); got != maxStaleChecksPerSearch {
 		t.Errorf("Changed calls = %d, want %d", got, maxStaleChecksPerSearch)
 	}
@@ -168,7 +168,7 @@ func TestAnnotateStale_OnlyTopTenAndOneHeadRead(t *testing.T) {
 func TestAnnotateStale_PinnedHeadSkipsHeadRead(t *testing.T) {
 	f := &fakeHistory{head: "H1", changedFn: func(context.Context, string, []string) (bool, int, error) { return true, 1, nil }}
 	r := rec("repo", goodSHA, "a.go")
-	staleSvc(f, time.Second).WithPinnedHead("PIN").annotateStale(context.Background(), []*SearchRecord{r})
+	staleSvc(f, time.Second).WithPinnedHead("PIN").annotateStale(context.Background(), []*SearchRecord{r}, 0)
 	if f.headCalls.Load() != 0 || r.Stale == nil {
 		t.Errorf("head calls = %d, stale = %v", f.headCalls.Load(), r.Stale)
 	}
@@ -184,7 +184,7 @@ func TestAnnotateStale_DeadlineBoundsBlockingChecks(t *testing.T) {
 	}}
 	r := rec("repo", goodSHA, "a.go")
 	start := time.Now()
-	staleSvc(f, 30*time.Millisecond).annotateStale(context.Background(), []*SearchRecord{r})
+	staleSvc(f, 30*time.Millisecond).annotateStale(context.Background(), []*SearchRecord{r}, 0)
 	if el := time.Since(start); el > 150*time.Millisecond {
 		t.Errorf("annotateStale took %v, want ~deadline+10ms", el)
 	}
@@ -201,7 +201,7 @@ func TestAnnotateStale_HookBudgetDeadlineIsAnUpperBound(t *testing.T) {
 	}}
 	budget := time.Now().Add(20 * time.Millisecond)
 	svc := staleSvc(f, time.Second).WithStaleDeadline(budget)
-	svc.annotateStale(context.Background(), []*SearchRecord{rec("repo", goodSHA, "a.go")})
+	svc.annotateStale(context.Background(), []*SearchRecord{rec("repo", goodSHA, "a.go")}, 0)
 	if sawDeadline.After(budget) {
 		t.Errorf("check deadline %v is after the hook budget %v", sawDeadline, budget)
 	}
@@ -215,7 +215,7 @@ func TestAnnotateStale_HookBudgetDeadlineIsAnUpperBound(t *testing.T) {
 		return false, 0, ctx.Err()
 	}}
 	r := rec("repo", goodSHA, "a.go")
-	staleSvc(f2, time.Second).WithStaleDeadline(time.Now().Add(-time.Second)).annotateStale(context.Background(), []*SearchRecord{r})
+	staleSvc(f2, time.Second).WithStaleDeadline(time.Now().Add(-time.Second)).annotateStale(context.Background(), []*SearchRecord{r}, 0)
 	if r.Stale != nil {
 		t.Error("flagged on an expired budget")
 	}
@@ -237,5 +237,56 @@ func TestStaleHint_SingleRecordAndHeadChangeChangesKey(t *testing.T) {
 	}
 	if f.headCalls.Load() != 1 {
 		t.Errorf("Head calls = %d, want 1 (foreign repo makes none)", f.headCalls.Load())
+	}
+}
+
+// A spent budget must still deliver results that are instantly available
+// (cache hits) — the grace timer must not fire before they are collected.
+func TestAnnotateStale_SpentBudgetStillDeliversReadyResults(t *testing.T) {
+	f := &fakeHistory{head: "H1", changedFn: func(ctx context.Context, _ string, _ []string) (bool, int, error) {
+		return true, 4, nil // as a cache hit would, ignoring the expired ctx
+	}}
+	recs := make([]*SearchRecord, 20)
+	for i := range recs {
+		recs[i] = rec("repo", goodSHA, "a.go")
+	}
+	svc := staleSvc(f, time.Second).WithStaleDeadline(time.Now().Add(-time.Second))
+	for i := 0; i < 50; i++ {
+		for _, r := range recs {
+			r.Stale = nil
+		}
+		svc.annotateStale(context.Background(), recs, 0)
+		for j := 0; j < maxStaleChecksPerSearch; j++ {
+			if recs[j].Stale == nil {
+				t.Fatalf("iteration %d: result %d dropped although its verdict was ready", i, j)
+			}
+		}
+	}
+}
+
+// Results below the caller's similarity floor never reach git.
+func TestAnnotateStale_BelowMinSimilarityNotChecked(t *testing.T) {
+	f := &fakeHistory{head: "H1", changedFn: func(context.Context, string, []string) (bool, int, error) { return true, 1, nil }}
+	low, high := rec("repo", goodSHA, "a.go"), rec("repo", goodSHA, "a.go")
+	low.Similarity, high.Similarity = 0.2, 0.8
+	staleSvc(f, time.Second).annotateStale(context.Background(), []*SearchRecord{low, high}, 0.5)
+	if f.changedCalls.Load() != 1 || low.Stale != nil || high.Stale == nil {
+		t.Errorf("changed calls=%d low=%v high=%v, want 1 call flagging only high", f.changedCalls.Load(), low.Stale, high.Stale)
+	}
+
+	f2 := &fakeHistory{head: "H1", changedFn: f.changedFn}
+	staleSvc(f2, time.Second).annotateStale(context.Background(), []*SearchRecord{low}, 0.5)
+	if f2.changedCalls.Load() != 0 || f2.headCalls.Load() != 0 {
+		t.Errorf("nothing eligible, yet head=%d changed=%d", f2.headCalls.Load(), f2.changedCalls.Load())
+	}
+}
+
+// An unborn HEAD that was pinned (empty) is not re-read from git.
+func TestPinnedEmptyHeadIsNotReRead(t *testing.T) {
+	f := &fakeHistory{head: "H1", changedFn: func(context.Context, string, []string) (bool, int, error) { return true, 1, nil }}
+	r := rec("repo", goodSHA, "a.go")
+	staleSvc(f, time.Second).WithPinnedHead("").annotateStale(context.Background(), []*SearchRecord{r}, 0)
+	if f.headCalls.Load() != 0 || f.changedCalls.Load() != 0 || r.Stale != nil {
+		t.Errorf("head=%d changed=%d stale=%v", f.headCalls.Load(), f.changedCalls.Load(), r.Stale)
 	}
 }

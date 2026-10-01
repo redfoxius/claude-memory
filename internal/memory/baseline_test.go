@@ -173,3 +173,111 @@ func TestUpdateRecord_Baseline(t *testing.T) {
 		t.Error("invalid commit_sha accepted")
 	}
 }
+
+func writePathSvc(h *fakeHistory, store *mockStore) *Service {
+	return nsService(store, "global").WithCodeHistory(h, 0).WithCheckout(Checkout{Dir: "/w/repo", Repo: "repo"})
+}
+
+func decisionStore(targetID string, updates *[]map[string]interface{}, created *[]*record.Record) *mockStore {
+	return &mockStore{
+		FindCandidatesFunc: func(context.Context, []float32, string, int) ([]*Candidate, error) {
+			return []*Candidate{{ID: targetID, Title: "Old", Similarity: 0.9}}, nil
+		},
+		GetFunc: func(_ context.Context, id string) (*record.Record, error) {
+			return &record.Record{ID: id, Namespace: "global", Status: record.StatusActive}, nil
+		},
+		UpdateFunc: func(_ context.Context, id string, u map[string]interface{}) (*record.Record, error) {
+			*updates = append(*updates, u)
+			return &record.Record{ID: id, Namespace: "global"}, nil
+		},
+		CreateFunc: func(_ context.Context, r *record.Record) (*record.Record, error) {
+			r.ID = "new-id"
+			*created = append(*created, r)
+			return r, nil
+		},
+	}
+}
+
+func decisionReq(action WriteAction, target string, files ...string) *StoreRequest {
+	r := baselineReq("repo", files...)
+	r.Source = record.SourceSession
+	r.ExtractionDecision = &ExtractionDecision{Action: action, TargetID: &target}
+	return r
+}
+
+func TestWritePath_UpdateRebaselinesWhenFilesGivenAndClean(t *testing.T) {
+	var ups []map[string]interface{}
+	var cr []*record.Record
+	svc := writePathSvc(&fakeHistory{head: headSHA}, decisionStore("t1", &ups, &cr))
+	if _, err := svc.Store(context.Background(), decisionReq(ActionUpdate, "t1", "a.go")); err != nil {
+		t.Fatal(err)
+	}
+	if len(ups) != 1 || ups[0]["commit_sha"] != headSHA {
+		t.Errorf("updates = %v, want commit_sha re-baselined", ups)
+	}
+}
+
+func TestWritePath_UpdateUnchangedWhenDirtyOrNoFiles(t *testing.T) {
+	for name, tc := range map[string]struct {
+		dirty bool
+		files []string
+	}{"dirty": {true, []string{"a.go"}}, "no files": {false, nil}} {
+		var ups []map[string]interface{}
+		var cr []*record.Record
+		svc := writePathSvc(&fakeHistory{head: headSHA, dirty: tc.dirty}, decisionStore("t1", &ups, &cr))
+		if _, err := svc.Store(context.Background(), decisionReq(ActionUpdate, "t1", tc.files...)); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := ups[0]["commit_sha"]; ok {
+			t.Errorf("%s: commit_sha changed: %v", name, ups[0])
+		}
+	}
+}
+
+func TestWritePath_SupersedeStampsTheNewRecord(t *testing.T) {
+	var ups []map[string]interface{}
+	var cr []*record.Record
+	svc := writePathSvc(&fakeHistory{head: headSHA}, decisionStore("t1", &ups, &cr))
+	if _, err := svc.Store(context.Background(), decisionReq(ActionSupersede, "t1", "a.go")); err != nil {
+		t.Fatal(err)
+	}
+	if len(cr) != 1 || cr[0].CommitSHA == nil || *cr[0].CommitSHA != headSHA {
+		t.Errorf("superseding record commit_sha = %v, want %s", cr, headSHA)
+	}
+}
+
+func TestWritePath_NoopNeverTouchesCommitSHA(t *testing.T) {
+	var ups []map[string]interface{}
+	var cr []*record.Record
+	svc := writePathSvc(&fakeHistory{head: headSHA}, decisionStore("t1", &ups, &cr))
+	if _, err := svc.Store(context.Background(), decisionReq(ActionNoop, "t1", "a.go")); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range ups {
+		if _, ok := u["commit_sha"]; ok {
+			t.Errorf("NOOP changed commit_sha: %v", u)
+		}
+	}
+	if len(cr) != 0 {
+		t.Error("NOOP created a record")
+	}
+}
+
+func TestUpdateRecord_EmptyCommitSHAClearsBaseline(t *testing.T) {
+	existing := &record.Record{ID: "r1", Namespace: "global", Repo: "repo"}
+	var got map[string]interface{}
+	store := &mockStore{
+		GetFunc: func(context.Context, string) (*record.Record, error) { return existing, nil },
+		UpdateFunc: func(_ context.Context, _ string, u map[string]interface{}) (*record.Record, error) {
+			got = u
+			return existing, nil
+		},
+	}
+	empty := ""
+	if _, err := nsService(store, "global").UpdateRecord(context.Background(), &UpdateRequest{ID: "r1", CommitSHA: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := got["commit_sha"]; !ok || v != nil {
+		t.Errorf("commit_sha = %#v, want explicit nil (NULL)", v)
+	}
+}

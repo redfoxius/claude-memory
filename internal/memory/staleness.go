@@ -136,6 +136,7 @@ func (s *Service) WithCheckout(co Checkout) *Service {
 func (s *Service) WithPinnedHead(head string) *Service {
 	c := *s
 	c.pinnedHead = head
+	c.headPinned = true // even when empty (unborn HEAD): no re-read
 	return &c
 }
 
@@ -171,7 +172,7 @@ func (s *Service) staleInputs(repo, sha string, files []string) ([]string, bool)
 
 // currentHead returns the pinned HEAD, or reads it from git once.
 func (s *Service) currentHead(ctx context.Context) string {
-	if s.pinnedHead != "" {
+	if s.headPinned {
 		return s.pinnedHead
 	}
 	h, err := s.history.Head(ctx, s.checkout.Dir)
@@ -199,7 +200,7 @@ type staleResult struct {
 // annotateStale sets Stale on the top results whose files changed since
 // they were recorded. Best-effort: anything that cannot be checked in time
 // is left unflagged; it never returns an error.
-func (s *Service) annotateStale(ctx context.Context, recs []*SearchRecord) {
+func (s *Service) annotateStale(ctx context.Context, recs []*SearchRecord, minSimilarity float64) {
 	if s.history == nil || s.checkout == nil || len(recs) == 0 {
 		return
 	}
@@ -213,6 +214,11 @@ func (s *Service) annotateStale(ctx context.Context, recs []*SearchRecord) {
 	}
 	var jobs []job
 	for i, r := range recs {
+		// Results the caller will not show (below its similarity floor)
+		// are never checked: no git for a result that cannot become a card.
+		if r.Similarity < minSimilarity {
+			continue
+		}
 		if files, ok := s.staleInputs(r.Repo, r.CommitSHA, r.Files); ok {
 			jobs = append(jobs, job{i, files})
 		}
@@ -243,7 +249,11 @@ func (s *Service) annotateStale(ctx context.Context, recs []*SearchRecord) {
 
 	// Wait for every check, or give up shortly after the deadline even if an
 	// adapter ignores its context.
-	grace := time.NewTimer(time.Until(deadline) + 10*time.Millisecond)
+	wait := time.Until(deadline)
+	if wait < 0 {
+		wait = 0 // budget already spent: still collect results that are ready (cache hits)
+	}
+	grace := time.NewTimer(wait + 10*time.Millisecond)
 	defer grace.Stop()
 	for range jobs {
 		select {

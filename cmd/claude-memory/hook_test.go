@@ -437,8 +437,8 @@ func TestHook_NoCardNoChangedCalls(t *testing.T) {
 	out, _ := runHookCmdDeps(t, context.Background(), hookCfgWithStale(), staleHookSvc([]*memory.SearchRecord{rec}),
 		`{"prompt":"x","cwd":"/w/myrepo","session_id":"s"}`, deps)
 	_ = out
-	if h.resolveCalls != 1 || h.headCalls != 0 {
-		t.Errorf("resolve=%d head=%d, want 1/0", h.resolveCalls, h.headCalls)
+	if h.resolveCalls != 1 || h.headCalls != 0 || h.changedCalls != 0 {
+		t.Errorf("resolve=%d head=%d changed=%d, want 1/0/0 (no card -> no git beyond Resolve)", h.resolveCalls, h.headCalls, h.changedCalls)
 	}
 }
 
