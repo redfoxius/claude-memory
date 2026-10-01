@@ -126,6 +126,11 @@ type SearchRecord struct {
 	Title      string
 	Repo       string
 	Namespace  string // "global" rows are shared across namespaces
+	Files      []string
+	CommitSHA  string
+	// Stale is set when the record's files changed since it was recorded;
+	// nil means fresh or unchecked.
+	Stale *StaleHint
 	Tags       []string
 	Status     record.Status
 	Confidence float64

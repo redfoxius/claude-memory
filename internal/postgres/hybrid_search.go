@@ -101,6 +101,8 @@ func (s *Store) searchHybridRRF(
 			r.title,
 			r.repo,
 			r.namespace,
+			r.files,
+			r.commit_sha,
 			r.tags,
 			r.status,
 			r.confidence,
@@ -132,13 +134,15 @@ func (s *Store) searchHybridRRF(
 		var title string
 		var repo string
 		var namespace string
+		var files []string
+		var commitSHA *string
 		var tags []string
 		var status string
 		var confidence float64
 		var score float64
 		var similarity float64
 
-		if err := rows.Scan(&id, &kind, &title, &repo, &namespace, &tags, &status, &confidence, &score, &similarity); err != nil {
+		if err := rows.Scan(&id, &kind, &title, &repo, &namespace, &files, &commitSHA, &tags, &status, &confidence, &score, &similarity); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 
@@ -148,6 +152,8 @@ func (s *Store) searchHybridRRF(
 			Title:      title,
 			Repo:       repo,
 			Namespace:  namespace,
+			Files:      files,
+			CommitSHA:  derefString(commitSHA),
 			Tags:       tags,
 			Status:     record.Status(status),
 			Confidence: confidence,
@@ -210,6 +216,8 @@ func (s *Store) searchFullTextOnly(
 			title,
 			repo,
 			namespace,
+			files,
+			commit_sha,
 			tags,
 			status,
 			confidence,
@@ -237,12 +245,14 @@ func (s *Store) searchFullTextOnly(
 		var title string
 		var repo string
 		var namespace string
+		var files []string
+		var commitSHA *string
 		var tags []string
 		var status string
 		var confidence float64
 		var score float64
 
-		if err := rows.Scan(&id, &kind, &title, &repo, &namespace, &tags, &status, &confidence, &score); err != nil {
+		if err := rows.Scan(&id, &kind, &title, &repo, &namespace, &files, &commitSHA, &tags, &status, &confidence, &score); err != nil {
 			return nil, fmt.Errorf("scan full-text result: %w", err)
 		}
 
@@ -252,6 +262,8 @@ func (s *Store) searchFullTextOnly(
 			Title:      title,
 			Repo:       repo,
 			Namespace:  namespace,
+			Files:      files,
+			CommitSHA:  derefString(commitSHA),
 			Tags:       tags,
 			Status:     record.Status(status),
 			Confidence: confidence,
@@ -269,4 +281,11 @@ func (s *Store) searchFullTextOnly(
 		Records:  results,
 		Degraded: true,
 	}, nil
+}
+
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }

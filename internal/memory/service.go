@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"claude-memory/internal/config"
 	"claude-memory/internal/record"
@@ -19,6 +20,13 @@ type Service struct {
 	clock             Clock
 	cfg               *config.Config
 	namespace         string
+
+	// Staleness checking (all optional; see staleness.go).
+	history       CodeHistory
+	checkout      *Checkout
+	pinnedHead    string
+	staleCeiling  time.Duration
+	staleDeadline time.Time
 }
 
 // DefaultNamespace is used when no namespace is configured or resolvable:
@@ -130,6 +138,8 @@ func (s *Service) Search(ctx context.Context, req *SearchRequest) (*SearchResult
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
+
+	s.annotateStale(ctx, result.Records)
 
 	return result, nil
 }
