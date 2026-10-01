@@ -1,0 +1,67 @@
+# claude-memory server stack: Postgres 16 + pgvector only (topology B).
+# Embeddings and the MCP server run on the laptop; this host only stores data.
+#
+# Network: host networking, Postgres listens ONLY on 127.0.0.1 and the host's
+# Tailscale IP (POSTGRES_BIND_IP). No docker-proxy, so pg_hba.conf sees the real
+# client address and rejects anything outside the tailnet range 100.64.0.0/10.
+# (With published ports, docker-proxy rewrote the source to 172.x and pg_hba
+# rejected every laptop connection — observed 2026-10-01.)
+# With host networking UFW applies as usual: allow 5432 only on tailscale0.
+# Requires net.ipv4.ip_nonlocal_bind=1 on the host (see DEPLOY.md), otherwise a
+# boot where Postgres starts before Tailscale silently skips the Tailscale IP.
+
+name: claude-memory
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: claude-memory-postgres
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=peer"
+      # Consumed only by initdb/01-app-role.sh on first start (empty data dir).
+      APP_DB_NAME: ${APP_DB_NAME:-claude_memory}
+      APP_DB_USER: ${APP_DB_USER:-claude_memory}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD}
+    command:
+      - postgres
+      - -c
+      - listen_addresses=127.0.0.1,${POSTGRES_BIND_IP:?set POSTGRES_BIND_IP to the Tailscale IP}
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - password_encryption=scram-sha-256
+      # Sized for a 512 MiB container on a shared host.
+      - -c
+      - max_connections=20
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - log_connections=on
+      - -c
+      - log_disconnections=on
+    volumes:
+      # Data on the SSD: tiny DB, latency-sensitive (HNSW/GIN lookups).
+      - /var/lib/claude-memory/pgdata:/var/lib/postgresql/data
+      - ./pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    shm_size: 128m
+    mem_limit: 512m
+    cpus: 1.0
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

@@ -1,0 +1,9 @@
+[Unit]
+Description=claude-memory Postgres backup
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/mnt/data
+
+[Service]
+Type=oneshot
+ExecStart=/opt/claude-memory/deploy/backup.sh
