@@ -190,6 +190,97 @@ func TestScrubTitle(t *testing.T) {
 	}
 }
 
+// --- False-positive checks for the "Azure DevOps PAT" patterns (AC-38/39) ---
+//
+// DefaultPatterns now matches two specific Azure DevOps PAT shapes instead
+// of the old over-broad `[A-Za-z0-9+/]{50,}={0,2}(?:\s|$)` (any run of 50+
+// letters/digits/+// with no secret-specific anchor): a classic 52-char
+// base32-lowercase ([a-z2-7]) token, and a new-format 84-char token ending
+// in a literal "AZDO" marker. The following two tests prove neither pattern
+// redacts clearly non-secret content a real memory record is likely to
+// contain (a long nested file path, and a long hex-only identifier such as
+// a trace/request id) — both contain digits (0/1/8/9) or uppercase letters
+// that fall outside the classic pattern's restricted charset, and neither
+// contains the "AZDO" anchor the new-format pattern requires.
+
+func TestScrub_LongFilePath_NotRedacted(t *testing.T) {
+	s := New()
+	// A realistic deep repo path with no secret in it at all.
+	input := "See /Users/me/work/acme/clientinternalpackagenamesubpackagefile for the fix."
+	result := s.Scrub(input)
+
+	if result.Redacted {
+		t.Errorf("a plain file path was redacted as if it were a secret: %q", result.Text)
+	}
+}
+
+func TestScrub_LongHexIdentifier_NotRedacted(t *testing.T) {
+	s := New()
+	// A long hex-only identifier (e.g. a trace/request id), not a secret.
+	input := "the trace id is 4f8c2a1e9b7d3c6f0a2e8b1d4c7f9a3e6b2d8c1f4a7e0b3d6f9c2a5e8b1d4f7c0a3"
+	result := s.Scrub(input)
+
+	if result.Redacted {
+		t.Errorf("a non-secret hex identifier was redacted as if it were a secret: %q", result.Text)
+	}
+}
+
+func TestScrub_AzureDevOpsPAT_Classic(t *testing.T) {
+	s := New()
+	// Synthetic classic-format Azure DevOps PAT: 52 chars, lowercase a-z + 2-7.
+	pat := "hbrpoigf3cbfnobm2o4rak3vrjnvgfygwwqc5hyfsxmecosfogyr"
+	input := "AZURE_DEVOPS_PAT=" + pat
+	result := s.Scrub(input)
+
+	if !result.Redacted {
+		t.Fatalf("expected classic Azure DevOps PAT to be redacted, got: %s", result.Text)
+	}
+	if !strings.Contains(result.Text, "***AZDO_PAT_REDACTED***") {
+		t.Errorf("expected AZDO_PAT_REDACTED placeholder, got: %s", result.Text)
+	}
+	if strings.Contains(result.Text, pat) {
+		t.Errorf("PAT should be redacted, still found in: %s", result.Text)
+	}
+}
+
+func TestScrub_AzureDevOpsPAT_NewFormat(t *testing.T) {
+	s := New()
+	// Synthetic new-format Azure DevOps PAT: 76-char alphanumeric body +
+	// literal "AZDO" marker + 4-char alphanumeric suffix (84 chars total).
+	pat := "DO1xkxwnQrS7RPeMOkIUpkDyr7OSJoRu1XXdo0cZuzren68K4TunPFz46PDjqipVJIqVLB5LzxoiAZDOGFfW"
+	input := "token: " + pat
+	result := s.Scrub(input)
+
+	if !result.Redacted {
+		t.Fatalf("expected new-format Azure DevOps PAT to be redacted, got: %s", result.Text)
+	}
+	if !strings.Contains(result.Text, "***AZDO_PAT_REDACTED***") {
+		t.Errorf("expected AZDO_PAT_REDACTED placeholder, got: %s", result.Text)
+	}
+	if strings.Contains(result.Text, pat) {
+		t.Errorf("PAT should be redacted, still found in: %s", result.Text)
+	}
+}
+
+// TestScrub_URLsAndGitSHAsNotRedacted is a (currently passing) safety-net
+// regression test: a git SHA alone is well under the 50-char AZDO-PAT
+// floor, and a typical URL's dots break up the contiguous
+// [A-Za-z0-9+/]{50,} run, so neither should trip any pattern. If this ever
+// starts failing, scrub has gotten even more over-broad.
+func TestScrub_URLsAndGitSHAsNotRedacted(t *testing.T) {
+	s := New()
+	cases := []string{
+		"commit abc123def456abc123def456abc123def456abc1 was the fix",
+		"see https://github.com/golang/go/blob/master/src/net/http/server.go for details",
+	}
+	for _, input := range cases {
+		result := s.Scrub(input)
+		if result.Redacted {
+			t.Errorf("expected no redaction for %q, got %q", input, result.Text)
+		}
+	}
+}
+
 func TestScrubContent(t *testing.T) {
 	s := New()
 	input := "The database connection is postgres://user:pass@host/db"

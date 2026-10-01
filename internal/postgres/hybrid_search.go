@@ -12,9 +12,30 @@ import (
 
 const rffK = 60 // Reciprocal Rank Fusion constant
 
+// statusTieBreak is the SQL sort key that puts an active record ahead of a
+// candidate one when they are otherwise equally relevant (AC-4: "rank
+// candidate records lower than active"). It is applied as a secondary sort
+// key — inside each RRF component ranking (so identical distance/ts_rank
+// gives the active record the better component rank) and in the final
+// ORDER BY — never as a multiplier on the fused score.
+//
+// Why not a multiplier: RRF scores are rank-compressed (1/(60+1) = 0.01639
+// vs 1/(60+10) = 0.01429, only ~13% apart), so a 0.85 candidate factor
+// (the previous approach) was equivalent to demoting a candidate by ~11
+// rank positions — it pushed a candidate with cosine 0.67-0.72 (the
+// clearly correct answer) below active records at cosine 0.35-0.50
+// (measured on bge-m3, eval paraphrase_005/_006, 2026-10-01).
+// Score and Similarity are therefore left unweighted: Score is the plain
+// RRF/ts_rank value and Similarity the raw cosine that AC-15/AC-32
+// thresholds compare against.
+const statusTieBreak = "(CASE WHEN r.status = 'active' THEN 0 ELSE 1 END)"
+
 // searchHybridRRF performs a hybrid search using Reciprocal Rank Fusion
 // to combine vector (semantic) and full-text (keyword) ranking.
 // The embedding must be non-nil and of length > 0.
+// Uses the `<=>` cosine-distance operator (matching the records.embedding
+// HNSW index, built WITH vector_cosine_ops) so Similarity = 1 - cosine
+// distance is true cosine similarity, and so ANN index lookups are used.
 func (s *Store) searchHybridRRF(
 	ctx context.Context,
 	query string,
@@ -55,21 +76,21 @@ func (s *Store) searchHybridRRF(
 		WITH vector_ranks AS (
 			SELECT
 				id,
-				ROW_NUMBER() OVER (ORDER BY embedding <-> $1) as vector_rank
-			FROM records
+				ROW_NUMBER() OVER (ORDER BY embedding <=> $1, %s, id) as vector_rank
+			FROM records r
 			WHERE (repo = $2 OR repo = '*')
 				%s
 		),
 		fts_ranks AS (
 			SELECT
 				id,
-				ROW_NUMBER() OVER (ORDER BY ts_rank(tsvector_content, plainto_tsquery('simple', $3)) DESC) as fts_rank
-			FROM records
+				ROW_NUMBER() OVER (ORDER BY ts_rank(tsvector_content, plainto_tsquery('simple', $3)) DESC, %s, id) as fts_rank
+			FROM records r
 			WHERE (repo = $2 OR repo = '*')
 				AND tsvector_content @@ plainto_tsquery('simple', $3)
 				%s
 		)
-		SELECT DISTINCT
+		SELECT
 			r.id,
 			r.kind,
 			r.title,
@@ -79,16 +100,16 @@ func (s *Store) searchHybridRRF(
 			r.confidence,
 			(1.0 / (%d + COALESCE(v.vector_rank, 1e9)) +
 			 1.0 / (%d + COALESCE(f.fts_rank, 1e9))) as rrf_score,
-			(1.0 - (r.embedding <-> $1)) as similarity
+			COALESCE(1.0 - (r.embedding <=> $1), 0) as similarity
 		FROM records r
 		LEFT JOIN vector_ranks v ON r.id = v.id
 		LEFT JOIN fts_ranks f ON r.id = f.id
 		WHERE (r.repo = $2 OR r.repo = '*')
 			%s
 			AND (v.id IS NOT NULL OR f.id IS NOT NULL)
-		ORDER BY rrf_score DESC
+		ORDER BY rrf_score DESC, %s, similarity DESC, r.id
 		LIMIT $%d
-	`, whereClause, whereClause, rffK, rffK, whereClause, baseArgCount)
+	`, statusTieBreak, whereClause, statusTieBreak, whereClause, rffK, rffK, whereClause, statusTieBreak, baseArgCount)
 
 	args = append(args, limit)
 
@@ -179,13 +200,13 @@ func (s *Store) searchFullTextOnly(
 			status,
 			confidence,
 			ts_rank(tsvector_content, plainto_tsquery('simple', $1)) as score
-		FROM records
+		FROM records r
 		WHERE (repo = $2 OR repo = '*')
 			AND tsvector_content @@ plainto_tsquery('simple', $1)
 			%s
-		ORDER BY score DESC
+		ORDER BY score DESC, %s, id
 		LIMIT $%d
-	`, whereClause, baseArgCount)
+	`, whereClause, statusTieBreak, baseArgCount)
 
 	args = append(args, limit)
 

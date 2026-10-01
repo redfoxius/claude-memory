@@ -1,3 +1,6 @@
 deploy/.env
 *.dump
 /bin/
+/claude-memory
+*.test
+.idea/

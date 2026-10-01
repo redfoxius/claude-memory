@@ -35,10 +35,14 @@ func New(client *http.Client, baseURL, model string, maxTokens int) *Embedder {
 
 // embedRequest is the request body for the Ollama /api/embed endpoint.
 type embedRequest struct {
-	Model   string      `json:"model"`
-	Input   string      `json:"input"`
-	Truncate bool       `json:"truncate"`
-	Options embedOptions `json:"options"`
+	Model    string       `json:"model"`
+	Input    string       `json:"input"`
+	Truncate bool         `json:"truncate"`
+	Options  embedOptions `json:"options"`
+	// KeepAlive -1 keeps the model loaded indefinitely. Set per request
+	// because the brew-managed Ollama service regenerates its plist on
+	// `brew services restart`/upgrade, dropping any OLLAMA_KEEP_ALIVE edit.
+	KeepAlive int `json:"keep_alive"`
 }
 
 // embedOptions configures embedding truncation and context size.
@@ -65,9 +69,10 @@ func (e *Embedder) Embed(ctx context.Context, text string, maxTokens int) ([]flo
 
 	// Build the request body.
 	body := embedRequest{
-		Model:    e.model,
-		Input:    text,
-		Truncate: true,
+		Model:     e.model,
+		Input:     text,
+		Truncate:  true,
+		KeepAlive: -1,
 		Options: embedOptions{
 			NumCtx:   maxTokens,
 			NumBatch: maxTokens,

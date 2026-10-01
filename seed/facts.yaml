@@ -1,0 +1,212 @@
+# Seed facts for claude-memory (WI-17).
+#
+# Loaded via `claude-memory seed --file seed/facts.yaml`, which stores each
+# entry through the normal memory.Service.Store write path (source=inline)
+# -- the same dedup/scrub/embedding logic as any memory_store call, no
+# bypass. Re-running this file against an already-seeded database should
+# resolve near-verbatim repeats to NOOP/UPDATE rather than duplicate ADDs
+# (AC-16).
+#
+# Fields: kind (pattern|decision|gotcha|convention), title, content
+# (markdown), repo (a specific repo name, or "*" for cross-repo), tags.
+facts:
+  - kind: gotcha
+    title: "Kubernetes label values cap branch-derived version strings at 63 bytes"
+    content: |
+      The shared `acme/devops-pipelines` template builds the release version
+      from the branch name: `<semver>-<branch with "/" -> "-">.<build N>`,
+      e.g. `0.20.2-task-PRJ-218-add-seller-return-decision-endpoint.23`
+      (58 chars). That value becomes `Build.BuildNumber`, which goes into
+      the `ver:` labels in `k8s/*.yaml`. Kubernetes caps label values at 63
+      bytes, so a longer branch name makes the release's "Setup k8s" step
+      fail with `metadata.labels: Invalid value ... must be no more than 63
+      bytes`, and re-running the pipeline never helps -- only renaming the
+      branch (which means a new PR, since Azure DevOps can't change a PR's
+      source branch) fixes it. Keep branch names at roughly 50 characters
+      or fewer. Example that had to be renamed:
+      `task/PRJ-216/add-partner-and-checkup-statuses-to-internal-endpoint`
+      (75-char version) -> `task/PRJ-216/add-partner-checkup-statuses`.
+    repo: "*"
+    tags: [k8s, ci, branch-naming, azure-devops]
+
+  - kind: convention
+    title: "Branch naming convention across acme/ repos"
+    content: |
+      New branches follow `<type>/<TICKET-KEY>/<short-description>`, where
+      `<type>` comes from the ticket's real issue type (task, bugfix,
+      feature, hotfix -- check the actual field, don't assume), `<TICKET-
+      KEY>` is the exact ticket key as-is (e.g. `PRJ-130`), and
+      `<short-description>` is a short lowercase-kebab-case summary of the
+      change itself, not a restatement of the ticket title. Keep the whole
+      branch name at about 50 characters or fewer (see the k8s 63-byte
+      label gotcha for why).
+    repo: "*"
+    tags: [branch-naming, git, azure-devops]
+
+  - kind: convention
+    title: "billing-service branches from and opens PRs into master, not develop"
+    content: |
+      Exception to the shared acme/ default: in billing-service, feature
+      branches are cut from `master` and pull requests are opened into
+      `master`. Every other acme/ repo (catalog-service, orders-service,
+      admin-dashboard, inventory-service, etc.) defaults to branching
+      from and opening PRs into `develop` unless its own CLAUDE.md
+      documents a different exception. When unsure whether a repo is an
+      exception, default to `develop`.
+    repo: billing-service
+    tags: [git, pull-request, branching]
+
+  - kind: decision
+    title: "DECLINED/DECLINED is terminal in billing-service; the ERP lock is intended"
+    content: |
+      A return in `DECLINED` partner-status with `DECLINED` merchant-status
+      is a terminal state in billing-service. The lock that blocks ERP from
+      writing further updates into that state is intentional behavior, not
+      a bug -- do not "fix" it by loosening the lock without re-confirming
+      the decision with the owner first.
+    repo: billing-service
+    tags: [lifecycle, erp, returns]
+
+  - kind: convention
+    title: "Written artifacts at acme/ are Russian or English, never Ukrainian"
+    content: |
+      Jira/Azure DevOps ticket descriptions and comments, PR descriptions,
+      commit messages, code comments, and docs across every acme/ repo
+      are written in Russian or English only, never Ukrainian -- regardless
+      of what language the conversation with an assistant happens to be
+      conducted in.
+    repo: "*"
+    tags: [documentation, convention]
+
+  - kind: pattern
+    title: "SDD pipeline file layout: docs/specs/<feature-slug>/01..07"
+    content: |
+      Every acme/ repo doing Spec-Driven Development puts a feature's
+      whole pipeline output in one directory at the repo root:
+      `docs/specs/<feature-slug>/01-spec.md` (spec-creator),
+      `02-plan.md` (implementation-planner), `03-plan-review.md`
+      (plan-reviewer, overwritten on re-review), `04-implementation-
+      report.md` (implementer), `05-test-report.md` (test-writer),
+      `06-architecture-review.md` (architecture-reviewer), `07-
+      verification.md` (plan-verifier). A repo with real internal
+      sub-modules nests under `docs/specs/<module>/<feature-slug>/`
+      instead. A request with no real requirements ambiguity skips
+      straight to `docs/<feature-slug>-plan.md` at the docs root (not
+      under `docs/specs/`) instead of running spec-creator.
+    repo: "*"
+    tags: [sdd, documentation, process]
+
+  - kind: gotcha
+    title: "Ollama silently truncates embedding input at num_batch (default 2048), not the model's context window"
+    content: |
+      Verified 2026-10-01 on Ollama 0.35 / M1 Pro against bge-m3 (8192-token
+      context): the effective input cap for `/api/embed` is `options.
+      num_batch` (default 2048), not the model's own context length.
+      Without passing `num_batch` explicitly, input longer than 2048 tokens
+      is silently cut -- no error, just a truncated embedding computed from
+      the head of the text. `truncate: false` instead returns an explicit
+      "input length exceeds the context length" error, which is at least
+      loud. Always pass both `truncate: true` and
+      `options: {num_ctx: N, num_batch: N}` with the same N
+      (claude-memory's MEMORY_EMBED_MAX_TOKENS) so truncation is an
+      explicit, configured decision rather than an invisible default.
+      Truncation itself keeps the leading tokens (same head + different
+      tail -> cosine 1.0). Cost scales roughly linearly: 2048 tokens ~0.6s,
+      4096 ~3.4s, 8192 ~8.0s on an M1 Pro.
+    repo: claude-memory
+    tags: [ollama, embedding, bge-m3]
+
+  - kind: gotcha
+    title: "Default brew-managed Ollama unloads the model after 5 minutes idle"
+    content: |
+      `OLLAMA_KEEP_ALIVE` defaults to `5m`: an idle model is evicted from
+      memory after 5 minutes, so the next request pays a cold-load penalty.
+      For a latency-sensitive caller like claude-memory's UserPromptSubmit
+      hook (p95 budget 300ms), that cold load alone can blow the budget.
+      Fix: send `"keep_alive": -1` with each /api/embed request (claude-memory
+      does this). Editing OLLAMA_KEEP_ALIVE into the brew LaunchAgent plist
+      does not persist: `brew services restart` and `brew upgrade`
+      regenerate it.
+    repo: claude-memory
+    tags: [ollama, performance, launchd]
+
+  - kind: gotcha
+    title: "Docker bridge networking rewrites the client source IP, breaking pg_hba's Tailscale-range check"
+    content: |
+      Confirmed 2026-10-01: with the default bridge network and published
+      ports, Docker's docker-proxy component rewrites the source IP of
+      incoming connections from the real client (laptop's Tailscale IP,
+      100.x) to an internal docker bridge address (172.x) before Postgres
+      ever sees it. `pg_hba.conf` restricted to the Tailscale CGNAT range
+      (100.64.0.0/10) then rejects every laptop connection, because it
+      never sees the real 100.x source. Fix: use `network_mode: host` in
+      docker-compose so Postgres binds directly to the host's Tailscale
+      interface, bypassing docker-proxy and preserving the real client IP.
+    repo: claude-memory
+    tags: [docker, postgres, networking, tailscale]
+
+  - kind: gotcha
+    title: "net.ipv4.ip_nonlocal_bind=1 is required to bind Postgres to a Tailscale IP before boot assigns it"
+    content: |
+      Postgres (via host networking) binds to the server's Tailscale IP
+      directly. If Postgres starts before Tailscale has assigned that IP
+      to any interface on boot, the bind fails silently. Setting the
+      kernel parameter `net.ipv4.ip_nonlocal_bind=1` (persisted in
+      /etc/sysctl.d/) lets the kernel accept a bind to an IP not yet
+      present on any interface; Tailscale assigns it moments later and the
+      bind becomes live without a restart.
+    repo: claude-memory
+    tags: [postgres, tailscale, networking, systemd]
+
+  - kind: gotcha
+    title: "pgvector: <=> is cosine distance, <-> is L2 -- the HNSW cosine index only accelerates <=>"
+    content: |
+      pgvector's `<=>` operator is cosine distance (1 - cosine similarity);
+      `<->` is Euclidean (L2) distance. An HNSW index built `WITH
+      (vector_cosine_ops)` is only used by planner for `ORDER BY embedding
+      <=> $1` -- using `<->` against that same index either falls back to
+      a sequential scan or silently ranks by the wrong metric. claude-
+      memory's hybrid search always orders by `<=>` and derives
+      Similarity = 1 - distance from it, matching the index's op class.
+    repo: claude-memory
+    tags: [postgres, pgvector, sql]
+
+  - kind: pattern
+    title: "Postgres CTEs sharing one WHERE fragment need matching table aliases"
+    content: |
+      claude-memory's hybrid search builds one `whereClause` string
+      (referencing columns as `r.status`, `r.kind`, `r.tags`) and splices
+      it into two separate CTEs (`vector_ranks`, `fts_ranks`), each
+      querying `FROM records r` with its own `r` alias. Because both CTEs
+      alias the table identically, the same WHERE fragment string works
+      unmodified in both places -- if one CTE used a different alias (or
+      none), the shared fragment would either fail to parse or silently
+      filter on the wrong table reference.
+    repo: claude-memory
+    tags: [postgres, sql, pgvector]
+
+  - kind: decision
+    title: "Topology B: Ollama and the MCP process run on the laptop, not the server"
+    content: |
+      AC-44 smoke test (2026-10-01): the home server (Mac Mini 2012,
+      AVX-only CPU, no AVX2) runs bge-m3 embeddings at ~17ms/token
+      (linear) -- 12-60x slower than the laptop's Metal-accelerated
+      Ollama (M1 Pro). That gap motivated moving Ollama and the claude-
+      memory MCP process off the server entirely onto the laptop; the
+      server is reduced to Postgres + pgvector only, reachable solely over
+      Tailscale with scram-sha-256 password auth replacing the earlier
+      bearer-token MCP auth design.
+    repo: claude-memory
+    tags: [architecture, ollama, performance]
+
+  - kind: convention
+    title: "Postgres DSN with password comes only from env or a 0600 local file, never from repo files"
+    content: |
+      MEMORY_PG_DSN is read from the process environment or from
+      ~/.config/claude-memory/env (mode 0600, never committed);
+      config.LoadFromFile refuses to load that file at all if it is
+      group- or world-readable. The DSN is never logged, never hardcoded
+      in a repo file, and never passed as a plaintext CLI flag that would
+      show up in `claude mcp list` or shell history.
+    repo: claude-memory
+    tags: [security, postgres, secrets]

@@ -1,0 +1,316 @@
+# Claude Memory Deployment
+
+## Topology B (v0.2)
+
+**Laptop** (macOS, arm64): Ollama + `bge-m3` (Homebrew, Metal GPU), `claude-memory` MCP server (stdio), and all CLI subcommands. Embedding and extraction run locally; all data writes reach the server over Tailscale. **Server** (home Mac Mini/Ubuntu 26.04): Postgres 16 + pgvector only, bound to Tailscale IP, reachable only via password auth (scram-sha-256) and network-restricted to `100.64.0.0/10` CGNAT. No Ollama, no MCP listener on the server. This topology is why we measure acceptable performance on the laptop (12–60× faster than server's AVX-only CPU); see AC-44 baseline below.
+
+## Server Prerequisites
+
+- **Docker CE**: Installed with `data-root` set to `/mnt/data/docker` (in `/etc/docker/daemon.json`: `{"data-root": "/mnt/data/docker", "ip": "127.0.0.1"}`). Restart daemon to apply.
+- **Tailscale**: Already running (`tailscale up`). Confirm with `tailscale ip -4` (returns your server's Tailscale IP, e.g., `100.64.0.10`).
+- **UFW firewall**: Allow Postgres on Tailscale interface only: `sudo ufw allow in on tailscale0 to any port 5432`. (Host networking means `ufw` rules apply; docker-proxy is not used.)
+- **Kernel setting**: `sudo sysctl net.ipv4.ip_nonlocal_bind=1` and persist to `/etc/sysctl.d/60-claude-memory.conf` with:
+  ```
+  net.ipv4.ip_nonlocal_bind = 1
+  ```
+  Why: Postgres binds to the Tailscale IP via host networking. If Postgres starts before Tailscale has assigned that IP on bootup, the bind fails silently without this flag. With it, the kernel allows binding to an IP not yet present on any interface; Tailscale assigns it later, and the bind becomes live.
+- **Data directories** (owned by root, created once):
+  ```bash
+  sudo mkdir -p /var/lib/claude-memory/pgdata
+  sudo chmod 0700 /var/lib/claude-memory/pgdata
+  sudo chown 999:999 /var/lib/claude-memory/pgdata
+  
+  sudo mkdir -p /mnt/data/backups/claude-memory
+  sudo chmod 0755 /mnt/data/backups/claude-memory
+  ```
+  The `999:999` UID/GID is the postgres user inside the container; full permissions (`0700`) are required.
+
+## Installation
+
+1. **Clone the repo** into `/opt/claude-memory`:
+   ```bash
+   sudo git clone https://github.com/your-org/claude-memory.git /opt/claude-memory
+   sudo chown -R your-user:your-group /opt/claude-memory
+   ```
+
+2. **Create `.env`** from the example:
+   ```bash
+   cd /opt/claude-memory
+   cp deploy/.env.example deploy/.env
+   chmod 600 deploy/.env
+   ```
+   Edit `deploy/.env` and fill in:
+   - `POSTGRES_BIND_IP`: Run `tailscale ip -4` and copy the IPv4 address (e.g., `100.64.0.10`).
+   - `POSTGRES_PASSWORD`: Generate with `openssl rand -base64 32`. Store securely; you will not need it again after initial setup (laptops use the app role instead).
+   - `APP_DB_PASSWORD`: Generate with `openssl rand -base64 32`. Store this; you will need it on the laptop.
+
+3. **Start the container**:
+   ```bash
+   cd /opt/claude-memory
+   docker compose up -d
+   ```
+
+4. **Verify health**:
+   ```bash
+   docker compose ps
+   # Output: claude-memory-postgres should show status "Up ... (healthy)"
+   
+   ss -tlnp | grep 5432
+   # Output: tcp LISTEN  127.0.0.1:5432 and <POSTGRES_BIND_IP>:5432
+   # (no 172.x or docker-proxy entries)
+   
+   docker compose logs postgres | grep "connection authorized"
+   # Output: Should show "connection authorized: user=claude_memory database=claude_memory hostaddr=100.x..."
+   # (the laptop's Tailscale address)
+   ```
+
+## Why Host Networking
+
+The `docker-compose.yml` uses `network_mode: host` instead of the default bridge network. Reason: with bridge networking and published ports, Docker's `docker-proxy` component rewrites the source IP of incoming connections from the laptop (real Tailscale IP `100.x`) to an internal docker bridge range (`172.x`). Postgres's `pg_hba.conf` is configured to accept only the Tailscale CGNAT range `100.64.0.0/10`, so every laptop connection was rejected after source rewriting.
+
+Host networking bypasses docker-proxy entirely, preserving the real client IP (your laptop's Tailscale IP), which `pg_hba.conf` validates correctly. Confirmed 2026-10-01: published ports → rejected connections; host networking → accepted connections.
+
+## Resource Limits & Restart
+
+The container is configured with:
+- **Memory**: `512 MiB` limit
+- **CPU**: `1.0` (one core)
+- **Restart policy**: `unless-stopped` (auto-restart on crash or server reboot)
+- **Healthcheck**: `pg_isready -U postgres -d postgres -h 127.0.0.1` every 10s (5s timeout, 5 retries, 20s start grace period)
+
+These limits leave ample headroom for pre-existing host services (game server, Node/PM2 app, MongoDB, Redis, Caddy) on the 7.2 GiB home server. Verify with `docker stats postgres` over a 24-hour window; there should be no OOM-kill or sustained CPU throttle.
+
+## Laptop Side Configuration
+
+1. **Install `libpq`** (for manual `psql` verification):
+   ```bash
+   brew install libpq
+   ```
+
+2. **Create `~/.config/claude-memory/env`** (mode 0600, never committed):
+   ```bash
+   mkdir -p ~/.config/claude-memory
+   cat > ~/.config/claude-memory/env <<'EOF'
+   export MEMORY_PG_DSN="postgresql://claude_memory:<APP_DB_PASSWORD>@<POSTGRES_BIND_IP>:5432/claude_memory"
+   export MEMORY_OLLAMA_URL="http://127.0.0.1:11434"
+   export MEMORY_EMBED_MAX_TOKENS="2048"
+   EOF
+   chmod 600 ~/.config/claude-memory/env
+   ```
+   
+   Replace:
+   - `<APP_DB_PASSWORD>`: The password you generated for `APP_DB_PASSWORD` on the server.
+   - `<POSTGRES_BIND_IP>`: The server's Tailscale IP (e.g., `100.64.0.10`).
+
+3. **Verify connectivity**:
+   ```bash
+   source ~/.config/claude-memory/env
+   psql "$MEMORY_PG_DSN" -c "SELECT version();"
+   # Output: PostgreSQL 16.x ...
+   ```
+   If this fails, check:
+   - Tailscale is up on both laptop and server (`tailscale status`).
+   - Password is correct.
+   - Server firewall allows 5432 on tailscale0 (`ufw show added`).
+
+## Backups
+
+### Daily Systemd Timer (Server)
+
+The backup runs daily at **04:30 UTC** (plus a random 15-minute jitter to avoid thundering herd). Install the systemd files:
+
+```bash
+sudo cp /opt/claude-memory/deploy/systemd/claude-memory-backup.service \
+  /etc/systemd/system/
+
+sudo cp /opt/claude-memory/deploy/systemd/claude-memory-backup.timer \
+  /etc/systemd/system/
+
+sudo systemctl daemon-reload
+sudo systemctl enable claude-memory-backup.timer
+sudo systemctl start claude-memory-backup.timer
+```
+
+Verify:
+```bash
+sudo systemctl status claude-memory-backup.timer
+sudo systemctl list-timers claude-memory-backup.timer
+```
+
+### Manual Backup Run (Server)
+
+```bash
+/opt/claude-memory/deploy/backup.sh
+# Output: backup ok: /mnt/data/backups/claude-memory/claude_memory-20261001T043015Z.dump (1.2 M)
+```
+
+The backup uses `pg_dump -Fc` (custom binary format, ~14-day retention). Backups are stored in `/mnt/data/backups/claude-memory/` with timestamp naming (`claude_memory-YYYYMMDDTHHMMSSZ.dump`).
+
+### Restore from Backup (Server)
+
+To restore from a backup file (e.g., after accidental data loss):
+
+1. **Stop the container**:
+   ```bash
+   docker compose down
+   ```
+
+2. **Drop and recreate the application database**:
+   ```bash
+   docker compose up -d
+   docker exec -u postgres claude-memory-postgres psql -d postgres \
+     -c "DROP DATABASE IF EXISTS claude_memory;"
+   docker exec -u postgres claude-memory-postgres psql -d postgres \
+     -c "CREATE DATABASE claude_memory OWNER claude_memory; REVOKE ALL ON DATABASE claude_memory FROM PUBLIC;"
+   docker exec -u postgres claude-memory-postgres psql -d claude_memory \
+     -c "CREATE EXTENSION IF NOT EXISTS vector; GRANT ALL ON SCHEMA public TO claude_memory;"
+   ```
+
+3. **Restore from the backup file**:
+   ```bash
+   docker exec -u postgres claude-memory-postgres pg_restore -d claude_memory \
+     --no-owner --role=claude_memory \
+     < /mnt/data/backups/claude-memory/claude_memory-20261001T043015Z.dump
+   ```
+
+4. **Verify**:
+   ```bash
+   docker exec -u postgres claude-memory-postgres psql -d claude_memory \
+     -c "SELECT COUNT(*) FROM record;"
+   # Output: Should show the number of records from the backup.
+   ```
+
+The flags `--no-owner --role=claude_memory` ensure the restored objects are owned by the application role (not by `postgres`).
+
+## Upgrade
+
+```bash
+cd /opt/claude-memory
+git pull
+docker compose pull
+docker compose up -d
+```
+
+The container restarts and runs any new migrations on startup (via `docker-entrypoint-initdb.d` on the first start; existing databases are not re-initialized).
+
+### Major Postgres Version Upgrade (if needed in the future)
+
+Postgres major-version upgrades (e.g., 16 → 17) require a dump and restore because the on-disk format changes:
+
+```bash
+# Backup the current database
+/opt/claude-memory/deploy/backup.sh
+
+# Update the image in docker-compose.yml to the new version
+# (e.g., pgvector/pgvector:pg17), then:
+
+docker compose down
+rm -rf /var/lib/claude-memory/pgdata
+docker compose up -d
+# Wait for healthy status
+docker compose logs -f postgres
+
+# Restore from the backup
+docker exec -u postgres claude-memory-postgres pg_restore -d claude_memory \
+  --no-owner --role=claude_memory \
+  < /mnt/data/backups/claude-memory/claude_memory-YYYYMMDDTHHMMSSZ.dump
+```
+
+## Password Rotation
+
+To change the application role password (for the laptop's DSN):
+
+1. **On the server**, generate a new password:
+   ```bash
+   openssl rand -base64 32
+   ```
+
+2. **Update Postgres**:
+   ```bash
+   docker exec -u postgres claude-memory-postgres psql -d postgres \
+     -c "ALTER ROLE claude_memory PASSWORD 'new-password';"
+   ```
+
+3. **On the laptop**, update `~/.config/claude-memory/env`:
+   ```bash
+   # Edit ~/.config/claude-memory/env and change MEMORY_PG_DSN password
+   source ~/.config/claude-memory/env
+   psql "$MEMORY_PG_DSN" -c "SELECT version();"
+   ```
+
+The superuser (`postgres`) password is not used by any client; if you forget it, it can only be reset by stopping the container and restarting with an environment variable override (advanced recovery; document in internal runbooks if needed).
+
+## Performance Baseline (AC-44)
+
+**Measured 2026-10-01** on the topology this spec mandates:
+
+- **Mac Mini 2012 server (AVX-only, Ollama `bge-m3` F16)**: 
+  - 15 tokens: p50 0.23s
+  - 150 tokens: p50 2.3s
+  - 600 tokens: p50 12.3s (~17 ms/token, linear)
+  - RSS 1434 MiB
+
+- **Laptop M1 Pro (native Ollama, Metal GPU)**: 
+  - 15 tokens: 0.02s
+  - 150 tokens: 0.045s
+  - 600 tokens: 0.21s
+  - RSS 673 MB
+  - **12–60× faster** than the server across the range.
+
+This disparity is why Topology B runs Ollama (and the MCP server) on the laptop exclusively. The server runs only Postgres, allowing:
+- Synchronous read-path hook latency budget (AC-30): p95 < 300 ms on the home Tailscale link.
+- Write-path embedding latency (AC-48): p95 < 3 seconds (laptop GPU embedding + tailnet Postgres persistence).
+
+## Security
+
+### Network Isolation (AC-52, AC-54)
+
+- **Postgres binds only to `127.0.0.1` and the server's Tailscale IP** (`100.64.0.10` in this example). No public interface, no `0.0.0.0`.
+- **`pg_hba.conf` restricts connection to**:
+  - `localhost` (peer auth for docker-exec backups/admin).
+  - `127.0.0.1` (healthcheck).
+  - `100.64.0.0/10` (Tailscale CGNAT range; laptops only).
+  - **Everything else is rejected** (explicit `reject` rule for `0.0.0.0/0` and `::/0`).
+- **Authentication**: `scram-sha-256` password auth (salted, hashed; passwords are never stored in plaintext or sent over the wire).
+- **Verify network isolation**:
+  ```bash
+  sudo ss -tlnp | grep 5432
+  # Output should show ONLY 127.0.0.1:5432 and 100.64.0.10:5432
+  # (no 0.0.0.0, no docker-proxy)
+  ```
+
+### Secrets in Environment
+
+- **`.env` file** (`deploy/.env`) is mode `0600` (readable by root and the docker user only). Never committed.
+- **Laptop config** (`~/.config/claude-memory/env`) is mode `0600` (readable by the user only).
+- **Postgres DSN with password** is sourced into the environment on the laptop before invoking `claude-memory` commands, never logged or printed.
+
+### Negative Tests (AC-54, AC-52)
+
+Verify these rejection scenarios to confirm the setup is secure:
+
+1. **Wrong password from laptop**:
+   ```bash
+   # On laptop, in a test shell:
+   export MEMORY_PG_DSN="postgresql://claude_memory:wrong-password@<POSTGRES_BIND_IP>:5432/claude_memory"
+   psql "$MEMORY_PG_DSN" -c "SELECT 1;"
+   # Expected: "fe_sendauth: no password supplied" or "FATAL: password authentication failed"
+   ```
+
+2. **Correct password from a non-Tailscale address** (e.g., the LAN or public IP):
+   ```bash
+   # On a different machine not on the tailnet:
+   psql -h <server-lan-ip> -U claude_memory -d claude_memory
+   # Expected: "could not connect to server" (firewall rejects before pg_hba sees it)
+   # OR if the port is exposed: "FATAL: pg_hba.conf rejects connection" (pg_hba rule mismatch)
+   ```
+
+3. **No password**:
+   ```bash
+   # On laptop:
+   export MEMORY_PG_DSN="postgresql://claude_memory@<POSTGRES_BIND_IP>:5432/claude_memory"
+   psql "$MEMORY_PG_DSN" -c "SELECT 1;"
+   # Expected: "fe_sendauth: no password supplied" or password prompt (depending on psql version)
+   ```
+
+All three should fail cleanly. If they succeed, the server security posture is compromised; re-check `pg_hba.conf`, UFW rules, and Tailscale status.

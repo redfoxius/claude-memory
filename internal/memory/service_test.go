@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -52,15 +53,15 @@ func (m *mockTxStore) Update(ctx context.Context, id string, updates map[string]
 }
 
 type mockStore struct {
-	CreateFunc          func(ctx context.Context, r *record.Record) (*record.Record, error)
-	GetFunc             func(ctx context.Context, id string) (*record.Record, error)
-	UpdateFunc          func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error)
-	SearchFunc          func(ctx context.Context, query string, embedding []float32, repo string, options SearchOptions) (*SearchResult, error)
-	FindCandidatesFunc  func(ctx context.Context, embedding []float32, repo string, limit int) ([]*Candidate, error)
-	ListFunc            func(ctx context.Context, filters ListFilters) ([]*record.Record, error)
-	WithTxFunc          func(ctx context.Context, fn func(tx TxStore) error) error
-	AcquireLockFunc     func(ctx context.Context, repo string, titleHash string) error
-	DeleteCandidatesByTTLFunc func(ctx context.Context, ttlDays int) error
+	CreateFunc                func(ctx context.Context, r *record.Record) (*record.Record, error)
+	GetFunc                   func(ctx context.Context, id string) (*record.Record, error)
+	UpdateFunc                func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error)
+	SearchFunc                func(ctx context.Context, query string, embedding []float32, repo string, options SearchOptions) (*SearchResult, error)
+	FindCandidatesFunc        func(ctx context.Context, embedding []float32, repo string, limit int) ([]*Candidate, error)
+	ListFunc                  func(ctx context.Context, filters ListFilters) ([]*record.Record, error)
+	WithTxFunc                func(ctx context.Context, fn func(tx TxStore) error) error
+	AcquireLockFunc           func(ctx context.Context, repo string, titleHash string) error
+	DeleteCandidatesByTTLFunc func(ctx context.Context, ttlDays int) (int, error)
 }
 
 func (m *mockStore) Create(ctx context.Context, r *record.Record) (*record.Record, error) {
@@ -123,11 +124,11 @@ func (m *mockStore) AcquireLock(ctx context.Context, repo string, titleHash stri
 	return nil
 }
 
-func (m *mockStore) DeleteCandidatesByTTL(ctx context.Context, ttlDays int) error {
+func (m *mockStore) DeleteCandidatesByTTL(ctx context.Context, ttlDays int) (int, error) {
 	if m.DeleteCandidatesByTTLFunc != nil {
 		return m.DeleteCandidatesByTTLFunc(ctx, ttlDays)
 	}
-	return nil
+	return 0, nil
 }
 
 type mockEmbeddingProvider struct {
@@ -165,13 +166,13 @@ func (m *mockClock) Now() time.Time {
 
 func TestService_GetRecord(t *testing.T) {
 	cfg := &config.Config{
-		MaxContentChars:    20000,
-		StoreSimUpdate:     0.92,
-		StoreSimAsk:        0.80,
-		EmbedMaxTokens:     2048,
-		HookSimThreshold:   0.75,
-		HookTimeout:        800 * time.Millisecond,
-		CandidateTTL:       180 * 24 * time.Hour,
+		MaxContentChars:  20000,
+		StoreSimUpdate:   0.92,
+		StoreSimAsk:      0.80,
+		EmbedMaxTokens:   2048,
+		HookSimThreshold: 0.75,
+		HookTimeout:      800 * time.Millisecond,
+		CandidateTTL:     180 * 24 * time.Hour,
 	}
 
 	t.Run("get existing record", func(t *testing.T) {
@@ -303,10 +304,10 @@ func TestService_DeprecateRecord(t *testing.T) {
 
 	t.Run("deprecate existing record", func(t *testing.T) {
 		deprecatedRec := &record.Record{
-			ID:                   "rec1",
-			Status:               record.StatusDeprecated,
-			DeprecationReason:    ptrString("Record is outdated"),
-			CreatedAt:            time.Now(),
+			ID:                "rec1",
+			Status:            record.StatusDeprecated,
+			DeprecationReason: ptrString("Record is outdated"),
+			CreatedAt:         time.Now(),
 		}
 
 		store := &mockStore{
@@ -372,17 +373,30 @@ func TestService_DeprecateRecord(t *testing.T) {
 }
 
 func TestService_UpdateRecord(t *testing.T) {
-	cfg := &config.Config{MaxContentChars: 20000}
+	cfg := &config.Config{MaxContentChars: 20000, EmbedMaxTokens: 2048}
 
 	t.Run("update with new content", func(t *testing.T) {
+		existingRec := &record.Record{
+			ID:      "rec1",
+			Title:   "Original Title",
+			Content: "Original content",
+			Tags:    []string{"tag1", "tag2"},
+			Status:  record.StatusActive,
+		}
 		updatedRec := &record.Record{
 			ID:      "rec1",
-			Title:   "Updated Title",
+			Title:   "Original Title",
 			Content: "Updated content",
 			Status:  record.StatusActive,
 		}
 
 		store := &mockStore{
+			GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
+				if id == "rec1" {
+					return existingRec, nil
+				}
+				return nil, ErrNotFound
+			},
 			UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 				if id == "rec1" {
 					return updatedRec, nil
@@ -406,6 +420,22 @@ func TestService_UpdateRecord(t *testing.T) {
 
 		if result.Content != newContent {
 			t.Errorf("expected content %q, got %q", newContent, result.Content)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		store := &mockStore{
+			GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
+				return nil, ErrNotFound
+			},
+		}
+
+		svc := New(store, &mockEmbeddingProvider{}, &mockScrubber{}, &mockClock{}, cfg)
+
+		newContent := "doesn't matter"
+		_, err := svc.UpdateRecord(context.Background(), &UpdateRequest{ID: "missing", Content: &newContent})
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("AC-10: expected ErrNotFound, got %v", err)
 		}
 	})
 }
@@ -436,6 +466,294 @@ func TestService_FindCandidates(t *testing.T) {
 			t.Errorf("expected %d candidates, got %d", len(candidates), len(result))
 		}
 	})
+}
+
+// TestService_Search_PassesEmbeddingToStore is a regression test for the
+// hybrid-search bug where Search computed a query embedding but a bug
+// elsewhere (postgres hybrid_search.go's CTE alias error) silently
+// degraded every search to full-text-only. This test pins the contract at
+// the memory.Service layer: when the embedding provider succeeds, Search
+// must hand the resulting non-nil embedding to Store.Search rather than
+// dropping it (which would force every search into the degraded,
+// Similarity-always-0 full-text-only path).
+func TestService_Search_PassesEmbeddingToStore(t *testing.T) {
+	cfg := &config.Config{MaxContentChars: 20000}
+
+	wantEmbedding := make([]float32, 1024)
+	for i := range wantEmbedding {
+		wantEmbedding[i] = float32(i) / 1024.0
+	}
+
+	var gotEmbedding []float32
+	var searchCalled bool
+
+	store := &mockStore{
+		SearchFunc: func(ctx context.Context, query string, embedding []float32, repo string, options SearchOptions) (*SearchResult, error) {
+			searchCalled = true
+			gotEmbedding = embedding
+			return &SearchResult{Records: []*SearchRecord{}}, nil
+		},
+	}
+
+	embedProvider := &mockEmbeddingProvider{
+		EmbedFunc: func(ctx context.Context, text string, maxTokens int) ([]float32, error) {
+			return wantEmbedding, nil
+		},
+	}
+
+	svc := New(store, embedProvider, &mockScrubber{}, &mockClock{}, cfg)
+
+	_, err := svc.Search(context.Background(), &SearchRequest{Query: "some paraphrase query"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !searchCalled {
+		t.Fatal("expected Store.Search to be called")
+	}
+
+	if gotEmbedding == nil {
+		t.Fatal("expected Store.Search to receive a non-nil embedding when the embedding provider succeeds")
+	}
+
+	if len(gotEmbedding) != len(wantEmbedding) {
+		t.Fatalf("expected embedding of length %d, got %d", len(wantEmbedding), len(gotEmbedding))
+	}
+
+	for i := range wantEmbedding {
+		if gotEmbedding[i] != wantEmbedding[i] {
+			t.Fatalf("embedding mismatch at index %d: want %f, got %f", i, wantEmbedding[i], gotEmbedding[i])
+		}
+	}
+}
+
+// TestService_UpdateRecord_ContentChangeRecomputesEmbedding encodes AC-8:
+// "memory_update shall re-compute the record's embedding whenever title or
+// content changes." It uses an UpdateFunc that enforces the same column
+// whitelist the real postgres.Store.Update applies (internal/postgres/store.go,
+// allowedColumns) before ever touching a connection, so this also catches a
+// non-whitelisted key leaking into the updates map without needing
+// Postgres/testcontainers.
+func TestService_UpdateRecord_ContentChangeRecomputesEmbedding(t *testing.T) {
+	cfg := &config.Config{MaxContentChars: 20000, EmbedMaxTokens: 2048}
+
+	wantEmbedding := make([]float32, 1024)
+	for i := range wantEmbedding {
+		wantEmbedding[i] = float32(i) / 1024.0
+	}
+
+	allowedColumns := map[string]bool{
+		"title": true, "content": true, "tags": true, "files": true,
+		"ticket": true, "status": true, "confidence": true,
+		"deprecation_reason": true, "superseded_by": true,
+		"seen_count": true, "used_count": true, "last_used_at": true,
+		"embedding": true,
+	}
+
+	existingRec := &record.Record{
+		ID:      "rec1",
+		Title:   "Existing Title",
+		Content: "Existing content",
+		Tags:    []string{"tagA", "tagB"},
+		Status:  record.StatusActive,
+	}
+
+	var capturedUpdates map[string]interface{}
+	store := &mockStore{
+		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
+			if id == "rec1" {
+				return existingRec, nil
+			}
+			return nil, ErrNotFound
+		},
+		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
+			for k := range updates {
+				if !allowedColumns[k] {
+					return nil, fmt.Errorf("update: column %q not allowed", k)
+				}
+			}
+			capturedUpdates = updates
+			content, _ := updates["content"].(string)
+			return &record.Record{ID: id, Content: content, Status: record.StatusActive}, nil
+		},
+	}
+
+	embedCalled := false
+	embedProvider := &mockEmbeddingProvider{
+		EmbedFunc: func(ctx context.Context, text string, maxTokens int) ([]float32, error) {
+			embedCalled = true
+			return wantEmbedding, nil
+		},
+	}
+
+	svc := New(store, embedProvider, &mockScrubber{}, &mockClock{}, cfg)
+
+	newContent := "Updated content with new facts"
+	_, err := svc.UpdateRecord(context.Background(), &UpdateRequest{ID: "rec1", Content: &newContent})
+	if err != nil {
+		t.Fatalf("UpdateRecord failed (likely a non-whitelisted key leaking into the updates map): %v", err)
+	}
+
+	if !embedCalled {
+		t.Error("AC-8: expected UpdateRecord to call the embedding provider when content changes")
+	}
+	if _, ok := capturedUpdates["embedding"]; !ok {
+		t.Errorf("AC-8: expected the updates map to include a recomputed 'embedding', got keys: %v", keysOf(capturedUpdates))
+	}
+}
+
+// TestService_UpdateRecord_ContentOnlyEmbedsExistingTitleAndTags encodes
+// AC-55: the embedding input is the record's title + tags + content, so a
+// content-only update must still embed the record's existing (unchanged)
+// title and tags, not just the new content, otherwise the recomputed
+// embedding would drift away from what the record is actually titled/tagged.
+func TestService_UpdateRecord_ContentOnlyEmbedsExistingTitleAndTags(t *testing.T) {
+	cfg := &config.Config{MaxContentChars: 20000, EmbedMaxTokens: 2048}
+
+	existingRec := &record.Record{
+		ID:      "rec1",
+		Title:   "Existing Title",
+		Content: "Existing content",
+		Tags:    []string{"tagA", "tagB"},
+		Status:  record.StatusActive,
+	}
+
+	store := &mockStore{
+		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
+			return existingRec, nil
+		},
+		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
+			return &record.Record{ID: id, Status: record.StatusActive}, nil
+		},
+	}
+
+	var gotEmbedInput string
+	embedProvider := &mockEmbeddingProvider{
+		EmbedFunc: func(ctx context.Context, text string, maxTokens int) ([]float32, error) {
+			gotEmbedInput = text
+			return make([]float32, 1024), nil
+		},
+	}
+
+	svc := New(store, embedProvider, &mockScrubber{}, &mockClock{}, cfg)
+
+	newContent := "Brand new content"
+	_, err := svc.UpdateRecord(context.Background(), &UpdateRequest{ID: "rec1", Content: &newContent})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantEmbedInput := composeEmbedInput(existingRec.Title, existingRec.Tags, newContent)
+	if gotEmbedInput != wantEmbedInput {
+		t.Errorf("AC-55: expected embed input %q (existing title+tags + new content), got %q", wantEmbedInput, gotEmbedInput)
+	}
+}
+
+// TestService_UpdateRecord_TagsOnlyRecomputesEmbedding encodes AC-55: tags
+// are part of the embedding input, so a tags-only update (title/content
+// unchanged) must still re-embed using the existing title+content with the
+// new tags.
+func TestService_UpdateRecord_TagsOnlyRecomputesEmbedding(t *testing.T) {
+	cfg := &config.Config{MaxContentChars: 20000, EmbedMaxTokens: 2048}
+
+	existingRec := &record.Record{
+		ID:      "rec1",
+		Title:   "Existing Title",
+		Content: "Existing content",
+		Tags:    []string{"tagA"},
+		Status:  record.StatusActive,
+	}
+
+	store := &mockStore{
+		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
+			return existingRec, nil
+		},
+		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
+			return &record.Record{ID: id, Status: record.StatusActive}, nil
+		},
+	}
+
+	embedCalled := false
+	var gotEmbedInput string
+	embedProvider := &mockEmbeddingProvider{
+		EmbedFunc: func(ctx context.Context, text string, maxTokens int) ([]float32, error) {
+			embedCalled = true
+			gotEmbedInput = text
+			return make([]float32, 1024), nil
+		},
+	}
+
+	svc := New(store, embedProvider, &mockScrubber{}, &mockClock{}, cfg)
+
+	newTags := []string{"tagA", "tagC"}
+	_, err := svc.UpdateRecord(context.Background(), &UpdateRequest{ID: "rec1", Tags: newTags})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !embedCalled {
+		t.Fatal("AC-55: expected a tags-only update to re-embed")
+	}
+
+	wantEmbedInput := composeEmbedInput(existingRec.Title, newTags, existingRec.Content)
+	if gotEmbedInput != wantEmbedInput {
+		t.Errorf("AC-55: expected embed input %q (existing title+content + new tags), got %q", wantEmbedInput, gotEmbedInput)
+	}
+}
+
+// TestService_UpdateRecord_NoEmbedInputChangeSkipsEmbed is a negative
+// counterpart to AC-8/AC-55: updating a field outside the embedding input
+// (e.g. ticket) must not call the embedding provider at all.
+func TestService_UpdateRecord_NoEmbedInputChangeSkipsEmbed(t *testing.T) {
+	cfg := &config.Config{MaxContentChars: 20000, EmbedMaxTokens: 2048}
+
+	existingRec := &record.Record{
+		ID:      "rec1",
+		Title:   "Existing Title",
+		Content: "Existing content",
+		Tags:    []string{"tagA"},
+		Status:  record.StatusActive,
+	}
+
+	store := &mockStore{
+		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
+			return existingRec, nil
+		},
+		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
+			if _, ok := updates["embedding"]; ok {
+				t.Error("did not expect 'embedding' in the updates map for a ticket-only update")
+			}
+			return &record.Record{ID: id, Status: record.StatusActive}, nil
+		},
+	}
+
+	embedCalled := false
+	embedProvider := &mockEmbeddingProvider{
+		EmbedFunc: func(ctx context.Context, text string, maxTokens int) ([]float32, error) {
+			embedCalled = true
+			return make([]float32, 1024), nil
+		},
+	}
+
+	svc := New(store, embedProvider, &mockScrubber{}, &mockClock{}, cfg)
+
+	newTicket := "JIRA-123"
+	_, err := svc.UpdateRecord(context.Background(), &UpdateRequest{ID: "rec1", Ticket: &newTicket})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if embedCalled {
+		t.Error("expected a ticket-only update to NOT call the embedding provider")
+	}
+}
+
+func keysOf(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // Helper function to create a string pointer.

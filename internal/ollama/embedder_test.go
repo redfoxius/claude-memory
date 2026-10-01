@@ -46,6 +46,9 @@ func TestEmbedRequestBody(t *testing.T) {
 	if capturedReq.Input != "test input" {
 		t.Errorf("expected input 'test input', got %s", capturedReq.Input)
 	}
+	if capturedReq.KeepAlive != -1 {
+		t.Errorf("expected KeepAlive=-1, got %d", capturedReq.KeepAlive)
+	}
 	if !capturedReq.Truncate {
 		t.Error("expected Truncate=true")
 	}

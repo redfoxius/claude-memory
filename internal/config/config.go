@@ -22,7 +22,7 @@ type Config struct {
 	// StoreSimUpdate is the similarity threshold for the store write path:
 	// at or above this score, an existing record is updated rather than added.
 	// Range: 0.0-1.0.
-	// Default: 0.92.
+	// Default: 0.85 (tuned on bge-m3: near-duplicates measured 0.79–0.88, 2026-10-01).
 	// Env: MEMORY_STORE_SIM_UPDATE
 	StoreSimUpdate float64
 
@@ -30,7 +30,7 @@ type Config struct {
 	// between StoreSimAsk and StoreSimUpdate, top candidates are returned
 	// to the caller for judgment.
 	// Range: 0.0-1.0.
-	// Default: 0.80.
+	// Default: 0.65 (tuned on bge-m3, 2026-10-01).
 	// Env: MEMORY_STORE_SIM_ASK
 	StoreSimAsk float64
 
@@ -42,7 +42,7 @@ type Config struct {
 	// HookSimThreshold is the similarity threshold for the read-path hook:
 	// results at or above this score are injected into the session.
 	// Range: 0.0-1.0.
-	// Default: 0.75.
+	// Default: 0.50 (tuned on bge-m3: relevant 0.45–0.72, unrelated ≤0.42, 2026-10-01).
 	// Env: MEMORY_HOOK_SIM_THRESHOLD
 	HookSimThreshold float64
 
@@ -86,6 +86,13 @@ type Config struct {
 	// Default: bge-m3
 	// Env: MEMORY_OLLAMA_MODEL
 	OllamaModel string
+
+	// PRIngestRepos is the list of local repo directories (or root
+	// directories scanned one level deep for git repos) that `claude-memory
+	// ingest-pr` ingests PRs from (AC-58). Default: empty (no repos
+	// configured; ingest-pr has nothing to do).
+	// Env: MEMORY_PR_INGEST_REPOS (comma-separated absolute paths)
+	PRIngestRepos []string
 }
 
 // Load reads configuration from environment variables, with fallback defaults.
@@ -93,16 +100,17 @@ type Config struct {
 func Load() (*Config, error) {
 	c := &Config{
 		MaxContentChars:     getIntEnv("MEMORY_MAX_CONTENT_CHARS", 20000),
-		StoreSimUpdate:      getFloatEnv("MEMORY_STORE_SIM_UPDATE", 0.92),
-		StoreSimAsk:         getFloatEnv("MEMORY_STORE_SIM_ASK", 0.80),
+		StoreSimUpdate:      getFloatEnv("MEMORY_STORE_SIM_UPDATE", 0.85),
+		StoreSimAsk:         getFloatEnv("MEMORY_STORE_SIM_ASK", 0.65),
 		PRIngestLookback:    getDurationEnv("MEMORY_PR_INGEST_LOOKBACK", 30*24*time.Hour),
-		HookSimThreshold:    getFloatEnv("MEMORY_HOOK_SIM_THRESHOLD", 0.75),
+		HookSimThreshold:    getFloatEnv("MEMORY_HOOK_SIM_THRESHOLD", 0.50),
 		ExtractMinMessages:  getIntEnv("MEMORY_EXTRACT_MIN_MESSAGES", 20),
 		CandidateTTL:        getDurationEnv("MEMORY_CANDIDATE_TTL", 180*24*time.Hour),
 		HookTimeout:         getDurationEnv("MEMORY_HOOK_TIMEOUT", 800*time.Millisecond),
 		EmbedMaxTokens:      getIntEnv("MEMORY_EMBED_MAX_TOKENS", 2048),
 		OllamaURL:           getStringEnv("MEMORY_OLLAMA_URL", "http://127.0.0.1:11434"),
 		OllamaModel:         getStringEnv("MEMORY_OLLAMA_MODEL", "bge-m3"),
+		PRIngestRepos:       getStringListEnv("MEMORY_PR_INGEST_REPOS"),
 	}
 
 	// PGDSN is required and never has a default.
@@ -121,6 +129,24 @@ func getStringEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+// getStringListEnv reads a comma-separated environment variable into a
+// slice of trimmed, non-empty strings. An unset or empty variable returns
+// an empty (nil) slice.
+func getStringListEnv(key string) []string {
+	val := os.Getenv(key)
+	if val == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(val, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 // getIntEnv reads an integer environment variable with a default fallback.

@@ -13,11 +13,11 @@ import (
 // It depends only on interfaces (ports) it declares in this package, never on concrete
 // implementations (postgres, ollama) — those are wired in the composition root.
 type Service struct {
-	store              Store
-	embeddingProvider  EmbeddingProvider
-	scrubber           Scrubber
-	clock              Clock
-	cfg                *config.Config
+	store             Store
+	embeddingProvider EmbeddingProvider
+	scrubber          Scrubber
+	clock             Clock
+	cfg               *config.Config
 }
 
 // New constructs a Service with all required dependencies.
@@ -36,6 +36,13 @@ func New(
 		clock:             clock,
 		cfg:               cfg,
 	}
+}
+
+// Cfg exposes the service's configuration (thresholds, limits) for callers
+// that need to report on or compare against the configured defaults, such
+// as the evalset harness's threshold recommendations.
+func (s *Service) Cfg() *config.Config {
+	return s.cfg
 }
 
 // Search performs a hybrid semantic + full-text search using the query text,
@@ -59,10 +66,10 @@ func (s *Service) Search(ctx context.Context, req *SearchRequest) (*SearchResult
 	}
 
 	opts := SearchOptions{
-		Kind:                 req.Kind,
-		Tags:                 req.Tags,
-		Limit:                req.Limit,
-		IncludeDeprecated:    false,
+		Kind:              req.Kind,
+		Tags:              req.Tags,
+		Limit:             req.Limit,
+		IncludeDeprecated: false,
 	}
 	if opts.Limit == 0 {
 		opts.Limit = 5
@@ -92,48 +99,38 @@ func (s *Service) FindCandidates(ctx context.Context, embedding []float32, repo 
 	return candidates, nil
 }
 
+// FindCandidatesForText computes a candidate-lookup embedding for a draft's
+// title/tags/content, built the same way the write path composes its own
+// embedding input (secret-scrubbed, then title+tags+content via
+// composeEmbedInput — see embedinput.go), and returns the top-N nearest
+// existing records in the same repo (or repo="*"). It is read-only: it never
+// writes anything and never acquires the AC-16 advisory lock.
+//
+// This exists so extraction (session/PR paths) can see real candidates
+// *before* a haiku call decides ADD/UPDATE/SUPERSEDE/NOOP (AC-13, AC-14,
+// Interface Note) — the decision must never be made blind. Store/writepath.go
+// still re-fetches a fresh top-5 and re-validates any target id under the
+// AC-16 lock before committing; this method only feeds the earlier
+// extraction-time decision, it is not a substitute for that re-validation.
+func (s *Service) FindCandidatesForText(ctx context.Context, title string, tags []string, content string, repo string) ([]*Candidate, error) {
+	scrubbedTitle, _ := s.scrubber.Scrub(title)
+	scrubbedContent, _ := s.scrubber.Scrub(content)
+	embedInput := composeEmbedInput(scrubbedTitle, tags, scrubbedContent)
+
+	embedding, err := s.embeddingProvider.Embed(ctx, embedInput, s.cfg.EmbedMaxTokens)
+	if err != nil {
+		return nil, fmt.Errorf("embedding provider unavailable: %w", err)
+	}
+
+	return s.FindCandidates(ctx, embedding, repo, 5)
+}
+
 // Store persists a new record, applying the dedup/merge logic.
 // Implemented in writepath.go (WI-3b).
 // See writepath.go for full documentation.
 
-// Get retrieves a record by ID.
-// Implemented in WI-3a (crud.go).
-func (s *Service) Get(ctx context.Context, id string) (*record.Record, error) {
-	if id == "" {
-		return nil, errors.New("id is required")
-	}
-	rec, err := s.store.Get(ctx, id)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("get: %w", err)
-	}
-	return rec, nil
-}
-
-// Update modifies fields of an existing record.
-// If title or content changes, the embedding is recomputed (AC-8).
-// Implemented in WI-3a (crud.go).
-func (s *Service) Update(ctx context.Context, req *UpdateRequest) (*record.Record, error) {
-	return nil, errors.New("not implemented (WI-3a, handled separately)")
-}
-
-// Deprecate transitions a record to deprecated status with a reason.
-// Implemented in WI-3a (crud.go).
-func (s *Service) Deprecate(ctx context.Context, req *DeprecateRequest) (*record.Record, error) {
-	return nil, errors.New("not implemented (WI-3a, handled separately)")
-}
-
-// List returns all records matching optional filters (repo, kind, status).
-// Implemented in WI-3a (crud.go).
-func (s *Service) List(ctx context.Context, filters ListFilters) ([]*record.Record, error) {
-	recs, err := s.store.List(ctx, filters)
-	if err != nil {
-		return nil, fmt.Errorf("list: %w", err)
-	}
-	return recs, nil
-}
+// Get/Update/Deprecate/List are implemented as GetRecord/UpdateRecord/
+// DeprecateRecord/ListRecords in crud.go.
 
 // Feedback records user feedback (useful/outdated/wrong) and applies lifecycle transitions.
 // Implemented in lifecycle.go (WI-3c).
@@ -142,7 +139,7 @@ func (s *Service) List(ctx context.Context, filters ListFilters) ([]*record.Reco
 // SearchRequest is the input to Search.
 type SearchRequest struct {
 	Query     string
-	Embedding []float32  // Optional; if provided, used instead of computing from Query.
+	Embedding []float32 // Optional; if provided, used instead of computing from Query.
 	Repo      string
 	Kind      *record.Kind
 	Tags      []string

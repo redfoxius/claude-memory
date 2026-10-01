@@ -47,8 +47,23 @@ func DefaultPatterns() []*Pattern {
 			Replace: "***JWT_REDACTED***",
 		},
 		{
-			Name:    "Azure DevOps PAT (Base64-like 52-char token)",
-			Regex:   regexp.MustCompile(`[A-Za-z0-9+/]{50,}={0,2}(?:\s|$)`),
+			// Classic Azure DevOps PAT: exactly 52 characters drawn from the
+			// lowercase base32-ish charset Azure DevOps actually generates
+			// (a-z plus digits 2-7 — no 0/1/8/9, no uppercase). Word-bounded
+			// and character-class-restricted so it never matches a long file
+			// path or a hex identifier (those routinely contain 0/1/8/9 or
+			// uppercase letters, which break the run).
+			Name:    "Azure DevOps PAT (classic, 52-char base32-lowercase)",
+			Regex:   regexp.MustCompile(`\b[a-z2-7]{52}\b`),
+			Replace: "***AZDO_PAT_REDACTED***",
+		},
+		{
+			// New-format Azure DevOps PAT: 84 characters total — a 76-char
+			// high-entropy alphanumeric body, the literal "AZDO" marker, then
+			// a 4-char alphanumeric suffix. The "AZDO" anchor makes this
+			// pattern specific rather than "any long alphanumeric string".
+			Name:    "Azure DevOps PAT (new format, AZDO-suffixed)",
+			Regex:   regexp.MustCompile(`\b[A-Za-z0-9]{76}AZDO[A-Za-z0-9]{4}\b`),
 			Replace: "***AZDO_PAT_REDACTED***",
 		},
 		{

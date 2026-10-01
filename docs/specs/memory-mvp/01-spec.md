@@ -3,7 +3,7 @@
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-01-memory-mvp
 - Status: clarifying
-- Version: 0.3
+- Version: 0.5
 - Owner: Oleksandr Kolomoiets (user@example.com)
 - Supersedes: none
 - Related: shared conventions `acme/CLAUDE.md`; no prior spec/plan exists (greenfield repo); design decisions captured here were agreed in a prior discussion with the owner, not sourced from a separate document; v0.2 revises the deployment topology (laptop-local Ollama + `claude-memory`, server reduced to Postgres-only) based on the owner's AC-44 smoke-test measurements taken 2026-10-01
@@ -352,17 +352,15 @@ log entry.
   top-5 nearest existing records. Verify: a PR-ingest run whose extracted
   fact closely matches an existing active record results in UPDATE or
   NOOP, not a duplicate ADD.
-- AC-15 (Ubiquitous): For the inline `memory_store` write path, the
-  decision shall follow a threshold rule on the top candidate's fused
-  similarity score: at or above 0.92, treat as the same fact (NOOP with
-  `seen_count++`, or UPDATE if the new content materially enriches it);
-  between 0.80 and 0.92, return the top candidates to the calling Claude
-  session so it can judge ADD vs. UPDATE using its own context; below
-  0.80, ADD. Verify: storing near-verbatim content twice in a row results
-  in NOOP, not two rows. [NEEDS CLARIFICATION: the 0.80/0.92 thresholds
-  are a spec-creator default tuned for cosine-similarity-style scores,
-  not an owner-specified value — confirm or retune once real embeddings
-  are available.]
+- AC-15 (Ubiquitous) **(thresholds set in v0.5)**: For the inline
+  `memory_store` write path, the decision shall follow a threshold rule on
+  the top candidate's **cosine similarity** (not the fused RRF rank score):
+  at or above `MEMORY_STORE_SIM_UPDATE` (default 0.85), treat as the same
+  fact (NOOP with `seen_count++`, or UPDATE if the new content materially
+  enriches it); between `MEMORY_STORE_SIM_ASK` (default 0.65) and 0.85,
+  return the top candidates to the calling Claude session so it can judge
+  ADD vs. UPDATE using its own context; below 0.65, ADD. Verify: storing
+  near-verbatim content twice in a row results in NOOP, not two rows.
 - AC-16 (Unwanted behavior): IF two writes targeting the same `repo` and
   a near-identical normalized title are in flight concurrently, THEN the
   system shall serialize their dedup decision via a Postgres advisory
@@ -447,6 +445,16 @@ log entry.
   completed in the last 30 days, then writes a new cursor. [NEEDS
   CLARIFICATION: 30 days is a spec-creator default; confirm desired
   first-run lookback.]
+- AC-58 (Ubiquitous) **(new in v0.4)**: `claude-memory ingest-pr` shall
+  take its repos from a configured list of local repo directories
+  (`MEMORY_PR_INGEST_REPOS`, or root directories scanned for git repos),
+  determine each repo's PR provider from its `origin` remote (Azure DevOps:
+  `dev.azure.com` / `*.visualstudio.com`; GitHub; GitLab) behind a
+  provider-neutral `PRSource` port, and keep the cursor per provider + repo.
+  In this version only the Azure DevOps provider is implemented. Verify: a
+  repo whose origin is GitHub or GitLab (or unknown) is skipped with a logged
+  "provider not supported" warning, its cursor untouched, and the remaining
+  repos are still ingested in the same run.
 - AC-29 (Optional feature): WHERE a record's `source` is `pr`, the system
   shall set its initial `status` to `active` and initial `confidence` to
   0.75; WHERE `source` is `inline` or `session`, initial `status` shall
@@ -478,14 +486,13 @@ log entry.
   surfaced, hook exits 0) and shall never block or fail the prompt
   submission. Verify: stopping local Ollama, or disconnecting Tailscale,
   still allows a prompt to submit normally with no visible error.
-- AC-32 (Event-driven): WHEN a search result's fused score is at or
-  above a similarity threshold (default 0.75), the hook shall inject 1–3
+- AC-32 (Event-driven) **(threshold set in v0.5)**: WHEN a search
+  result's cosine similarity to the prompt is at or above
+  `MEMORY_HOOK_SIM_THRESHOLD` (default 0.50), the hook shall inject 1–3
   cards containing only `title`, `repo`, and `id`; results below the
   threshold shall not be injected. Verify: a weakly-related result below
-  0.75 produces no injected card; a strongly-related one does, with only
-  those three fields visible. [NEEDS CLARIFICATION: 0.75 is a
-  spec-creator default pending real-world tuning against actual
-  `bge-m3` score distributions.]
+  0.50 produces no injected card; a strongly-related one does, with only
+  those three fields visible.
 - AC-33 (Ubiquitous): The `acme/CLAUDE.md` read-path rule shall
   instruct Claude to call `memory_search` before designing a solution,
   verify any retrieved record against current code before relying on it,
@@ -890,14 +897,16 @@ prompt context:
 | # | Category (1–6) | Question | Answer / [NEEDS CLARIFICATION] | Impacted AC-ID(s) |
 |---|---|---|---|---|
 | 1 | 2 | Maximum allowed `content` size per record? | [NEEDS CLARIFICATION: spec-creator default 20,000 chars, not owner-specified] | AC-3 |
-| 2 | 6 | Exact similarity thresholds for the inline `memory_store` dedup rule? | [NEEDS CLARIFICATION: spec-creator default 0.80/0.92, pending tuning against real `bge-m3` score distributions] | AC-15 |
+| 2 | 6 | Exact similarity thresholds for the inline `memory_store` dedup rule? | Resolved v0.5 (see row 11): 0.65 / 0.85 on cosine similarity. | AC-15 |
 | 3 | 5 | First-run PR-ingest lookback window when no cursor exists? | [NEEDS CLARIFICATION: spec-creator default 30 days] | AC-28 |
-| 4 | 3 | Similarity threshold for injecting a card on the read path? | [NEEDS CLARIFICATION: spec-creator default 0.75, pending real score tuning] | AC-32 |
+| 4 | 3 | Similarity threshold for injecting a card on the read path? | Resolved v0.5 (see row 11): 0.50 on cosine similarity. | AC-32 |
 | 5 | 1/2/3/4/5/6 | All other functional scope, data model, UX flow, NFR, integration, and edge-case decisions | Fully decided by the owner in prior discussion (see request); recorded directly into §6/§7 without re-asking, per explicit instruction | AC-1–AC-2, AC-4–AC-14, AC-16–AC-27, AC-29–AC-31, AC-33–AC-53 |
 | 6 | 5 | Was server-side embedding latency on the AVX-only Mac Mini acceptable for production use? | Measured via the AC-44 smoke test on 2026-10-01: server ~17 ms/token (linear), 12–60× slower than the laptop's Metal-accelerated Ollama. Owner decided (v0.2 topology) to move Ollama and the `claude-memory` MCP process off the server entirely onto the laptop, reducing the server to Postgres-only, reachable solely over Tailscale with password auth replacing the former bearer-token MCP auth. | AC-30 (changed), AC-31 (changed), AC-41 (withdrawn), AC-42 (changed), AC-44 (changed), AC-47 (changed), AC-49 (changed), AC-50 (changed), AC-52 (changed), AC-54 (new), AC-55 (new), AC-56 (new), AC-57 (new) |
 | 7 | 4 | What hook-added p95 latency target applies now that embedding is local rather than over the former laptop→server MCP hop? | [NEEDS CLARIFICATION: spec-creator default 300 ms p95, proposed as reasonable given the removed network hop; confirm or retune once measured end-to-end on the real Tailscale link] (2026-10-01) | AC-30 |
 | 8 | 4 | Should the new Postgres-over-Tailscale connection require `sslmode=require`, given WireGuard already encrypts the link? | Decided (spec-creator judgment, recorded 2026-10-01 in §4 Constraints): not mandated for the MVP — an additional TLS layer is redundant for this single-user, single-link topology; `sslmode=require` remains available as an optional future hardening step, with no AC depending on it. | None (design decision, not a testable AC) |
 | 9 | 4 | What embedding token limit applies, given Ollama's real behavior? | Measured 2026-10-01 (Ollama 0.35, M1 Pro): Ollama silently truncates at `num_batch` (default 2048), keeping leading tokens; 2048 tokens 0.6s, 4096 3.4s, 8192 8.0s. 8192 would break AC-48 (< 3s). Owner decided: configurable `MEMORY_EMBED_MAX_TOKENS`, default 2048, passed as `num_ctx`/`num_batch`; full content always in the full-text index. (v0.3) | AC-55 (changed), AC-56 (changed) |
+| 10 | 3 | Where do PRs come from when namespaces span several platforms? | Owner decided 2026-10-01: provider is auto-detected from the repo's git `origin`; MVP ships a provider-neutral `PRSource` port with Azure DevOps only; GitHub/GitLab adapters, per-namespace `pr_ingest` config and `token_env` multi-account auth are backlog (after namespaces). (v0.4) | AC-58 (new) |
+| 11 | 6 | What thresholds fit real `bge-m3` scores? | Measured 2026-10-01 (eval harness, real bge-m3 + pgvector, 11 records / 16 queries): relevant hits 0.45–0.72 (median 0.67), unrelated 0.28–0.42, near-duplicates 0.79 and 0.88. The original 0.75 hook / 0.80–0.92 store defaults would never inject a card and would store duplicates. Owner set defaults: hook 0.50, store ask 0.65, store update/NOOP 0.85 — all compared against cosine similarity, never the fused RRF score; still config-driven; revisit with a larger eval set and usage metrics. (v0.5) | AC-15 (changed), AC-32 (changed) |
 
 No blocking questions were raised: every open point above — including
 the v0.2 topology items — is either a tunable numeric default or a
@@ -964,3 +973,4 @@ intent (ambient, automatic, cross-repo memory), so none required
 - [ ] AC-55 — record embedding uses title+tags+content up to the configured 2048-token limit; full content always full-text indexed (new v0.2, limit v0.3)
 - [ ] AC-56 — hook embeds the prompt up to the configured 2048-token limit (new v0.2, limit v0.3)
 - [ ] AC-57 — write path returns a clear error (no local queue) when Postgres/Ollama is unreachable (new, v0.2)
+- [ ] AC-58 — ingest-pr detects provider from git origin behind a PRSource port; Azure only, others skipped with a warning (new, v0.4)

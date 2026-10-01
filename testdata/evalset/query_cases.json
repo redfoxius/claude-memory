@@ -1,0 +1,123 @@
+[
+  {
+    "id": "paraphrase_001",
+    "repo": "billing-service",
+    "query": "Where should I open pull requests in the billing-service service?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 0,
+    "description": "Paraphrase of 'billing-service: Pull requests target master' record"
+  },
+  {
+    "id": "paraphrase_002",
+    "query": "How does the Kubernetes build pipeline handle branch names that are too long?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 1,
+    "description": "Paraphrase of the k8s 63-byte label limit record"
+  },
+  {
+    "id": "paraphrase_003",
+    "repo": "billing-service",
+    "query": "What happens when an order return is declined in billing-service?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 2,
+    "description": "Paraphrase of DECLINED/DECLINED terminal status record"
+  },
+  {
+    "id": "exact_identifier_001",
+    "query": "pg_advisory_xact_lock",
+    "category": "exact_identifier",
+    "expectedRecordIdx": 3,
+    "description": "Exact function name lookup"
+  },
+  {
+    "id": "exact_identifier_002",
+    "query": "num_batch truncation Ollama bge-m3",
+    "category": "exact_identifier",
+    "expectedRecordIdx": 4,
+    "description": "Exact parameter name and model identifier"
+  },
+  {
+    "id": "exact_identifier_003",
+    "query": "100.64.0.0/10 Tailscale CGNAT",
+    "category": "exact_identifier",
+    "expectedRecordIdx": 7,
+    "description": "Exact IP range lookup"
+  },
+  {
+    "id": "exact_identifier_004",
+    "query": "bearer token Authorization scrubbing pattern",
+    "category": "exact_identifier",
+    "expectedRecordIdx": 9,
+    "description": "Exact secret pattern lookup"
+  },
+  {
+    "id": "paraphrase_004",
+    "query": "Why does the memory service run locally instead of on the server?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 8,
+    "description": "Paraphrase of Ollama laptop vs server decision"
+  },
+  {
+    "id": "paraphrase_005",
+    "query": "How should I handle retries against Azure DevOps API endpoints?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 5,
+    "description": "Paraphrase of Azure DevOps retry logic pattern"
+  },
+  {
+    "id": "paraphrase_006",
+    "query": "What format are Claude Code session transcripts stored in?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 6,
+    "description": "Paraphrase of transcript format convention"
+  },
+  {
+    "id": "negative_001",
+    "query": "What is the best pizza topping for a Thursday dinner?",
+    "category": "negative",
+    "description": "Completely unrelated query; should score below the configured hook threshold"
+  },
+  {
+    "id": "negative_002",
+    "query": "How do I knit a sweater with Python?",
+    "category": "negative",
+    "description": "Unrelated to development; expect low similarity"
+  },
+  {
+    "id": "negative_003",
+    "query": "What is the capital of France?",
+    "category": "negative",
+    "description": "Geography question; not development-related"
+  },
+  {
+    "id": "near_duplicate_001",
+    "store": {
+      "kind": "convention",
+      "title": "billing-service: PRs target master branch",
+      "content": "In billing-service, all pull requests should be opened to the master branch, not develop. This is a repo-specific override.",
+      "repo": "billing-service",
+      "source": "inline"
+    },
+    "category": "near_duplicate_store",
+    "description": "Near-duplicate of record 0; should resolve to NOOP or UPDATE"
+  },
+  {
+    "id": "near_duplicate_002",
+    "store": {
+      "kind": "gotcha",
+      "title": "When embedding with Ollama, num_batch is required for token limits",
+      "content": "Without setting num_batch in Ollama requests, inputs are silently truncated at 2048 tokens.",
+      "repo": "*",
+      "source": "inline"
+    },
+    "category": "near_duplicate_store",
+    "description": "Near-duplicate of record 4; should resolve to NOOP or UPDATE"
+  },
+  {
+    "id": "exact_identifier_005",
+    "query": "RRF Reciprocal Rank Fusion 1.0 / (60 + rank)",
+    "category": "exact_identifier",
+    "expectedRecordIdx": 10,
+    "description": "Exact formula and acronym lookup"
+  }
+]

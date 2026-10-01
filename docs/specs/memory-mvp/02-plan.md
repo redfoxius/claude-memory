@@ -3,8 +3,8 @@
 **Status:** not started
 
 ## Spec
-- `docs/specs/memory-mvp/01-spec.md` (SPEC-2026-10-01-memory-mvp, v0.3,
-  AC-1..AC-57; AC-41 withdrawn)
+- `docs/specs/memory-mvp/01-spec.md` (SPEC-2026-10-01-memory-mvp, v0.5,
+  AC-1..AC-58; AC-41 withdrawn)
 
 ## Context
 Greenfield repo (`acme/claude-memory`); only `docs/specs/` exists today,
@@ -67,7 +67,8 @@ The MCP tool surface stays exactly the spec's §10 set.
   transport only
 - `internal/transcript/`, `internal/extraction/` — session transcript
   parsing + haiku extraction (shared by extract & ingest-pr)
-- `internal/azuredevops/`, `internal/prcursor/` — PR ingest adapter + local
+- `internal/prsource/` (provider-neutral port + origin detection),
+  `internal/azuredevops/`, `internal/prcursor/` — PR ingest adapter + local
   cursor file
 - `internal/evalset/` + `testdata/evalset/` — retrieval eval fixtures
 - `deploy/` — server-only: `docker-compose.yml` (postgres), `pg_hba.conf`,
@@ -163,9 +164,9 @@ WI-09 is withdrawn (no MCP client in topology B); numbering is kept stable.
    `internal/config/config.go`, `Makefile`, `.golangci.yml`, `.gitignore`.
    depends on: none. acceptance: `go build ./...` succeeds; config loads
    `MEMORY_MAX_CONTENT_CHARS` (default 20000), `MEMORY_STORE_SIM_UPDATE`
-   (default 0.92), `MEMORY_STORE_SIM_ASK` (default 0.80),
+   (default 0.85), `MEMORY_STORE_SIM_ASK` (default 0.65),
    `MEMORY_PR_INGEST_LOOKBACK` (default 30d),
-   `MEMORY_HOOK_SIM_THRESHOLD` (default 0.75),
+   `MEMORY_HOOK_SIM_THRESHOLD` (default 0.50),
    `MEMORY_EXTRACT_MIN_MESSAGES` (default 20),
    `MEMORY_CANDIDATE_TTL` (default 180d), `MEMORY_HOOK_TIMEOUT` (default
    800ms), `MEMORY_EMBED_MAX_TOKENS` (default 2048, passed to Ollama as `num_ctx`/`num_batch`),
@@ -210,7 +211,7 @@ WI-09 is withdrawn (no MCP client in topology B); numbering is kept stable.
    **3b. Write path: dedup / merge / atomicity** — files: `writepath.go`,
    `embedinput.go`. depends on: 3a. acceptance: top-5 fetched before every
    write decision (AC-13); session/PR paths honor `ExtractionDecision`
-   (AC-14); inline 0.80/0.92 threshold branches (AC-15); advisory-lock
+   (AC-14); inline 0.65/0.85 cosine-similarity threshold branches (AC-15); advisory-lock
    acquired before the decision and released after commit (AC-16);
    SUPERSEDE in one transaction (AC-17); a contradicting fact resolves to
    SUPERSEDE of the old active record (AC-18); NOOP bumps `seen_count`;
@@ -287,8 +288,8 @@ WI-09 is withdrawn (no MCP client in topology B); numbering is kept stable.
    `docs/specs/memory-mvp/eval-results.md`.
    depends on: 03, 05, 06 (needs real Postgres + laptop Ollama; a local
    `pgvector/pgvector:pg16` container is fine). acceptance: running the eval against the dev stack reports
-   whether the paraphrase set clears the 0.75 hook threshold and the
-   0.80/0.92 store thresholds separate "same fact" from "judge-needed"
+   whether the paraphrase set clears the hook threshold and the
+   store thresholds (now 0.50 / 0.65 / 0.85, set from this harness's first real run) separate "same fact" from "judge-needed"
    from "new fact" on real `bge-m3` scores; results feed back into WI-01's
    config defaults (values stay config-driven — no code change needed to
    retune); the same harness measures real-stack `Store` p95 latency
@@ -350,15 +351,27 @@ WI-09 is withdrawn (no MCP client in topology B); numbering is kept stable.
     message, no-file-edit fixture transcript. satisfies: AC-21, AC-22.
 
 13. **Ingest-pr CLI** — files: `cmd/claude-memory/ingestpr.go`,
-    `internal/azuredevops/client.go` (`az` CLI wrapper, args passed as a
-    slice — never shell-concatenated, per security skill A05),
-    `internal/prcursor/cursor.go` (per-repo JSON cursor file).
+    `internal/prsource/` (provider-neutral port `PRSource`:
+    `ListCompleted(ctx, repo, since)` and `Get(ctx, repo, id)` returning
+    title, description, diff summary, review comments, completed-at;
+    `Detect(remoteURL) (provider, repoRef, error)` for `dev.azure.com` /
+    `*.visualstudio.com` → azure, `github.com` → github, `gitlab.*` → gitlab,
+    else unknown), `internal/azuredevops/client.go` (the only `PRSource`
+    implementation in MVP; `az` CLI wrapper, args passed as a slice — never
+    shell-concatenated, per security skill A05),
+    `internal/prcursor/cursor.go` (JSON cursor file keyed by
+    provider + repo). Repos come from `MEMORY_PR_INGEST_REPOS` (local repo
+    dirs, or roots scanned one level deep for git repos); provider is read
+    from each repo's `git remote get-url origin`.
     depends on: 11. acceptance: cursor persisted only after a repo's full
     batch succeeds (interrupting mid-batch leaves the old cursor);
     invalid-credentials fixture for one repo doesn't block/corrupt other
     configured repos' runs; missing/unreadable cursor falls back to the
-    configured lookback window and writes a fresh cursor after the run.
-    satisfies: AC-26, AC-27, AC-28.
+    configured lookback window and writes a fresh cursor after the run;
+    `Detect` table test for azure/github/gitlab/unknown URLs (https + ssh
+    forms); a GitHub-origin repo in the list is skipped with a "provider not
+    supported" warning and the Azure repos are still ingested (AC-58).
+    satisfies: AC-26, AC-27, AC-28, AC-58.
 
 14. **Lifecycle/cleanup job** — files: `cmd/claude-memory/cleanup.go`
     (daily job entry point calling `internal/memory` + `internal/postgres`
@@ -469,7 +482,7 @@ WI-09 is withdrawn (no MCP client in topology B); numbering is kept stable.
   paraphrase pairs (same fact, reworded) and exact-identifier pairs (a
   literal error code/function name) run against the real `bge-m3`
   embeddings once the dev stack is up, to confirm or retune the
-  0.75/0.80/0.92 defaults — thresholds stay config values, never
+  0.50/0.65/0.85 defaults — thresholds stay config values, never
   hardcoded, so retuning needs no code change.
 - **Manual/hardware-dependent** (documented in `DEPLOY.md`, not automatable
   by the implementer): AC-49's 24-hour `docker stats` window for postgres,
@@ -480,7 +493,7 @@ WI-09 is withdrawn (no MCP client in topology B); numbering is kept stable.
 - `go build ./...`, `go vet ./...`, `golangci-lint run`, `go test ./...
   -race` all green.
 - Full testcontainers + eval-harness suite green (Work Items 5, 7, 8).
-- AC-N traceability pass: every active AC-1..AC-57 (AC-41 withdrawn)
+- AC-N traceability pass: every active AC-1..AC-58 (AC-41 withdrawn)
   appears in at least one Work
   Item's `satisfies:` list above and in at least one test named in that
   item's acceptance criteria.

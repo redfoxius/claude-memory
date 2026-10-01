@@ -1,4 +1,4 @@
-.PHONY: build test lint clean cross-build
+.PHONY: build test lint clean cross-build install
 
 # Default target
 all: build lint test
@@ -28,3 +28,12 @@ cross-build:
 clean:
 	@echo "Cleaning..."
 	rm -rf bin/
+
+# Build and install the claude-memory binary to ~/.local/bin (user-level,
+# no sudo). This is step 1 of integration/INSTALL.md; it never touches
+# ~/.claude/, ~/Library/LaunchAgents, or acme/CLAUDE.md itself.
+install: build
+	@echo "Installing claude-memory to $$HOME/.local/bin..."
+	mkdir -p "$$HOME/.local/bin"
+	cp bin/claude-memory "$$HOME/.local/bin/claude-memory"
+	chmod 755 "$$HOME/.local/bin/claude-memory"

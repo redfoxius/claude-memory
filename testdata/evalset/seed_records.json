@@ -1,0 +1,90 @@
+[
+  {
+    "kind": "convention",
+    "title": "billing-service: Pull requests target master, not develop",
+    "content": "In the billing-service repository, all feature branches are cut from `master` and pull requests are opened back into `master`, not `develop`. This is a repo-specific exception to the shared acme/CLAUDE.md convention. Branch format: `<type>/<TICKET-KEY>/<short-description>`, max 50 chars for k8s label compatibility.",
+    "repo": "billing-service",
+    "tags": ["git", "convention", "billing-service"],
+    "source": "pr"
+  },
+  {
+    "kind": "gotcha",
+    "title": "Kubernetes label value 63-byte limit breaks long branch names",
+    "content": "Kubernetes label values are capped at 63 bytes. The Azure DevOps build pipeline uses the branch name to construct version labels: `<semver>-<branch with / → ->.<build N>`. A branch name longer than ~50 chars can exceed this limit, causing the 'Setup k8s' step to fail with 'metadata.labels: Invalid value ... must be no more than 63 bytes'. The failure will re-occur on every pipeline re-run without branch rename. Example: `task/PRJ-216/add-partner-and-checkup-statuses-to-internal-endpoint` (75 chars) had to be shortened to `task/PRJ-216/add-partner-checkup-statuses`.",
+    "repo": "*",
+    "tags": ["kubernetes", "ci-cd", "azure-devops"],
+    "source": "pr"
+  },
+  {
+    "kind": "decision",
+    "title": "DECLINED/DECLINED is a terminal status in billing-service",
+    "content": "In the billing-service order management system, when a return is marked as DECLINED with a DECLINED substatus (lock blocking ERP), this is an intended, terminal state. The system prevents further transitions out of DECLINED/DECLINED to maintain data consistency with ERP. This is not a bug and should not be changed without coordinating with operations.",
+    "repo": "billing-service",
+    "tags": ["order-management", "status-transitions", "erp"],
+    "source": "pr"
+  },
+  {
+    "kind": "gotcha",
+    "title": "pgx advisory locks: always use transaction scope with pg_advisory_xact_lock",
+    "content": "When using pgx with `pg_advisory_xact_lock(hashtext(...))`, the lock is held for the duration of the transaction and released automatically on commit or rollback. For dedup logic in concurrent writes, wrap the lock acquisition and candidate check inside `db.WithTx()` or an explicit transaction block. Using `pg_advisory_lock()` (the session-scoped version) without careful cleanup is a deadlock risk. The intent of AC-16 is serializing near-duplicate writes via transaction-scoped locks keyed on repo + normalized title hash.",
+    "repo": "*",
+    "tags": ["postgres", "concurrency", "pgx"],
+    "source": "session"
+  },
+  {
+    "kind": "gotcha",
+    "title": "Ollama num_batch truncation: input silently cut at 2048 tokens without the flag",
+    "content": "When embedding with Ollama 0.35 and bge-m3, if you do not pass `num_batch` in the request options, input is silently truncated at 2048 tokens even if your model context is larger. To respect a custom embedding token limit (e.g., 4096), you must explicitly set both `num_ctx` and `num_batch` in the request. Without `num_batch`, inputs longer than 2048 tokens produce embeddings that only reflect the first 2048 tokens, silently degrading quality. Set `truncate: true` to force truncation instead of returning an error.",
+    "repo": "*",
+    "tags": ["ollama", "embedding", "performance"],
+    "source": "session"
+  },
+  {
+    "kind": "pattern",
+    "title": "Azure DevOps work item retry logic: never use bare exponential backoff",
+    "content": "When retrying Azure DevOps REST API calls (e.g., for PR ingestion), implement jitter-based backoff with a maximum retry count. The `az` CLI can be slow under load, and queries for large PR lists may temporarily fail. Recommended: exponential backoff starting at 100ms with jitter, max 5 retries, 30-second hard timeout. Avoid retrying indefinitely or on non-idempotent operations like status updates.",
+    "repo": "*",
+    "tags": ["azure-devops", "api", "error-handling"],
+    "source": "inline"
+  },
+  {
+    "kind": "convention",
+    "title": "Claude Code session transcripts use JSON-lines format with message type field",
+    "content": "Claude Code transcripts are stored in a JSON format where each message is a JSON object with a 'type' field (e.g., 'user', 'assistant', 'file_edit'). When parsing a transcript for extraction, split by newlines and parse each line as JSON. Missing or malformed lines should not crash extraction; log the failure and skip the line. The transcript path is passed as a command argument to `claude-memory extract`.",
+    "repo": "*",
+    "tags": ["claude-code", "transcript", "parsing"],
+    "source": "session"
+  },
+  {
+    "kind": "gotcha",
+    "title": "Tailscale CGNAT range is 100.64.0.0/10 for all installations",
+    "content": "Tailscale reserves 100.64.0.0/10 (100.64.0.0 - 100.127.255.255) as its universal CGNAT range for all installations and organizations. When configuring Postgres `pg_hba.conf` for Tailscale-only access, use `host all all 100.64.0.0/10 scram-sha-256`. This range never conflicts with other tailnets because each tailnet's traffic is isolated within the WireGuard tunnel. A connection from any address outside 100.64.0.0/10 should be rejected at the network layer or by `pg_hba.conf`.",
+    "repo": "*",
+    "tags": ["tailscale", "networking", "postgres"],
+    "source": "pr"
+  },
+  {
+    "kind": "decision",
+    "title": "Semantic memory: Ollama runs on the laptop, not the server",
+    "content": "After smoke-testing bge-m3 embeddings on both the laptop (M1 Pro, Metal GPU) and the home server (Mac Mini 2012, AVX-only), the laptop is 12-60x faster: ~0.02-0.21s for 15-600 tokens vs. ~0.23-12.3s on the server (~17ms/token). For a synchronous read-path hook (AC-30), moving Ollama to the laptop was non-negotiable. The server runs only Postgres in Docker, bound to its Tailscale IP. The `claude-memory` MCP server also runs on the laptop as a stdio process, registered in Claude Code's user-level config.",
+    "repo": "*",
+    "tags": ["architecture", "performance", "embedding"],
+    "source": "pr"
+  },
+  {
+    "kind": "pattern",
+    "title": "Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens",
+    "content": "Before storing user-provided content in the memory database, scrub common secret patterns to prevent accidental leakage: AWS-style access keys (AKIA...), GitHub personal access tokens (ghp_...), Postgres connection strings (postgresql://...), private keys (-----BEGIN...), generic `secret|key|token|password=` assignments, JWT shapes (eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+), and `Authorization: Bearer ...` headers. Replace matched spans with a placeholder (e.g., `[REDACTED]`). Log that a redaction occurred (with metadata like which pattern matched) but never log the original secret value.",
+    "repo": "*",
+    "tags": ["security", "redaction", "pii"],
+    "source": "session"
+  },
+  {
+    "kind": "gotcha",
+    "title": "RRF (Reciprocal Rank Fusion) ranking requires parameterized queries to avoid SQL injection",
+    "content": "When implementing hybrid semantic + full-text search via RRF, the SQL query fuses pgvector cosine-similarity ranking with Postgres `tsvector` BM25 ranking. The query string, kind filter, tags, and limit must be parameterized using `pgx.Query()` with `$1`, `$2`, etc., never string-concatenated. This prevents SQL injection even if record content accidentally contains SQL-like text. The RRF formula: `1.0 / (60 + rank) for each ranking method, then sum the scores.`",
+    "repo": "*",
+    "tags": ["postgres", "sql", "security"],
+    "source": "pr"
+  }
+]

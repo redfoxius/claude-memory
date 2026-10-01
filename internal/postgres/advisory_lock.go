@@ -36,7 +36,9 @@ func (t *txStoreImpl) AcquireLock(ctx context.Context, repo string, titleHash st
 }
 
 // FindCandidates is the transaction-scoped version of Store.FindCandidates.
-// It fetches top-N nearest records using RRF hybrid ranking within the transaction.
+// It fetches top-N nearest records by vector (cosine) similarity within the
+// transaction. See Store.FindCandidates for why this is vector-only, not
+// RRF-fused with full-text (no query-text parameter on this port).
 func (t *txStoreImpl) FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*memory.Candidate, error) {
 	if limit <= 0 {
 		limit = 5
@@ -48,42 +50,20 @@ func (t *txStoreImpl) FindCandidates(ctx context.Context, embedding []float32, r
 
 	embeddingVec := pgvector.NewVector(embedding)
 
-	// RRF hybrid query (k=60)
 	query := `
-		WITH vector_ranks AS (
-			SELECT
-				id,
-				ROW_NUMBER() OVER (ORDER BY embedding <-> $1) as vector_rank
-			FROM records
-			WHERE (repo = $2 OR repo = '*')
-				AND status IN ('candidate', 'active')
-		),
-		fts_ranks AS (
-			SELECT
-				id,
-				ROW_NUMBER() OVER (ORDER BY ts_rank(tsvector_content, plainto_tsquery('simple', $3)) DESC) as fts_rank
-			FROM records
-			WHERE (repo = $2 OR repo = '*')
-				AND status IN ('candidate', 'active')
-				AND tsvector_content @@ plainto_tsquery('simple', $3)
-		)
-		SELECT DISTINCT
-			r.id,
-			r.title,
-			1.0 / (60 + COALESCE(v.vector_rank, 1e9)) +
-			1.0 / (60 + COALESCE(f.fts_rank, 1e9)) as rrf_score,
-			1.0 - (r.embedding <-> $1) as similarity
-		FROM records r
-		LEFT JOIN vector_ranks v ON r.id = v.id
-		LEFT JOIN fts_ranks f ON r.id = f.id
-		WHERE (r.repo = $2 OR r.repo = '*')
-			AND r.status IN ('candidate', 'active')
-			AND (v.id IS NOT NULL OR f.id IS NOT NULL)
-		ORDER BY rrf_score DESC
-		LIMIT $4
+		SELECT
+			id,
+			title,
+			1.0 / (60 + ROW_NUMBER() OVER (ORDER BY embedding <=> $1)) as rrf_score,
+			COALESCE(1.0 - (embedding <=> $1), 0) as similarity
+		FROM records
+		WHERE (repo = $2 OR repo = '*')
+			AND status IN ('candidate', 'active')
+		ORDER BY embedding <=> $1
+		LIMIT $3
 	`
 
-	rows, err := t.tx.Query(ctx, query, embeddingVec, repo, query, limit)
+	rows, err := t.tx.Query(ctx, query, embeddingVec, repo, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query candidates: %w", err)
 	}
@@ -161,12 +141,11 @@ func (t *txStoreImpl) Create(ctx context.Context, r *record.Record) (*record.Rec
 		embeddingVec = pgvector.NewVector(r.Embedding)
 	}
 
-	// Compute tsvector in Go to avoid type resolution issues
+	// Compute tsvector via bound parameters (not string-concatenated SQL) —
+	// see tsvectorExpr's doc comment and the security skill's A05 guidance.
 	tagsStr := strings.Join(r.Tags, " ")
-	tsvec := fmt.Sprintf("setweight(to_tsvector('simple', %s), 'A') || setweight(to_tsvector('simple', %s), 'B') || setweight(to_tsvector('simple', %s), 'C')",
-		"'" + strings.ReplaceAll(r.Title, "'", "''") + "'",
-		"'" + strings.ReplaceAll(tagsStr, "'", "''") + "'",
-		"'" + strings.ReplaceAll(r.Content, "'", "''") + "'")
+	const tsvecArgStart = 21
+	tsvec := tsvectorExpr(tsvecArgStart)
 
 	query := `
 		INSERT INTO records (
@@ -185,6 +164,7 @@ func (t *txStoreImpl) Create(ctx context.Context, r *record.Record) (*record.Rec
 		r.ID, string(r.Kind), r.Title, r.Content, r.Repo, r.Files, r.CommitSHA, r.Ticket, r.Tags,
 		string(r.Status), r.DeprecationReason, r.SupersededBy, string(r.Source), r.Confidence,
 		r.SeenCount, r.UsedCount, r.CreatedAt, r.UpdatedAt, r.LastUsedAt, embeddingVec,
+		r.Title, tagsStr, r.Content,
 	).Scan(&r.ID)
 
 	if err != nil {
@@ -202,19 +182,19 @@ func (t *txStoreImpl) Update(ctx context.Context, id string, updates map[string]
 
 	// Whitelist allowed columns to update (same as Store.Update)
 	allowedColumns := map[string]bool{
-		"title":                true,
-		"content":              true,
-		"tags":                 true,
-		"files":                true,
-		"ticket":               true,
-		"status":               true,
-		"confidence":           true,
-		"deprecation_reason":   true,
-		"superseded_by":        true,
-		"seen_count":           true,
-		"used_count":           true,
-		"last_used_at":         true,
-		"embedding":            true,
+		"title":              true,
+		"content":            true,
+		"tags":               true,
+		"files":              true,
+		"ticket":             true,
+		"status":             true,
+		"confidence":         true,
+		"deprecation_reason": true,
+		"superseded_by":      true,
+		"seen_count":         true,
+		"used_count":         true,
+		"last_used_at":       true,
+		"embedding":          true,
 	}
 
 	// Build the SET clause dynamically
@@ -226,6 +206,12 @@ func (t *txStoreImpl) Update(ctx context.Context, id string, updates map[string]
 	setClauses = append(setClauses, "updated_at = $"+fmt.Sprint(argCount))
 	args = append(args, time.Now().UTC())
 	argCount++
+
+	// Track the placeholder number assigned to each of title/content, so
+	// the tsvector recompute below can bind the NEW value for whichever of
+	// them is part of this update (0 means "not part of this update, use
+	// the existing column" — see tsvectorUpdateExpr).
+	var titleArgIdx, contentArgIdx int
 
 	for col, val := range updates {
 		if !allowedColumns[col] {
@@ -241,30 +227,37 @@ func (t *txStoreImpl) Update(ctx context.Context, id string, updates map[string]
 
 		setClauses = append(setClauses, col+" = $"+fmt.Sprint(argCount))
 		args = append(args, val)
+		switch col {
+		case "title":
+			titleArgIdx = argCount
+		case "content":
+			contentArgIdx = argCount
+		}
+		argCount++
+	}
+
+	// tags is bound to its own column as a []string (above), but the
+	// tsvector recompute needs a space-joined string, so bind that
+	// separately rather than splicing it into SQL text.
+	var tagsArgIdx int
+	if tagsVal, hasTags := updates["tags"]; hasTags {
+		var tagsStr string
+		if tagsSlice, ok := tagsVal.([]string); ok {
+			tagsStr = strings.Join(tagsSlice, " ")
+		}
+		args = append(args, tagsStr)
+		tagsArgIdx = argCount
 		argCount++
 	}
 
 	args = append(args, id)
 
-	// If title, content, or tags were updated, recompute tsvector
-	if _, hasTitle := updates["title"]; hasTitle {
-		setClauses = append(setClauses, "tsvector_content = (SELECT "+
-			"setweight(to_tsvector('simple', COALESCE(title, '')), 'A') || "+
-			"setweight(to_tsvector('simple', COALESCE(array_to_string(tags, ' '), '')), 'B') || "+
-			"setweight(to_tsvector('simple', COALESCE(content, '')), 'C') "+
-			"FROM records WHERE id = $"+fmt.Sprint(argCount-1)+")")
-	} else if _, hasContent := updates["content"]; hasContent {
-		setClauses = append(setClauses, "tsvector_content = (SELECT "+
-			"setweight(to_tsvector('simple', COALESCE(title, '')), 'A') || "+
-			"setweight(to_tsvector('simple', COALESCE(array_to_string(tags, ' '), '')), 'B') || "+
-			"setweight(to_tsvector('simple', COALESCE(content, '')), 'C') "+
-			"FROM records WHERE id = $"+fmt.Sprint(argCount-1)+")")
-	} else if _, hasTags := updates["tags"]; hasTags {
-		setClauses = append(setClauses, "tsvector_content = (SELECT "+
-			"setweight(to_tsvector('simple', COALESCE(title, '')), 'A') || "+
-			"setweight(to_tsvector('simple', COALESCE(array_to_string(tags, ' '), '')), 'B') || "+
-			"setweight(to_tsvector('simple', COALESCE(content, '')), 'C') "+
-			"FROM records WHERE id = $"+fmt.Sprint(argCount-1)+")")
+	// If title, content, or tags were updated, recompute tsvector from the
+	// NEW values (bound above) for whichever of them changed, and the
+	// existing column for the others — never from a stale pre-update
+	// snapshot (AC-5/AC-8).
+	if titleArgIdx > 0 || contentArgIdx > 0 || tagsArgIdx > 0 {
+		setClauses = append(setClauses, "tsvector_content = "+tsvectorUpdateExpr(titleArgIdx, tagsArgIdx, contentArgIdx))
 	}
 
 	query := fmt.Sprintf(`

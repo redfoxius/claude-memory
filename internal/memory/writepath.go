@@ -59,6 +59,7 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 	// Fetch top-5 candidates in a transaction (AC-13, AC-16, AC-17).
 	var decision WriteAction
 	var targetID *string
+	var recordID string // Track the ID of the record created/updated by this Store call.
 	var candidates []*Candidate
 	var inJudgmentRange bool
 
@@ -75,8 +76,10 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			return fmt.Errorf("find candidates: %w", fetchErr)
 		}
 
-		// Check if inline source is in the 0.80-0.92 judgment range (AC-15).
-		if req.Source == record.SourceInline && len(candidates) > 0 {
+		// Check if inline source is in the StoreSimAsk-StoreSimUpdate judgment range (AC-15).
+		// An explicit decision is the caller's answer to an earlier
+		// needs_judgment response, so it skips the judgment-range exit.
+		if req.Source == record.SourceInline && req.ExtractionDecision == nil && len(candidates) > 0 {
 			topCandidate := candidates[0]
 			if topCandidate.Similarity >= s.cfg.StoreSimAsk && topCandidate.Similarity < s.cfg.StoreSimUpdate {
 				// In judgment range; signal caller to decide via ExtractionDecision on next call.
@@ -138,6 +141,8 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 				return fmt.Errorf("create record: %w", persistErr)
 			}
 
+			recordID = newRec.ID
+
 		case ActionUpdate:
 			// Update the existing record with new content/metadata.
 			// The target was identified during the decision phase.
@@ -145,11 +150,13 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 				return errors.New("update decision missing target id")
 			}
 
+			// updated_at is not passed here: the Store adapter always stamps
+			// it itself and rejects it as an update column, so including it
+			// failed every UPDATE/SUPERSEDE/NOOP against real Postgres.
 			updates := map[string]interface{}{
-				"title":      scrubbedTitle,
-				"content":    scrubbedContent,
-				"embedding":  embedding,
-				"updated_at": s.clock.Now(),
+				"title":     scrubbedTitle,
+				"content":   scrubbedContent,
+				"embedding": embedding,
 			}
 
 			if len(req.Tags) > 0 {
@@ -165,6 +172,8 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 				return fmt.Errorf("update record: %w", updateErr)
 			}
 
+			recordID = *targetID
+
 		case ActionSupersede:
 			// Deprecate the old record and create a new one.
 			if targetID == nil {
@@ -174,10 +183,9 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			// Deprecate the old record.
 			reason := fmt.Sprintf("Superseded by newer fact: %s", scrubbedTitle)
 			deprecateUpdates := map[string]interface{}{
-				"status":              record.StatusDeprecated,
+				"status":             record.StatusDeprecated,
 				"deprecation_reason": reason,
-				"superseded_by":       "", // Will be filled with the new record's ID after creation.
-				"updated_at":          s.clock.Now(),
+				"superseded_by":      "", // Will be filled with the new record's ID after creation.
 			}
 
 			_, deprecateErr := tx.Update(ctx, *targetID, deprecateUpdates)
@@ -238,6 +246,8 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 				return fmt.Errorf("set superseded_by on old record: %w", updateOldErr)
 			}
 
+			recordID = createdRec.ID
+
 		case ActionNoop:
 			// Increment seen_count on the existing record (AC-15).
 			// If seen_count reaches 2, promote candidate→active (AC-34).
@@ -254,7 +264,6 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			newSeenCount := currentRec.SeenCount + 1
 			updates := map[string]interface{}{
 				"seen_count": newSeenCount,
-				"updated_at": s.clock.Now(),
 			}
 
 			// Promote candidate→active if seen_count >= 2 (AC-34).
@@ -268,6 +277,8 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			if updateErr != nil {
 				return fmt.Errorf("increment seen_count: %w", updateErr)
 			}
+
+			recordID = *targetID
 		}
 
 		return nil
@@ -281,23 +292,24 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 	// The caller should re-call Store with an ExtractionDecision to proceed (AC-15).
 	if inJudgmentRange {
 		return &StoreResponse{
-			ID:                   "", // No record created; caller will decide.
+			ID:                   "",        // No record created; caller will decide.
 			Decision:             ActionAdd, // Default decision (caller may override).
 			CandidatesConsidered: candidates,
 		}, nil
 	}
 
 	return &StoreResponse{
-		ID:                   "", // TODO: capture created record ID from decision logic.
+		ID:                   recordID,
 		Decision:             decision,
 		CandidatesConsidered: candidates,
 	}, nil
 }
 
 // decideWriteAction determines whether to ADD/UPDATE/SUPERSEDE/NOOP based on
-// the source and top candidates. For inline sources in the 0.80-0.92 judgment range,
-// this returns nil error but signals via the decision that candidates were returned
-// for the caller to judge (caller should then re-call with ExtractionDecision).
+// the source and top candidates. For inline sources in the
+// StoreSimAsk-StoreSimUpdate judgment range, this returns nil error but
+// signals via the decision that candidates were returned for the caller to
+// judge (caller should then re-call with ExtractionDecision).
 func (s *Service) decideWriteAction(
 	ctx context.Context,
 	req *StoreRequest,
@@ -309,34 +321,9 @@ func (s *Service) decideWriteAction(
 		return ActionAdd, nil, nil
 	}
 
-	topCandidate := candidates[0]
-
-	// For inline sources: threshold-based decision (AC-15).
-	if req.Source == record.SourceInline {
-		if topCandidate.Similarity >= s.cfg.StoreSimUpdate {
-			// >= 0.92: NOOP or UPDATE depending on content enrichment.
-			// For simplicity, use NOOP (increment seen_count) if content is identical,
-			// or UPDATE if new content adds information.
-			// Since we can't reliably detect "enrichment" without more context,
-			// we default to NOOP. The caller can override by passing ExtractionDecision.
-			return ActionNoop, &topCandidate.ID, nil
-		} else if topCandidate.Similarity >= s.cfg.StoreSimAsk {
-			// Between 0.80 and 0.92: return candidates to the caller for judgment.
-			// Return ADD as the default decision but signal via candidates that
-			// the caller should review and potentially override with ExtractionDecision.
-			// We don't write anything here; the caller decides.
-			// Signal this by returning a special marker, but since WriteAction doesn't
-			// have a "ASK" variant, we return ActionAdd with a special flag.
-			// The presence of candidates in StoreResponse signals the caller to decide.
-			slog.InfoContext(ctx, "inline store: candidates in judgment range, returning for caller decision",
-				"similarity", topCandidate.Similarity, "threshold_ask", s.cfg.StoreSimAsk)
-			return ActionAdd, nil, nil
-		}
-		// < 0.80: ADD.
-		return ActionAdd, nil, nil
-	}
-
-	// For session/pr sources: honor ExtractionDecision if provided (AC-14).
+	// An explicit decision wins for every source: session/pr extraction
+	// (AC-14) and an inline caller resolving a needs_judgment response (AC-15).
+	// Targets are re-validated against the fresh top-5.
 	if req.ExtractionDecision != nil {
 		// Validate that the target ID is still in the fresh top-5.
 		if req.ExtractionDecision.TargetID != nil {
@@ -355,6 +342,34 @@ func (s *Service) decideWriteAction(
 			}
 		}
 		return req.ExtractionDecision.Action, req.ExtractionDecision.TargetID, nil
+	}
+
+	topCandidate := candidates[0]
+
+	// For inline sources: threshold-based decision (AC-15).
+	if req.Source == record.SourceInline {
+		if topCandidate.Similarity >= s.cfg.StoreSimUpdate {
+			// >= StoreSimUpdate: NOOP or UPDATE depending on content enrichment.
+			// For simplicity, use NOOP (increment seen_count) if content is identical,
+			// or UPDATE if new content adds information.
+			// Since we can't reliably detect "enrichment" without more context,
+			// we default to NOOP. The caller can override by passing ExtractionDecision.
+			return ActionNoop, &topCandidate.ID, nil
+		} else if topCandidate.Similarity >= s.cfg.StoreSimAsk {
+			// Between StoreSimAsk and StoreSimUpdate: return candidates to the
+			// caller for judgment.
+			// Return ADD as the default decision but signal via candidates that
+			// the caller should review and potentially override with ExtractionDecision.
+			// We don't write anything here; the caller decides.
+			// Signal this by returning a special marker, but since WriteAction doesn't
+			// have a "ASK" variant, we return ActionAdd with a special flag.
+			// The presence of candidates in StoreResponse signals the caller to decide.
+			slog.InfoContext(ctx, "inline store: candidates in judgment range, returning for caller decision",
+				"similarity", topCandidate.Similarity, "threshold_ask", s.cfg.StoreSimAsk)
+			return ActionAdd, nil, nil
+		}
+		// < StoreSimAsk: ADD.
+		return ActionAdd, nil, nil
 	}
 
 	// No explicit extraction decision provided; default to ADD for session/pr sources.

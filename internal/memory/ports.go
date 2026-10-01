@@ -47,7 +47,8 @@ type Store interface {
 
 	// DeleteCandidatesByTTL hard-deletes candidate records untouched for longer than ttlDays,
 	// preserving active and deprecated records regardless of age.
-	DeleteCandidatesByTTL(ctx context.Context, ttlDays int) error
+	// Returns the number of records deleted.
+	DeleteCandidatesByTTL(ctx context.Context, ttlDays int) (int, error)
 }
 
 // TxStore is the subset of Store available inside WithTx. Every call runs in
@@ -125,7 +126,8 @@ type SearchRecord struct {
 	Score      float64 // fused (RRF) rank score — ordering only
 	// Similarity is the cosine similarity of the query embedding to this
 	// record (0 when the search ran degraded / full-text-only). The hook
-	// threshold (AC-32, 0.75) compares against this, not Score.
+	// threshold (AC-32, config.Config.HookSimThreshold) compares against
+	// this, not Score.
 	Similarity float64
 	Unverified bool // True if Status is StatusCandidate.
 }
@@ -139,8 +141,9 @@ type Candidate struct {
 	Score float64
 	// Similarity is the cosine similarity (1 - cosine distance) between the
 	// write's embedding and this record's embedding, in [-1, 1]. The
-	// dedup thresholds (AC-15: 0.80 / 0.92) compare against this, never
-	// against Score.
+	// dedup thresholds (AC-15: config.Config.StoreSimAsk /
+	// config.Config.StoreSimUpdate) compare against this, never against
+	// Score.
 	Similarity float64
 }
 
