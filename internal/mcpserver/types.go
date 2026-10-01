@@ -29,6 +29,10 @@ type SearchResultItem struct {
 	Score      float64  `json:"score"`
 	Similarity float64  `json:"similarity"`
 	Unverified bool     `json:"unverified"`
+	// StaleHint is true when the record's files changed since it was
+	// recorded; StaleCommits is the commit count when known.
+	StaleHint    bool `json:"stale_hint,omitempty"`
+	StaleCommits int  `json:"stale_commits,omitempty"`
 }
 
 // SearchOutput is the output of memory_search.
@@ -91,6 +95,7 @@ type UpdateInput struct {
 	Ticket     *string  `json:"ticket,omitempty"`
 	Status     *string  `json:"status,omitempty" jsonschema:"candidate, active, or deprecated"`
 	Confidence *float64 `json:"confidence,omitempty"`
+	CommitSHA  *string  `json:"commit_sha,omitempty" jsonschema:"baseline commit for staleness checks; set it after verifying the record against current code"`
 }
 
 // DeprecateInput is the input to memory_deprecate.
@@ -135,12 +140,15 @@ type FeedbackOutput struct {
 // memory_update, memory_deprecate, and memory_list. The embedding vector
 // is intentionally omitted — it is never useful to a calling session.
 type RecordOutput struct {
-	ID                string   `json:"id"`
-	Kind              string   `json:"kind"`
-	Title             string   `json:"title"`
-	Content           string   `json:"content"`
-	Repo              string   `json:"repo"`
-	Namespace         string   `json:"namespace"`
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	Repo      string `json:"repo"`
+	Namespace string `json:"namespace"`
+	// StaleHint / StaleCommits: see SearchResultItem (memory_get only).
+	StaleHint         bool     `json:"stale_hint,omitempty"`
+	StaleCommits      int      `json:"stale_commits,omitempty"`
 	Files             []string `json:"files,omitempty"`
 	CommitSHA         string   `json:"commit_sha,omitempty"`
 	Ticket            string   `json:"ticket,omitempty"`

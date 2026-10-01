@@ -214,6 +214,9 @@ type UpdateRequest struct {
 	Ticket     *string
 	Status     *record.Status
 	Confidence *float64
+	// CommitSHA explicitly sets the record's baseline commit (e.g. after
+	// verifying the record against current code). Valid on its own.
+	CommitSHA *string
 }
 
 // DeprecateRequest is the input to Deprecate, corresponding to the memory_deprecate MCP tool.

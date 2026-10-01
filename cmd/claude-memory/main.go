@@ -156,6 +156,17 @@ func cmdServe(cfg *config.Config) error {
 	}
 	defer cleanup()
 
+	// Staleness checks: the server's working directory is its checkout.
+	// Resolved once; HEAD is read per call (no pinned head). Outside a
+	// checkout, nothing is ever flagged.
+	history := gitlog.Cached(gitlog.Exec{}, gitlog.NewMapCache(), cfg.StaleTimeout)
+	wd, _ := os.Getwd()
+	rctx, cancel := context.WithTimeout(ctx, time.Second)
+	if co, _, ok, err := history.Resolve(rctx, wd); err == nil && ok {
+		svc = svc.WithCheckout(co).WithCodeHistory(history, cfg.StaleTimeout)
+	}
+	cancel()
+
 	return serveCmd(ctx, cfg, svc)
 }
 

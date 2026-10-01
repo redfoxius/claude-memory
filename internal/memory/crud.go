@@ -109,6 +109,23 @@ func (s *Service) UpdateRecord(ctx context.Context, req *UpdateRequest) (*record
 		updates["ticket"] = *req.Ticket
 	}
 
+	// Commit baseline: an explicit value wins; otherwise a content/files
+	// change re-baselines when the files are clean (see baselineSHA).
+	if req.CommitSHA != nil {
+		if *req.CommitSHA != "" && !ValidCommitSHA(*req.CommitSHA) {
+			return nil, fmt.Errorf("invalid commit_sha %q", *req.CommitSHA)
+		}
+		updates["commit_sha"] = *req.CommitSHA
+	} else if contentChanged || len(req.Files) > 0 {
+		files := existing.Files
+		if len(req.Files) > 0 {
+			files = req.Files
+		}
+		if sha := s.baselineSHA(ctx, existing.Repo, files); sha != "" {
+			updates["commit_sha"] = sha
+		}
+	}
+
 	if req.Status != nil {
 		updates["status"] = *req.Status
 	}

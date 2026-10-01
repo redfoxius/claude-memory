@@ -46,6 +46,9 @@ type fakeHistory struct {
 	headCalls    atomic.Int32
 	changedCalls atomic.Int32
 	head         string
+	dirtyCalls   atomic.Int32
+	dirty        bool
+	dirtyErr     error
 	changedFn    func(ctx context.Context, sha string, files []string) (bool, int, error)
 }
 
@@ -60,7 +63,10 @@ func (f *fakeHistory) Changed(ctx context.Context, _, _, sha string, files []str
 	f.changedCalls.Add(1)
 	return f.changedFn(ctx, sha, files)
 }
-func (f *fakeHistory) Dirty(context.Context, string, []string) (bool, error) { return false, nil }
+func (f *fakeHistory) Dirty(context.Context, string, []string) (bool, error) {
+	f.dirtyCalls.Add(1)
+	return f.dirty, f.dirtyErr
+}
 
 const goodSHA = "abcdef1234567"
 

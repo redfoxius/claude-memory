@@ -60,6 +60,16 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 		ns = record.GlobalNamespace
 	}
 
+	// Commit baseline (staleness): an explicit commit_sha wins; otherwise
+	// inline/session records get HEAD when their files are clean. Computed
+	// before the transaction so no git process runs under the advisory lock.
+	commitSHA := req.CommitSHA
+	if commitSHA == nil && (req.Source == record.SourceInline || req.Source == record.SourceSession) {
+		if sha := s.baselineSHA(ctx, req.Repo, req.Files); sha != "" {
+			commitSHA = &sha
+		}
+	}
+
 	// Compute the advisory lock key: repo + hash(normalized title) (AC-16).
 	lockKey := computeLockKey(req.Repo, scrubbedTitle)
 
@@ -121,8 +131,8 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			if len(req.Files) > 0 {
 				newRec.Files = req.Files
 			}
-			if req.CommitSHA != nil {
-				newRec.CommitSHA = req.CommitSHA
+			if commitSHA != nil {
+				newRec.CommitSHA = commitSHA
 			}
 			if req.Ticket != nil {
 				newRec.Ticket = req.Ticket
@@ -173,6 +183,13 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			}
 			if len(req.Files) > 0 {
 				updates["files"] = req.Files
+				// New files re-baseline the record; without them the
+				// baseline is unchanged.
+				if commitSHA != nil {
+					updates["commit_sha"] = *commitSHA
+				}
+			} else if req.CommitSHA != nil {
+				updates["commit_sha"] = *req.CommitSHA
 			}
 
 			// Update without changing status; the old record stays as-is.
@@ -219,8 +236,8 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			if len(req.Files) > 0 {
 				newRec.Files = req.Files
 			}
-			if req.CommitSHA != nil {
-				newRec.CommitSHA = req.CommitSHA
+			if commitSHA != nil {
+				newRec.CommitSHA = commitSHA
 			}
 			if req.Ticket != nil {
 				newRec.Ticket = req.Ticket

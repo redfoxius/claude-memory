@@ -192,6 +192,7 @@ func (t *txStoreImpl) Update(ctx context.Context, id string, updates map[string]
 		"tags":               true,
 		"files":              true,
 		"ticket":             true,
+		"commit_sha":         true,
 		"status":             true,
 		"confidence":         true,
 		"deprecation_reason": true,

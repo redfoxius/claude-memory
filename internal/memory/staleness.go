@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"log/slog"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -278,4 +279,41 @@ func (s *Service) StaleHint(ctx context.Context, rec *record.Record) *StaleHint 
 		return nil
 	}
 	return &StaleHint{Commits: commits}
+}
+
+// baselineSHA returns the commit to record as a record's baseline, or "" when
+// none may be stamped: there must be a checkout and history, the record's
+// repo must be the checkout's repo, at least one usable file must exist, HEAD
+// must be known, and the listed files must have no uncommitted changes
+// (otherwise HEAD predates the code the record describes and the first
+// commit would flag it stale). Any failure leaves the baseline empty.
+func (s *Service) baselineSHA(ctx context.Context, repo string, files []string) string {
+	if s.history == nil || s.checkout == nil || repo == "" || repo == "*" || repo != s.checkout.Repo {
+		return ""
+	}
+	norm := NormalizeFiles(s.checkout.Dir, files)
+	if len(norm) == 0 {
+		return ""
+	}
+	head := s.currentHead(ctx)
+	if head == "" || !shaRe.MatchString(head) {
+		return ""
+	}
+	dirty, err := s.history.Dirty(ctx, s.checkout.Dir, norm)
+	if err != nil || dirty {
+		slog.DebugContext(ctx, "commit baseline not stamped", "dirty", dirty, "error", err)
+		return ""
+	}
+	return head
+}
+
+// ValidCommitSHA reports whether sha is acceptable as a stored commit_sha.
+func ValidCommitSHA(sha string) bool { return shaRe.MatchString(sha) }
+
+// Checkout reports the checkout the service was given, if any.
+func (s *Service) Checkout() (Checkout, bool) {
+	if s.checkout == nil {
+		return Checkout{}, false
+	}
+	return *s.checkout, true
 }

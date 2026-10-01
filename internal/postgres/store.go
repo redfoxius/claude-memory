@@ -201,6 +201,7 @@ func (s *Store) Update(ctx context.Context, id string, updates map[string]interf
 		"tags":               true,
 		"files":              true,
 		"ticket":             true,
+		"commit_sha":         true,
 		"status":             true,
 		"confidence":         true,
 		"deprecation_reason": true,
