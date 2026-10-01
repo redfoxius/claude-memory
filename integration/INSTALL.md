@@ -183,11 +183,26 @@ stop it manually if you're sure nothing else uses it.
 
 ## Namespaces
 
-Records are partitioned by namespace (e.g. a company vs. a side project).
-Copy `integration/namespaces.example.yaml` to
-`~/.config/claude-memory/namespaces.yaml` and map your project directories to
-namespaces; `MEMORY_NAMESPACE` overrides it per repo. When no namespace can
-be chosen (no file, no matching path, broken file) records use the shared
-`global` namespace. No namespace is special: the upgrade migration backfilled
-existing records to `acme`, so map your Acme directories to a
-`acme` namespace or those records stay invisible. See the example file.
+Records are partitioned by namespace (a company, a side project, ...). Local
+single-user database, so this is for relevance, not security: a memory from
+another project showing up occasionally is harmless — a reusable decision
+can even be useful.
+
+Create the mapping file as part of installation (no database needed):
+
+```bash
+# one namespace per project area; map as many as you like
+claude-memory namespaces init acme='~/work/acme/**' pet-game='~/src/pet-game/**'
+# or start with just the shared default and add projects later:
+claude-memory namespaces init
+claude-memory namespaces add acme '~/work/acme/**'
+
+claude-memory namespaces which .        # check what the current dir resolves to
+```
+
+Directories that match no mapping use `default:` (`global` unless you chose
+otherwise with `init --default NAME`), and `MEMORY_NAMESPACE` overrides it
+per repo. No namespace is special in the code. The upgrade migration
+backfilled pre-existing records to `acme`, so if you had records before
+namespaces, add a `acme` mapping or they stay invisible. See
+`integration/namespaces.example.yaml`.

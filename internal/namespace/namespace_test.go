@@ -84,3 +84,41 @@ func TestOverrideWins(t *testing.T) {
 		t.Errorf("got %q, %v", got, err)
 	}
 }
+
+func TestInitAddAndRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sub", "namespaces.yaml")
+	if err := Init(p, "", []Rule{{Namespace: "acme", Paths: []string{"/work/acme/**"}}}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := Init(p, "", nil, false); err == nil {
+		t.Error("Init must refuse to overwrite without force")
+	}
+	if err := Add(p, "pet-game", "/src/pet-game/**"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Add(p, "pet-game", "/src/pet-game/**", "/src/pg2"); err != nil { // dedups
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Default != Fallback {
+		t.Errorf("default = %q, want %q", c.Default, Fallback)
+	}
+	if got := c.Resolve("/src/pg2"); got != "pet-game" {
+		t.Errorf("Resolve = %q", got)
+	}
+	if n := len(c.Namespaces[1].Paths); n != 2 {
+		t.Errorf("pet-game paths = %d, want 2 (dedup)", n)
+	}
+	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, want 0600", st.Mode().Perm())
+	}
+	if err := Add(p, "Bad Name", "/x"); err == nil {
+		t.Error("expected invalid name error")
+	}
+	if err := Init(p, "global", nil, true); err != nil {
+		t.Errorf("force init: %v", err)
+	}
+}

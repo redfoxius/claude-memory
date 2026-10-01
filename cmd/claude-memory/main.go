@@ -31,6 +31,11 @@ func main() {
 }
 
 func run() error {
+	// "namespaces" is local file management: no database, Ollama or DSN needed.
+	if len(os.Args) > 1 && os.Args[1] == "namespaces" {
+		return cmdNamespaces(os.Args[2:])
+	}
+
 	// Load config from file first if it exists, then from environment.
 	configPath := filepath.Join(os.Getenv("HOME"), ".config", "claude-memory", "env")
 	if err := config.LoadFromFile(configPath); err != nil {
@@ -47,7 +52,7 @@ func run() error {
 	args := flag.Args()
 
 	if len(args) == 0 {
-		return fmt.Errorf("no subcommand specified; available: serve, hook, extract, ingest-pr, cleanup, seed, eval-retrieval")
+		return fmt.Errorf("no subcommand specified; available: serve, hook, extract, ingest-pr, cleanup, seed, eval-retrieval, namespaces")
 	}
 
 	subcommand := args[0]

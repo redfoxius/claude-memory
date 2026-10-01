@@ -1,4 +1,5 @@
-# Copy to ~/.config/claude-memory/namespaces.yaml
+# Normally created by `claude-memory namespaces init` / `namespaces add`.
+# Hand-edit if you prefer; copy to ~/.config/claude-memory/namespaces.yaml
 #
 # Resolution order for the namespace of a project directory:
 #   1. MEMORY_NAMESPACE env var (e.g. in a repo's .claude/settings.json "env")
