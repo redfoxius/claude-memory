@@ -30,6 +30,24 @@ type Store struct {
 // New creates a new Postgres store with the given DSN.
 // It attempts to run migrations idempotently before returning.
 func New(ctx context.Context, dsn string) (*Store, error) {
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	// Run migrations
+	if err := s.runMigrations(ctx); err != nil {
+		s.pool.Close()
+		return nil, fmt.Errorf("run migrations: %w", err)
+	}
+
+	return s, nil
+}
+
+// Open connects to Postgres without running migrations. It is for the hook's
+// latency-sensitive hot path, which assumes a long-running subcommand
+// (serve, seed, cleanup, ingest-pr) already applied the schema.
+func Open(ctx context.Context, dsn string) (*Store, error) {
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse dsn: %w", err)
@@ -46,15 +64,7 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
-	s := &Store{pool: pool}
-
-	// Run migrations
-	if err := s.runMigrations(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("run migrations: %w", err)
-	}
-
-	return s, nil
+	return &Store{pool: pool}, nil
 }
 
 // Close closes the connection pool.

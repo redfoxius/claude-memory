@@ -78,8 +78,12 @@ func run() error {
 // `02-plan.md:88-89`: every concrete adapter is built only here, and only
 // when actually needed). buildService below composes this with the other
 // adapters for subcommands that need the full memory.Service.
-func buildPostgresStore(ctx context.Context, cfg *config.Config) (*postgres.Store, func(), error) {
-	store, err := postgres.New(ctx, cfg.PGDSN)
+func buildPostgresStore(ctx context.Context, cfg *config.Config, migrate bool) (*postgres.Store, func(), error) {
+	open := postgres.New
+	if !migrate {
+		open = postgres.Open
+	}
+	store, err := open(ctx, cfg.PGDSN)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create postgres store: %w", err)
 	}
@@ -94,8 +98,8 @@ func buildPostgresStore(ctx context.Context, cfg *config.Config) (*postgres.Stor
 // buildService constructs the memory.Service with all its dependencies.
 // This is the composition root: the only place concrete adapters are
 // constructed.
-func buildService(ctx context.Context, cfg *config.Config) (*memory.Service, func(), error) {
-	store, cleanup, err := buildPostgresStore(ctx, cfg)
+func buildService(ctx context.Context, cfg *config.Config, migrate bool) (*memory.Service, func(), error) {
+	store, cleanup, err := buildPostgresStore(ctx, cfg, migrate)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -131,7 +135,7 @@ func (*systemClock) Now() time.Time {
 
 func cmdServe(cfg *config.Config) error {
 	ctx := context.Background()
-	svc, cleanup, err := buildService(ctx, cfg)
+	svc, cleanup, err := buildService(ctx, cfg, true)
 	if err != nil {
 		return err
 	}
@@ -144,7 +148,8 @@ func cmdHook(cfg *config.Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.HookTimeout)
 	defer cancel()
 
-	svc, cleanup, err := buildService(ctx, cfg)
+	// Hot path: no migration check (serve/seed/cleanup/ingest-pr apply the schema).
+	svc, cleanup, err := buildService(ctx, cfg, false)
 	if err != nil {
 		// Silent failure per AC-31: error on Ollama/Postgres down -> exit 0, no output
 		slog.DebugContext(ctx, "failed to build service", "error", err)
@@ -174,7 +179,7 @@ func cmdIngestPR(cfg *config.Config) error {
 
 	var svc extraction.StoreWriter
 	if !*dryRun {
-		s, cleanup, err := buildService(ctx, cfg)
+		s, cleanup, err := buildService(ctx, cfg, true)
 		if err != nil {
 			return fmt.Errorf("build service: %w", err)
 		}
@@ -190,7 +195,7 @@ func cmdIngestPR(cfg *config.Config) error {
 
 func cmdCleanup(cfg *config.Config) error {
 	ctx := context.Background()
-	store, cleanup, err := buildPostgresStore(ctx, cfg)
+	store, cleanup, err := buildPostgresStore(ctx, cfg, true)
 	if err != nil {
 		return err
 	}
@@ -205,7 +210,7 @@ func cmdEvalRetrieval(cfg *config.Config) error {
 	ctx := context.Background()
 	args := flag.Args()[1:] // Skip the subcommand itself
 
-	svc, cleanup, err := buildService(ctx, cfg)
+	svc, cleanup, err := buildService(ctx, cfg, true)
 	if err != nil {
 		return fmt.Errorf("build service: %w", err)
 	}

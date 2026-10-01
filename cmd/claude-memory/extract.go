@@ -126,7 +126,7 @@ func launchDetached(executable, logPath string, args ...string) error {
 func runExtract(cfg *config.Config, transcriptPath string) error {
 	ctx := context.Background()
 
-	svc, cleanup, err := buildService(ctx, cfg)
+	svc, cleanup, err := buildService(ctx, cfg, true)
 	if err != nil {
 		// Best-effort background job: log and exit 0, never crash noisily.
 		slog.Error("extract --run: failed to build service", "error", err)
