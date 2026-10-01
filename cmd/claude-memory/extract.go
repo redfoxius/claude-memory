@@ -138,7 +138,9 @@ func runExtract(cfg *config.Config, transcriptPath string) error {
 	// The session's own working directory decides the namespace; if the
 	// transcript can't be read here, ProcessSession reports it below.
 	if tr, perr := transcript.Parse(transcriptPath, transcript.Config{CharBudget: cfg.MaxContentChars}); perr == nil && tr.Cwd != "" {
-		svc = svc.WithNamespace(resolveNamespace(tr.Cwd))
+		ns := resolveNamespace(tr.Cwd)
+		warnIfFallback(tr.Cwd, ns)
+		svc = svc.WithNamespace(ns)
 	} else {
 		svc = svc.WithNamespace(resolveNamespace(""))
 	}

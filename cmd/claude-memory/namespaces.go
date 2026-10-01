@@ -17,7 +17,7 @@ const namespacesUsage = `usage:
 
   init   create ~/.config/claude-memory/namespaces.yaml (part of installation)
   add    map more project paths to a namespace (creates it if new)
-  which  show which namespace a directory resolves to (default: current dir)
+  which  show which namespace a directory resolves to and why (default: current dir)
 
 With no mappings, "init" creates a file whose default is "global": every
 project shares one namespace until you add mappings. GLOB examples:
@@ -73,7 +73,8 @@ func cmdNamespaces(args []string) error {
 		if abs, err := filepath.Abs(dir); err == nil {
 			dir = abs
 		}
-		fmt.Println(resolveNamespace(dir))
+		ns, why := explainNamespace(dir)
+		fmt.Printf("%s\t(%s)\n", ns, why)
 		return nil
 	}
 	return fmt.Errorf("unknown namespaces command %q\n%s", args[0], namespacesUsage)

@@ -12,10 +12,14 @@ import (
 
 	"claude-memory/internal/config"
 	"claude-memory/internal/extraction"
-	"claude-memory/internal/memory"
 	"claude-memory/internal/prcursor"
 	"claude-memory/internal/prsource"
 )
+
+// scopeFunc returns the writer scoped to the namespace a repo path resolves
+// to. The composition root supplies it (it knows the concrete service); nil
+// means "use svc unchanged" (dry runs, tests).
+type scopeFunc func(repoPath string) extraction.StoreWriter
 
 // runIngestPR implements the "ingest-pr" subcommand's work (AC-26, AC-27,
 // AC-28, AC-58): for each configured local repo, detect its PR provider
@@ -33,6 +37,7 @@ func runIngestPR(
 	svc extraction.StoreWriter,
 	cursorStore *prcursor.Store,
 	client prsource.Source,
+	scope scopeFunc,
 	dryRun bool,
 ) error {
 	repos := discoverRepos(cfg.PRIngestRepos)
@@ -44,7 +49,7 @@ func runIngestPR(
 	for _, repoPath := range repos {
 		// nil runner -> extraction.ProcessPR constructs the real `claude -p`
 		// haiku runner itself; tests inject a fake runner instead.
-		ingestOneRepo(ctx, svc, client, cursorStore, cfg, repoPath, dryRun, nil)
+		ingestOneRepo(ctx, svc, client, cursorStore, cfg, repoPath, scope, dryRun, nil)
 	}
 
 	return nil
@@ -61,6 +66,7 @@ func ingestOneRepo(
 	cursorStore *prcursor.Store,
 	cfg *config.Config,
 	repoPath string,
+	scope scopeFunc,
 	dryRun bool,
 	haikuRunner extraction.HaikuRunner,
 ) {
@@ -79,8 +85,8 @@ func ingestOneRepo(
 	ref.Name = filepath.Base(repoPath)
 
 	// Each repo is ingested into the namespace its path maps to.
-	if sc, ok := svc.(interface{ WithNamespace(string) *memory.Service }); ok {
-		svc = sc.WithNamespace(resolveNamespace(repoPath))
+	if scope != nil {
+		svc = scope(repoPath)
 	}
 
 	if provider != prsource.ProviderAzureDevOps {

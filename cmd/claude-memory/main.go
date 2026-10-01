@@ -203,7 +203,15 @@ func cmdIngestPR(cfg *config.Config) error {
 	cursorStore := prcursor.NewStore(filepath.Join(stateDir(), "pr-cursors"))
 	client := azuredevops.New(nil)
 
-	return runIngestPR(ctx, cfg, svc, cursorStore, client, *dryRun)
+	var scope scopeFunc
+	if concrete, ok := svc.(*memory.Service); ok {
+		scope = func(repoPath string) extraction.StoreWriter {
+			ns := resolveNamespace(repoPath)
+			warnIfFallback(repoPath, ns)
+			return concrete.WithNamespace(ns)
+		}
+	}
+	return runIngestPR(ctx, cfg, svc, cursorStore, client, scope, *dryRun)
 }
 
 func cmdCleanup(cfg *config.Config) error {

@@ -122,3 +122,22 @@ func TestInitAddAndRoundTrip(t *testing.T) {
 		t.Errorf("force init: %v", err)
 	}
 }
+
+func TestExplainAndTieBreak(t *testing.T) {
+	c := &Config{Default: "d", Namespaces: []Rule{
+		{Namespace: "wide", Paths: []string{"/p/**"}},
+		{Namespace: "exact", Paths: []string{"/p"}},
+	}}
+	if ns, why := c.Explain("/p"); ns != "exact" || why != "rule /p" {
+		t.Errorf("Explain(/p) = %q, %q", ns, why)
+	}
+	if ns, _ := c.Explain("/p/x"); ns != "wide" {
+		t.Errorf("Explain(/p/x) = %q", ns)
+	}
+	if ns, why := c.Explain("/q"); ns != "d" || why != WhyDefault {
+		t.Errorf("Explain(/q) = %q, %q", ns, why)
+	}
+	if ns, why := (&Config{}).Explain("/q"); ns != Fallback || why != WhyFallback {
+		t.Errorf("empty Explain = %q, %q", ns, why)
+	}
+}

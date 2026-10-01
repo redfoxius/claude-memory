@@ -34,3 +34,36 @@ var resolveNamespace = func(dir string) string {
 	}
 	return ns
 }
+
+// loadNamespaces loads namespaces.yaml, degrading to an empty config (with a
+// warning) when it is unreadable.
+func loadNamespaces() *namespace.Config {
+	nsCfg, err := namespace.Load(namespacesFile())
+	if err != nil {
+		slog.Warn("namespaces.yaml unusable; using fallback namespace", "error", err)
+		return &namespace.Config{}
+	}
+	return nsCfg
+}
+
+// explainNamespace is resolveNamespace plus how the result was chosen
+// (env, rule <glob>, default, fallback), for `namespaces which`.
+func explainNamespace(dir string) (ns, why string) {
+	nsCfg := loadNamespaces()
+	if override := os.Getenv(config.NamespaceEnv); override != "" {
+		if got, err := nsCfg.ForDir(override, dir); err == nil {
+			return got, "env " + config.NamespaceEnv
+		}
+	}
+	return nsCfg.Explain(dir)
+}
+
+// warnIfFallback logs once per call site when a background writer (session
+// extraction, PR ingest) had to use the built-in global fallback because no
+// mapping exists for dir — a hint to run `claude-memory namespaces add`.
+// Records written this way can be re-homed later (see DEPLOY.md).
+func warnIfFallback(dir, ns string) {
+	if _, why := explainNamespace(dir); why == namespace.WhyFallback {
+		slog.Warn("no namespace mapping for directory; writing to the shared global namespace (see `claude-memory namespaces add`)", "dir", dir, "namespace", ns)
+	}
+}

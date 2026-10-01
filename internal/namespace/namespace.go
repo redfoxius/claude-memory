@@ -72,29 +72,43 @@ func Load(path string) (*Config, error) {
 }
 
 // Resolve returns the namespace for dir: the rule whose matching path glob
-// is most specific (longest literal prefix, then most path segments) wins;
-// otherwise `default:`, otherwise Fallback (global).
+// is most specific (longest literal prefix; an exact path beats "<path>/**")
+// wins; otherwise `default:`, otherwise Fallback (global).
 func (c *Config) Resolve(dir string) string {
+	ns, _ := c.Explain(dir)
+	return ns
+}
+
+// Why values returned by Explain.
+const (
+	WhyRule     = "rule"     // a path glob in namespaces.yaml matched
+	WhyDefault  = "default"  // no glob matched; the file's `default:`
+	WhyFallback = "fallback" // nothing configured; built-in global
+)
+
+// Explain is Resolve plus how the namespace was chosen: WhyRule (with the
+// matching glob in detail), WhyDefault or WhyFallback.
+func (c *Config) Explain(dir string) (ns, why string) {
 	dir = filepath.Clean(dir)
-	best, bestScore := "", -1
+	best, bestGlob, bestScore := "", "", -1
 	for _, r := range c.Namespaces {
 		for _, g := range r.Paths {
-			g = c.expand(g)
-			if !match(g, dir) {
+			eg := c.expand(g)
+			if !match(eg, dir) {
 				continue
 			}
-			if s := specificity(g); s > bestScore {
-				best, bestScore = r.Namespace, s
+			if s := specificity(eg); s > bestScore {
+				best, bestGlob, bestScore = r.Namespace, g, s
 			}
 		}
 	}
 	switch {
 	case best != "":
-		return best
+		return best, WhyRule + " " + bestGlob
 	case c.Default != "":
-		return c.Default
+		return c.Default, WhyDefault
 	}
-	return Fallback
+	return Fallback, WhyFallback
 }
 
 func (c *Config) expand(g string) string {
@@ -110,7 +124,7 @@ func specificity(g string) int {
 	if i := strings.IndexAny(g, "*?["); i >= 0 {
 		return i
 	}
-	return len(g) + 1 // an exact path beats any wildcard of equal prefix
+	return len(g) + 2 // an exact path beats "<path>/**" (whose prefix is len+1)
 }
 
 // match reports whether dir matches glob g, where "**" matches any number

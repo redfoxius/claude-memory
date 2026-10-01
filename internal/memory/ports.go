@@ -125,6 +125,7 @@ type SearchRecord struct {
 	Kind       record.Kind
 	Title      string
 	Repo       string
+	Namespace  string // "global" rows are shared across namespaces
 	Tags       []string
 	Status     record.Status
 	Confidence float64

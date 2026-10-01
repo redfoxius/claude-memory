@@ -100,6 +100,7 @@ func (s *Store) searchHybridRRF(
 			r.kind,
 			r.title,
 			r.repo,
+			r.namespace,
 			r.tags,
 			r.status,
 			r.confidence,
@@ -130,13 +131,14 @@ func (s *Store) searchHybridRRF(
 		var kind string
 		var title string
 		var repo string
+		var namespace string
 		var tags []string
 		var status string
 		var confidence float64
 		var score float64
 		var similarity float64
 
-		if err := rows.Scan(&id, &kind, &title, &repo, &tags, &status, &confidence, &score, &similarity); err != nil {
+		if err := rows.Scan(&id, &kind, &title, &repo, &namespace, &tags, &status, &confidence, &score, &similarity); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 
@@ -145,6 +147,7 @@ func (s *Store) searchHybridRRF(
 			Kind:       record.Kind(kind),
 			Title:      title,
 			Repo:       repo,
+			Namespace:  namespace,
 			Tags:       tags,
 			Status:     record.Status(status),
 			Confidence: confidence,
@@ -206,6 +209,7 @@ func (s *Store) searchFullTextOnly(
 			kind,
 			title,
 			repo,
+			namespace,
 			tags,
 			status,
 			confidence,
@@ -232,12 +236,13 @@ func (s *Store) searchFullTextOnly(
 		var kind string
 		var title string
 		var repo string
+		var namespace string
 		var tags []string
 		var status string
 		var confidence float64
 		var score float64
 
-		if err := rows.Scan(&id, &kind, &title, &repo, &tags, &status, &confidence, &score); err != nil {
+		if err := rows.Scan(&id, &kind, &title, &repo, &namespace, &tags, &status, &confidence, &score); err != nil {
 			return nil, fmt.Errorf("scan full-text result: %w", err)
 		}
 
@@ -246,6 +251,7 @@ func (s *Store) searchFullTextOnly(
 			Kind:       record.Kind(kind),
 			Title:      title,
 			Repo:       repo,
+			Namespace:  namespace,
 			Tags:       tags,
 			Status:     record.Status(status),
 			Confidence: confidence,

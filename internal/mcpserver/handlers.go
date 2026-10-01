@@ -45,6 +45,7 @@ func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in Se
 			Kind:       string(r.Kind),
 			Title:      r.Title,
 			Repo:       r.Repo,
+			Namespace:  r.Namespace,
 			Tags:       r.Tags,
 			Status:     string(r.Status),
 			Confidence: r.Confidence,

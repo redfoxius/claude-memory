@@ -22,6 +22,7 @@ type SearchResultItem struct {
 	Kind       string   `json:"kind"`
 	Title      string   `json:"title"`
 	Repo       string   `json:"repo"`
+	Namespace  string   `json:"namespace"`
 	Tags       []string `json:"tags,omitempty"`
 	Status     string   `json:"status"`
 	Confidence float64  `json:"confidence"`
@@ -138,6 +139,7 @@ type RecordOutput struct {
 	Title             string   `json:"title"`
 	Content           string   `json:"content"`
 	Repo              string   `json:"repo"`
+	Namespace         string   `json:"namespace"`
 	Files             []string `json:"files,omitempty"`
 	CommitSHA         string   `json:"commit_sha,omitempty"`
 	Ticket            string   `json:"ticket,omitempty"`
