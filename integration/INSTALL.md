@@ -25,20 +25,27 @@ wrappers below, which use an absolute path, don't need it to be).
 
 ## 2. Create the laptop env file
 
+Run this in a regular terminal (not via Claude Code's `!` prefix — `read -s`
+needs an interactive TTY). The password is typed hidden and never lands in
+shell history or the chat:
+
 ```bash
 mkdir -p ~/.config/claude-memory
-cat > ~/.config/claude-memory/env <<'EOF'
-MEMORY_PG_DSN=postgresql://claude_memory:<APP_DB_PASSWORD>@<POSTGRES_BIND_IP>:5432/claude_memory
-MEMORY_OLLAMA_URL=http://127.0.0.1:11434
-MEMORY_EMBED_MAX_TOKENS=2048
-EOF
-chmod 600 ~/.config/claude-memory/env
+read -rs "?APP_DB_PASSWORD: " PW && echo && umask 077 && printf \
+  'MEMORY_PG_DSN=postgresql://claude_memory:%s@<POSTGRES_BIND_IP>:5432/claude_memory\nMEMORY_OLLAMA_URL=http://127.0.0.1:11434\nMEMORY_EMBED_MAX_TOKENS=2048\nMEMORY_PR_INGEST_REPOS=%s\n' \
+  "$PW" "$HOME/work/acme" > ~/.config/claude-memory/env && unset PW \
+  && chmod 600 ~/.config/claude-memory/env && echo "env ok"
 ```
 
-Fill in `<APP_DB_PASSWORD>` / `<POSTGRES_BIND_IP>` per `DEPLOY.md`.
-`config.LoadFromFile` (`internal/config/config.go`) refuses to load this
-file if it is group/world-readable, so the `chmod 600` above is not
-optional.
+Replace `<POSTGRES_BIND_IP>` with the server's Tailscale IP (`DEPLOY.md`).
+(`read -rs "?prompt"` is zsh syntax; in bash use `read -rsp "prompt: " PW`.)
+If the password contains `@ : / %`, percent-encode it in the DSN.
+`config.LoadFromFile` refuses the file if it is group/world-readable.
+Check it without revealing the password:
+
+```bash
+sed -E 's#(claude_memory:)[^@]*@#\1****@#' ~/.config/claude-memory/env
+```
 
 ## 3. Install and configure Ollama
 
@@ -89,7 +96,10 @@ cp -r integration/skills/remember ~/.claude/skills/
 cp -r integration/skills/memory-digest ~/.claude/skills/
 ```
 
-## 8. Load the launchd jobs (PR ingest + cleanup)
+## 8. (Optional) Load the launchd jobs (PR ingest + cleanup)
+
+Skip this to run `ingest-pr` / `cleanup` by hand (see `USAGE.md`); the
+first `ingest-pr` run spends two haiku calls per PR over the last 30 days.
 
 ```bash
 mkdir -p ~/.local/bin ~/.local/state/claude-memory
@@ -112,6 +122,8 @@ to the comma-separated local repo paths (or root directories) you want
 `ingest-pr` to scan, if you haven't already.
 
 ## 9. Verify
+
+After verifying, see `USAGE.md` for day-to-day operation.
 
 **MCP tool list** (no Claude Code needed — talks to the binary directly):
 

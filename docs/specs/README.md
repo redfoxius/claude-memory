@@ -32,7 +32,35 @@ Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
 - Rough size: ~1 day incl. tests; full SDD flow (next spec version → plan → plan
   review ×2 → implementation).
 
-### 2. staleness check + usage metrics — after namespaces
+### 2. portable install: any host, any user — right after namespaces
+
+Today the install is tied to the owner's setup (checked 2026-10-01): client
+is macOS-only (Homebrew Ollama, launchd), Windows doesn't build
+(`cmd/claude-memory/extract.go` uses `syscall.SysProcAttr.Setsid`), the
+server path assumes Tailscale (`pg_hba` allows only `100.64.0.0/10`), there is
+no all-local variant (compose uses `network_mode: host`, which Docker Desktop
+on macOS doesn't handle well), seed/snippet/skills are Acme-specific, and
+installation is 9 manual steps. Goal: someone else can install it on their
+own machine(s) in minutes.
+- **Topologies documented and supported:** (a) all-local — Postgres on the
+  laptop, port published on `127.0.0.1`, no Tailscale (separate compose
+  file / profile, `pg_hba` for the Docker bridge + localhost); (b) remote
+  server over Tailscale (current); (c) remote server over another VPN/LAN —
+  configurable allowed subnet in `pg_hba` instead of hardcoded CGNAT.
+- **Linux client:** Ollama as a systemd service, systemd user timers instead
+  of launchd for ingest-pr/cleanup.
+- **Idempotent `install.sh`:** checks prerequisites (go or prebuilt binary,
+  ollama, claude CLI), installs the binary, creates the env file with a hidden
+  password prompt, registers the MCP server, merges hooks into
+  `~/.claude/settings.json` with a backup, copies skills, optional
+  scheduling; every step confirmable; `--uninstall`.
+- **Neutral defaults for other users:** `seed/facts.example.yaml` without
+  Acme facts; CLAUDE.md snippet and skills worded for any `CLAUDE.md`.
+- **Windows:** either a Windows-specific detached-process path for
+  `extract`, or WSL as the documented supported route.
+- Rough size: S–M.
+
+### 3. staleness check + usage metrics — after portable install
 
 - **Staleness check on retrieval.** Records already carry `files[]` and
   `commit_sha`. When a record is returned (hook card, `memory_search`,
@@ -50,7 +78,7 @@ Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
   stale-flag rate. No content in events — ids and enums only.
 - Rough size: S each.
 
-### 3. management CLI (`review`) + import of existing knowledge — after 2
+### 4. management CLI (`review`) + import of existing knowledge — after 3
 
 - **CLI:** `claude-memory ls|show|rm|edit|promote` and an interactive
   `claude-memory review` that walks `candidate` records (newest first, with
@@ -65,7 +93,7 @@ Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
   `CLAUDE.md`/`MEMORY.md` index files.
 - Rough size: S–M.
 
-### 4. PR ingest: GitHub + GitLab providers, per-namespace config — after namespaces
+### 5. PR ingest: GitHub + GitLab providers, per-namespace config — after namespaces
 
 MVP already has the provider-neutral `PRSource` port, auto-detection from the
 repo's git `origin`, and per-provider cursors (spec AC-58); only Azure DevOps
@@ -81,7 +109,7 @@ is implemented. This item adds:
 - Repos to ingest = git repos under the namespace's `paths`.
 - Rough size: S per provider + S for config.
 
-### 5. full-text search for natural-language queries — small, can go first
+### 6. full-text search for natural-language queries — small, can go first
 
 Measured 2026-10-01 (eval harness): `plainto_tsquery` ANDs every word of
 the query, so any natural-language prompt (hook, `memory_search`) gets **no**
@@ -97,7 +125,7 @@ matches help only for short, identifier-style queries.
   sentence; require identifier recall@3 = 100% and no paraphrase regression.
 - Rough size: S.
 
-### 6. integration tests for UPDATE / SUPERSEDE through the service — small
+### 7. integration tests for UPDATE / SUPERSEDE through the service — small
 
 `writepath.go` sent `updated_at` in UPDATE / SUPERSEDE / NOOP update maps and
 every such write failed on real Postgres; it was caught only by the eval's
@@ -112,7 +140,7 @@ call the adapter directly).
   content).
 - Rough size: S.
 
-### 7. hook latency: skip migrations on the hot path — tiny
+### 8. hook latency: skip migrations on the hot path — tiny
 
 Measured 2026-10-01 on the real setup (laptop → tailnet Postgres): hook
 round-trip 215–343 ms, at/over the AC-30 p95 budget of 300 ms. Every
