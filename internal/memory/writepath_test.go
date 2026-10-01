@@ -331,6 +331,12 @@ func TestStore_Supersede_WritesBothRowsInOneTx(t *testing.T) {
 	if _, ok := deprecateCall.updates["deprecation_reason"]; !ok {
 		t.Error("expected a deprecation_reason to be recorded on SUPERSEDE")
 	}
+	if _, ok := deprecateCall.updates["superseded_by"]; ok {
+		t.Error("superseded_by must only be set after the new record exists (an empty string is not a valid UUID)")
+	}
+	if createCalls[0].Namespace != DefaultNamespace {
+		t.Errorf("superseding record namespace = %q, want %q (an unscoped row is unreachable)", createCalls[0].Namespace, DefaultNamespace)
+	}
 
 	linkCall := updateCalls[1]
 	if linkCall.id != oldID {

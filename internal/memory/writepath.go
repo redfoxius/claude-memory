@@ -194,7 +194,8 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			deprecateUpdates := map[string]interface{}{
 				"status":             record.StatusDeprecated,
 				"deprecation_reason": reason,
-				"superseded_by":      "", // Will be filled with the new record's ID after creation.
+				// superseded_by is set below, once the new record's ID exists
+				// (an empty string is not a valid UUID for that column).
 			}
 
 			_, deprecateErr := tx.Update(ctx, *targetID, deprecateUpdates)
@@ -212,6 +213,7 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 				req.Source,
 				defaultConfidenceForSource(req.Source, req.Confidence),
 			)
+			newRec.Namespace = ns
 
 			// Set optional fields.
 			if len(req.Files) > 0 {

@@ -101,6 +101,10 @@ func (s *Store) runMigrations(ctx context.Context) error {
 
 // Create persists a new record and returns it with all fields set.
 func (s *Store) Create(ctx context.Context, r *record.Record) (*record.Record, error) {
+	if r.Namespace == "" {
+		// An unscoped row would be unreachable by every search.
+		return nil, errors.New("create record: namespace is required")
+	}
 	if r.ID == "" {
 		r.ID = uuid.New().String()
 	}

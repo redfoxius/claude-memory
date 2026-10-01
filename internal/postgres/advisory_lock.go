@@ -128,6 +128,10 @@ func (t *txStoreImpl) Get(ctx context.Context, id string) (*record.Record, error
 
 // Create is the transaction-scoped version of Store.Create.
 func (t *txStoreImpl) Create(ctx context.Context, r *record.Record) (*record.Record, error) {
+	if r.Namespace == "" {
+		// An unscoped row would be unreachable by every search.
+		return nil, errors.New("create record: namespace is required")
+	}
 	if r.ID == "" {
 		return nil, errors.New("create: record ID must be set")
 	}
