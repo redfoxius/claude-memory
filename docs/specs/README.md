@@ -126,3 +126,43 @@ round-trip 215–343 ms, at/over the AC-30 p95 budget of 300 ms. Every
 Run migrations only from `serve` / `seed` / `cleanup` / `ingest-pr` (or an
 explicit `migrate` subcommand) and open the hook's pool without them; then
 re-measure p95 over ~50 prompts.
+
+### 8. `claude-memory install` + `doctor` — interactive, re-runnable setup
+
+Added 2026-10-01 at the owner's request. Today installation is ~10 manual steps
+across `integration/INSTALL.md` and `DEPLOY.md` (only `namespaces init` is a
+command). Goal: one guided, safe, repeatable setup plus a health check.
+
+- **`claude-memory install`** — interactive wizard (prompts with sensible
+  defaults; `--yes`/flags and `--dry-run` for non-interactive use).
+  - Detects the OS/arch (macOS, Linux; say clearly what is unsupported) and
+    picks the matching service manager (launchd vs systemd user timers vs
+    cron) and package hints (brew/apt).
+  - Asks the **topology**: (a) everything local on this machine (local Postgres
+    + pgvector + Ollama), (b) Postgres on a remote server (e.g. over Tailscale)
+    with Ollama local, (c) Postgres in Docker (local or on a server — generate
+    the compose file/run it on request); embeddings via local Ollama or a
+    remote Ollama URL.
+  - Steps, each shown before it runs and individually skippable: env file
+    (0600, DSN + Ollama), database reachable + extensions + migrations,
+    Ollama model pull, `namespaces init` (interactive: add projects), MCP
+    registration (`claude mcp add`), hooks merged into `~/.claude/settings.json`
+    (backup + idempotent JSON merge, never clobber), CLAUDE.md snippet between
+    markers, skills copy, scheduled jobs (PR ingest, cleanup), optional seed.
+  - **Re-runnable**: detects what is already done (idempotent steps, marker
+    blocks, hash/diff of installed files), shows a status table, offers
+    repair/upgrade/reconfigure per step, never duplicates or overwrites
+    user edits without asking; `install --upgrade` after a new binary.
+  - `claude-memory uninstall` reverses everything it installed (keeps data
+    unless asked).
+- **`claude-memory doctor`** — read-only health check with actionable output:
+  binary/version, env file perms, Postgres reachable + pgvector + schema
+  version, Ollama up + model present + embed round-trip, MCP registered,
+  hooks present and valid, `git` on PATH, namespace resolution for the cwd,
+  scheduled jobs loaded, spool/cache dirs, optional hook latency probe
+  (p50/p95 over N synthetic prompts). Exit code non-zero on failures;
+  `--json` for scripting; `install` runs it at the end.
+- Open design points for the spec: which platforms to support first, how to
+  drive Docker safely, secrets handling for the DSN prompt, how much of
+  `DEPLOY.md` (server side) the wizard should automate vs. print.
+- Rough size: M–L.
