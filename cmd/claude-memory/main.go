@@ -237,5 +237,6 @@ func cmdEvalRetrieval(cfg *config.Config) error {
 	}
 	defer cleanup()
 
-	return evalCmd(ctx, args, svc)
+	// Fixtures are synthetic: keep them out of every real namespace.
+	return evalCmd(ctx, args, svc.WithNamespace("eval"))
 }

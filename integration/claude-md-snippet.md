@@ -64,4 +64,4 @@ the current namespace plus `global`; you normally do nothing special.
 
 Only pass `namespace: "global"` to `memory_store` for a stack-generic fact
 that is useful in every project (a Go, Docker or Postgres gotcha) and
-contains nothing specific to this project. Omit it otherwise.
+contains nothing specific to this project. Omit it otherwise. Records found in `global` are shared by every project: do not enrich them with project-specific details.

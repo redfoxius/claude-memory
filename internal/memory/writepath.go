@@ -301,6 +301,7 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 	// The caller should re-call Store with an ExtractionDecision to proceed (AC-15).
 	if inJudgmentRange {
 		return &StoreResponse{
+			Namespace:            ns,
 			ID:                   "",        // No record created; caller will decide.
 			Decision:             ActionAdd, // Default decision (caller may override).
 			CandidatesConsidered: candidates,
@@ -308,6 +309,7 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 	}
 
 	return &StoreResponse{
+		Namespace:            ns,
 		ID:                   recordID,
 		Decision:             decision,
 		CandidatesConsidered: candidates,

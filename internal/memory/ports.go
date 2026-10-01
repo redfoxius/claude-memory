@@ -155,20 +155,20 @@ type Candidate struct {
 
 // StoreRequest is the input to Store, corresponding to the memory_store MCP tool.
 type StoreRequest struct {
-	Kind              record.Kind
-	Title             string
-	Content           string
+	Kind    record.Kind
+	Title   string
+	Content string
 	// Namespace overrides the service's namespace for this write. Only
 	// record.GlobalNamespace is accepted (explicit shared facts); empty means
 	// the service's own namespace.
-	Namespace         string
-	Repo              string
-	Files             []string
-	CommitSHA         *string
-	Ticket            *string
-	Tags              []string
-	Source            record.Source
-	Confidence        *float64 // If nil, defaults are applied per source (AC-29).
+	Namespace          string
+	Repo               string
+	Files              []string
+	CommitSHA          *string
+	Ticket             *string
+	Tags               []string
+	Source             record.Source
+	Confidence         *float64            // If nil, defaults are applied per source (AC-29).
 	ExtractionDecision *ExtractionDecision // Optional; honored only for session/pr sources.
 }
 
@@ -192,6 +192,8 @@ const (
 
 // StoreResponse is the output of Store, corresponding to the memory_store MCP tool.
 type StoreResponse struct {
+	// Namespace is where the write was (or would have been) made.
+	Namespace            string
 	ID                   string
 	Decision             WriteAction
 	CandidatesConsidered []*Candidate
@@ -211,17 +213,17 @@ type UpdateRequest struct {
 
 // DeprecateRequest is the input to Deprecate, corresponding to the memory_deprecate MCP tool.
 type DeprecateRequest struct {
-	ID          string
-	Reason      string
+	ID           string
+	Reason       string
 	SupersededBy *string
 }
 
 // ListFilters configures the List query.
 type ListFilters struct {
 	Namespace *string
-	Repo   *string
-	Kind   *record.Kind
-	Status *record.Status
+	Repo      *string
+	Kind      *record.Kind
+	Status    *record.Status
 }
 
 // FeedbackRequest is the input to Feedback, corresponding to the memory_feedback MCP tool.

@@ -197,7 +197,7 @@ The container restarts and runs any new migrations on startup (via `docker-entry
 
 `claude-memory` applies its own (idempotent) migrations when `serve`, `seed`, `cleanup`, `ingest-pr` or `extract` start — but **not** the prompt hook, which skips the check to stay inside its latency budget. After installing a new binary, run one of those once before relying on the hook (`claude-memory cleanup` is harmless), or just start Claude Code (the MCP server runs `serve`).
 
-Migration 0002 adds `records.namespace` and backfills every existing record to `acme`. Then run `claude-memory namespaces init ...` / `namespaces add acme '<path>/**'` on the laptop (see `integration/INSTALL.md` step 2a) so those records are visible from your Acme directories. Rolling back to an older binary after migrating requires `ALTER TABLE records ALTER COLUMN namespace SET DEFAULT 'global';` (or restoring the backup), because the old inserts don't supply a namespace.
+Migration 0002 adds `records.namespace` and backfills every existing record to `acme`. **Before** starting Claude Code on the new binary, run `claude-memory namespaces init acme='<path>/**'` (or `namespaces add`) on the laptop (see `integration/INSTALL.md` step 2a) so those records are visible from your Acme directories and new facts don't land in `global`; if some already did, use the re-home SQL below. Rolling back to an older binary after migrating requires `ALTER TABLE records ALTER COLUMN namespace SET DEFAULT 'global';` (or restoring the backup), because the old inserts don't supply a namespace.
 
 **Re-homing records** written to `global` before a mapping existed (records carry their `repo`, so it is one statement per project):
 

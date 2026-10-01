@@ -123,7 +123,7 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 		return nil, StoreOutput{}, toToolError("memory_store", err)
 	}
 
-	out := StoreOutput{}
+	out := StoreOutput{Namespace: resp.Namespace}
 	for _, c := range resp.CandidatesConsidered {
 		out.CandidatesConsidered = append(out.CandidatesConsidered, StoreCandidate{
 			ID:         c.ID,

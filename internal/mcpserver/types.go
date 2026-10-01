@@ -73,6 +73,7 @@ type StoreCandidate struct {
 // path's top candidate falls in the 0.80-0.92 band and is awaiting a
 // Decision on a follow-up call (AC-15).
 type StoreOutput struct {
+	Namespace            string           `json:"namespace,omitempty"`
 	ID                   string           `json:"id,omitempty"`
 	Decision             string           `json:"decision,omitempty"`
 	Status               string           `json:"status"`
