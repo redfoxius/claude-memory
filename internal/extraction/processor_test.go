@@ -648,3 +648,58 @@ func TestProcessSessionOffSchemaDecisionJSON_MalformedJSON_FallsBackToADD(t *tes
 		t.Errorf("expected no store errors from the fallback-ADD path, got %v", result.Errors)
 	}
 }
+
+// A PR's provider merge commit becomes the stored record's commit_sha (the
+// staleness baseline); a PR without one stores none.
+func TestProcessPR_CarriesMergeCommitAsCommitSHA(t *testing.T) {
+	for _, tc := range []struct {
+		name, sha string
+		want      bool
+	}{{"with merge commit", "abcdef1234567", true}, {"without", "", false}} {
+		svc := mock.NewMemoryService()
+		fakeRunner := &FakeHaikuRunner{responses: []haikuResponse{
+			{output: []byte(`[{"kind":"convention","title":"PR convention","content":"Learned."}]`)},
+			{output: []byte(`{"action":"ADD"}`)},
+		}}
+		pr := PRInput{Title: "t", Description: "d", Repo: "billing-service", URL: "u", CommitSHA: tc.sha}
+		if _, err := ProcessPR(context.Background(), svc, pr, Config{HaikuTimeout: 5 * time.Second}, fakeRunner); err != nil {
+			t.Fatal(err)
+		}
+		stored := svc.GetStoredRecords()
+		if len(stored) != 1 {
+			t.Fatalf("%s: stored %d", tc.name, len(stored))
+		}
+		got := stored[0].CommitSHA
+		if tc.want && (got == nil || *got != tc.sha) {
+			t.Errorf("%s: commit_sha = %v, want %q", tc.name, got, tc.sha)
+		}
+		if !tc.want && got != nil {
+			t.Errorf("%s: commit_sha = %q, want none", tc.name, *got)
+		}
+	}
+}
+
+// AC-32: the resolved checkout's name (Config.Repo) beats the transcript's
+// basename(cwd) inference, so a session started in a sub-directory no longer
+// stores the sub-directory's name as repo.
+func TestProcessSession_ConfigRepoOverridesTranscriptRepo(t *testing.T) {
+	path := writeTempTranscript(t, manyMessagesTranscript())
+	for _, tc := range []struct{ cfgRepo string }{{"billing-service"}, {""}} {
+		svc := mock.NewMemoryService()
+		fakeRunner := &FakeHaikuRunner{responses: []haikuResponse{
+			{output: []byte(`[{"kind":"gotcha","title":"Fact","content":"Something."}]`)},
+			{output: []byte(`{"action":"ADD"}`)},
+		}}
+		cfg := Config{MinMessages: 20, CharBudget: 5000, HaikuTimeout: 5 * time.Second, Repo: tc.cfgRepo}
+		if _, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner); err != nil {
+			t.Fatal(err)
+		}
+		stored := svc.GetStoredRecords()
+		if len(stored) != 1 {
+			t.Fatalf("stored %d", len(stored))
+		}
+		if tc.cfgRepo != "" && stored[0].Repo != tc.cfgRepo {
+			t.Errorf("repo = %q, want %q", stored[0].Repo, tc.cfgRepo)
+		}
+	}
+}

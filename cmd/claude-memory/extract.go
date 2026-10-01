@@ -15,6 +15,7 @@ import (
 
 	"claude-memory/internal/config"
 	"claude-memory/internal/extraction"
+	"claude-memory/internal/gitlog"
 	"claude-memory/internal/transcript"
 )
 
@@ -137,10 +138,25 @@ func runExtract(cfg *config.Config, transcriptPath string) error {
 
 	// The session's own working directory decides the namespace; if the
 	// transcript can't be read here, ProcessSession reports it below.
+	extractionRepo := ""
 	if tr, perr := transcript.Parse(transcriptPath, transcript.Config{CharBudget: cfg.MaxContentChars}); perr == nil && tr.Cwd != "" {
 		ns := resolveNamespace(tr.Cwd)
 		warnIfFallback(tr.Cwd, ns)
 		svc = svc.WithNamespace(ns)
+
+		// The session's checkout decides the repo (not basename(cwd), which
+		// is a sub-directory name for sessions started below the top level)
+		// and enables commit-baseline stamping.
+		history := gitlog.Exec{}
+		rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		if co, head, ok, rerr := history.Resolve(rctx, tr.Cwd); rerr == nil && ok {
+			extractionRepo = co.Repo
+			svc = svc.WithCheckout(co).WithCodeHistory(history, cfg.StaleTimeout)
+			if head != "" {
+				svc = svc.WithPinnedHead(head)
+			}
+		}
+		cancel()
 	} else {
 		svc = svc.WithNamespace(resolveNamespace(""))
 	}
@@ -149,6 +165,7 @@ func runExtract(cfg *config.Config, transcriptPath string) error {
 		MinMessages:  cfg.ExtractMinMessages,
 		CharBudget:   cfg.MaxContentChars,
 		HaikuTimeout: defaultHaikuTimeout,
+		Repo:         extractionRepo,
 	}
 
 	result, err := extraction.ProcessSession(ctx, svc, transcriptPath, extractionCfg, nil)

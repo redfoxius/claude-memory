@@ -134,6 +134,7 @@ func ingestOneRepo(
 			Description: full.Description,
 			Repo:        ref.Name,
 			URL:         full.URL,
+			CommitSHA:   full.MergeCommit,
 		}
 		extractionCfg := extraction.Config{
 			MinMessages:  cfg.ExtractMinMessages,

@@ -46,6 +46,10 @@ type PR struct {
 	ReviewComments []string
 	CompletedAt    time.Time
 	URL            string
+	// MergeCommit is the provider's merge commit for the PR (empty when the
+	// provider gives none). It is the staleness baseline for records
+	// extracted from the PR — never the local HEAD.
+	MergeCommit string
 }
 
 // Source is the port ingest-pr needs against a PR-hosting platform:

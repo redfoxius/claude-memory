@@ -76,6 +76,10 @@ type prItem struct {
 	ClosedDate    string `json:"closedDate"`
 	Status        string `json:"status"`
 	URL           string `json:"url"`
+	// LastMergeCommit is the commit the PR was merged as (completed PRs).
+	LastMergeCommit struct {
+		CommitID string `json:"commitId"`
+	} `json:"lastMergeCommit"`
 }
 
 // ListCompleted lists PRs completed after since, scoped to repo, in
@@ -119,6 +123,7 @@ func (c *Client) ListCompleted(ctx context.Context, repo prsource.RepoRef, since
 			Description: it.Description,
 			CompletedAt: completedAt,
 			URL:         it.URL,
+			MergeCommit: it.LastMergeCommit.CommitID,
 		})
 	}
 
@@ -167,6 +172,7 @@ func (c *Client) Get(ctx context.Context, repo prsource.RepoRef, id string) (*pr
 		ReviewComments: comments,
 		CompletedAt:    completedAt,
 		URL:            item.URL,
+		MergeCommit:    item.LastMergeCommit.CommitID,
 	}, nil
 }
 

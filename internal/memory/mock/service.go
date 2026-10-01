@@ -29,13 +29,14 @@ func NewMemoryService() *Service {
 func (s *Service) Store(ctx context.Context, req *memory.StoreRequest) (*memory.StoreResponse, error) {
 	// Simulate storing a record.
 	rec := &record.Record{
-		ID:        "test-id-" + req.Title,
-		Kind:      req.Kind,
-		Title:     req.Title,
-		Content:   req.Content,
-		Repo:      req.Repo,
-		Source:    req.Source,
-		Status:    record.StatusCandidate,
+		ID:         "test-id-" + req.Title,
+		Kind:       req.Kind,
+		Title:      req.Title,
+		Content:    req.Content,
+		Repo:       req.Repo,
+		CommitSHA:  req.CommitSHA,
+		Source:     req.Source,
+		Status:     record.StatusCandidate,
 		Confidence: 0.8,
 	}
 	s.storedRecords = append(s.storedRecords, rec)
