@@ -1395,14 +1395,15 @@ func startScratchDatabase(t *testing.T, ctx context.Context, adminDSN string) (s
 	if err != nil {
 		t.Fatalf("connect admin: %v", err)
 	}
+	u, err := url.Parse(adminDSN)
+	if err != nil {
+		admin.Close(ctx)
+		t.Fatalf("MEMORY_TEST_PG_ADMIN_DSN must be a postgres:// URL: %v", err)
+	}
 	name := "mt_" + strings.ReplaceAll(uuid.New().String(), "-", "")[:16]
 	if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err != nil {
 		admin.Close(ctx)
 		t.Fatalf("create database: %v", err)
-	}
-	u, err := url.Parse(adminDSN)
-	if err != nil {
-		t.Fatalf("MEMORY_TEST_PG_ADMIN_DSN must be a postgres:// URL: %v", err)
 	}
 	u.Path = "/" + name
 	dsn := u.String()
@@ -1519,4 +1520,88 @@ func splitTags(s string) []string {
 		return []string{}
 	}
 	return strings.Fields(s)
+}
+
+// The query is built from Postgres' own parser, so identifiers the index
+// keeps as single lexemes (db.withtx, pg_hba.conf, 100.64.0.0 + /10) match;
+// they must also survive a long prompt, and rare content words must not be
+// shed because another record shares a *title* word.
+func TestFullTextParserConsistency(t *testing.T) {
+	ctx := context.Background()
+	dsn, cleanup := startPostgresContainer(t, ctx)
+	defer cleanup()
+	store, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	mk := func(title, content string) string {
+		r, err := store.Create(ctx, &record.Record{
+			ID: uuid.New().String(), Namespace: testNS, Kind: record.KindGotcha,
+			Title: title, Content: content, Repo: "r", Status: record.StatusActive,
+			Source: record.SourceInline, Confidence: 0.8, Files: []string{}, Tags: []string{},
+			Embedding: makeTestEmbedding(0.9),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.ID
+	}
+	idTx := mk("Transactions", "wrap the check inside db.WithTx so the lock is released on commit")
+	idHba := mk("Postgres access", "edit pg_hba.conf and allow host all all 100.64.0.0/10 scram-sha-256")
+	idHash := mk("Advisory locks", "derive the lock key with hashtext of the repo plus title")
+	idTitleWord := mk("Retry policy", "exponential backoff with jitter")
+	for i := 0; i < 6; i++ { // unrelated filler records
+		mk("Filler "+string(rune('a'+i)), "nothing relevant here at all, just filler number "+string(rune('a'+i)))
+	}
+
+	opts := memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5}
+	top3 := func(query string, emb []float32) map[string]bool {
+		res, err := store.Search(ctx, query, emb, "r", opts)
+		if err != nil {
+			t.Fatalf("%q: %v", query, err)
+		}
+		m := map[string]bool{}
+		for i, r := range res.Records {
+			if i < 3 {
+				m[r.ID] = true
+			}
+		}
+		return m
+	}
+	far := unitVec(9, 0)
+
+	// identifiers alone, in every path
+	for _, c := range []struct{ q, id, name string }{
+		{"db.WithTx", idTx, "dotted camelCase"},
+		{"pg_hba.conf", idHba, "snake.dotted"},
+		{"100.64.0.0/10", idHba, "CIDR"},
+	} {
+		if !top3(c.q, nil)[c.id] {
+			t.Errorf("%s (%q): full-text-only missed the record", c.name, c.q)
+		}
+		if !top3(c.q, far)[c.id] {
+			t.Errorf("%s (%q): hybrid missed the record", c.name, c.q)
+		}
+	}
+
+	// identifier buried after 40 filler words (the hook sends whole prompts)
+	filler := strings.Repeat("please could you kindly explain and elaborate on this topic ", 5)
+	long := filler + "where does db.WithTx matter"
+	if !top3(long, nil)[idTx] || !top3(long, far)[idTx] {
+		t.Error("identifier after 40+ filler words was truncated away")
+	}
+
+	// a rare content word must not be shed because another record shares a title word
+	q := "retry hashtext"
+	got := top3(q, nil)
+	if !got[idHash] || !got[idTitleWord] {
+		t.Errorf("rare content word shed next to a title-word match: %v", got)
+	}
+
+	// plain numbers are not identifiers: they get no override
+	if _, ids := ftsInputs("build 2048 now"); len(ids) != 0 {
+		t.Errorf("2048 treated as identifier: %v", ids)
+	}
 }

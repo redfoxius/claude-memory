@@ -83,9 +83,9 @@ is implemented. This item adds:
 - Repos to ingest = git repos under the namespace's `paths`.
 - Rough size: S per provider + S for config.
 
-### 5. full-text search for natural-language queries — DONE (2026-10-01)
+### 5. full-text search for natural-language queries — implemented; review fixes applied; eval pending
 
-Implemented: OR-semantics tsquery (`internal/postgres/ftsquery.go`), identifier-term matches always count, other matches must reach 25% of the best ts_rank (an absolute floor does not work: ts_rank scales with the number of OR terms), eval category `long_prompt_identifier` (4 cases, 100% recall required) and an integration test. **Not verified:** the "no paraphrase regression" half needs `claude-memory eval-retrieval` against real Ollama.
+Implemented: the tsquery is built inside SQL from Postgres' own parser (`to_tsvector('simple', prompt)` lexemes; identifier-like tokens through `phraseto_tsquery`), so identifiers the index keeps whole (`db.withtx`, `pg_hba.conf`, `100.64.0.0` + `/10`) match and survive long prompts. OR-noise guard: identifier matches always count; others must reach 25% of the best flat-weight ts_rank (an absolute floor cannot work: ts_rank scales with the number of OR terms). Eval category `long_prompt_identifier` (4 cases) + integration tests; review: `fts-and-service-tests-review.md`. **Not verified:** "no paraphrase regression" needs `claude-memory eval-retrieval` against real Ollama.
 
 Measured 2026-10-01 (eval harness): `plainto_tsquery` ANDs every word of
 the query, so any natural-language prompt (hook, `memory_search`) gets **no**

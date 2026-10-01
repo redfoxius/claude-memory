@@ -1,51 +1,73 @@
 package postgres
 
-import "testing"
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
 
-func TestBuildFTSQueries(t *testing.T) {
-	cases := []struct{ in, all, ids string }{
-		{"", "", ""},
-		{"the and of", "", ""},
-		{"fix the foo_bar bug", "fix | foo_bar | bug", "foo_bar"},
-		{"why does ErrNoRows happen in prod", "errnorows | happen | prod", "errnorows"},
-		{"ErrNoRows ErrNoRows", "errnorows", "errnorows"},
-		{"x'); DROP TABLE records; --", "drop | table | records", ""},
-		{"a | b & !c <-> d:*", "", ""},
-		{"why does pgx_pool_acquire hang", "pgx_pool_acquire | hang", "pgx_pool_acquire"},
-		{"retry 3 times on HTTP500", "retry | times | http500", "http500"},
-		{"OrderService.Cancel retries", "orderservice | cancel | retries", "orderservice"},
-		{"ERR_NULL_DEREF in handler", "err_null_deref | handler", "err_null_deref"},
-		{"plain words only here", "plain | words | only | here", ""},
+func TestIsIdentifierLike(t *testing.T) {
+	yes := []string{"foo_bar", "ERR_NULL_DEREF", "ErrNoRows", "OrderService.Cancel", "db.WithTx", "pg_hba.conf",
+		"http500", "100.64.0.0/10", "num_batch", "iPhone", "ab12"}
+	no := []string{"", "ab", "the", "retry", "production", "2048", "v2", "e.g", "and/or", "Hello", "HTTP", "well-known", "100"}
+	for _, s := range yes {
+		if !isIdentifierLike(s) {
+			t.Errorf("isIdentifierLike(%q) = false, want true", s)
+		}
 	}
-	for _, c := range cases {
-		all, ids := buildFTSQueries(c.in)
-		if all != c.all || ids != c.ids {
-			t.Errorf("buildFTSQueries(%q) = (%q, %q), want (%q, %q)", c.in, all, ids, c.all, c.ids)
+	for _, s := range no {
+		if isIdentifierLike(s) {
+			t.Errorf("isIdentifierLike(%q) = true, want false", s)
 		}
 	}
 }
 
-func TestBuildFTSQueriesCapsTerms(t *testing.T) {
-	var in string
-	for i := 0; i < 100; i++ {
-		in += "word" + string(rune('a'+i%26)) + string(rune('a'+i/26)) + " "
+func TestFTSInputs(t *testing.T) {
+	prompt, ids := ftsInputs("why does (ErrNoRows) happen? see db.WithTx, pg_hba.conf and errnorows again; build 2048")
+	if !strings.Contains(prompt, "ErrNoRows") {
+		t.Errorf("prompt altered: %q", prompt)
 	}
-	all, _ := buildFTSQueries(in)
-	if n := len(splitOR(all)); n != maxFTSTerms {
-		t.Errorf("terms = %d, want %d", n, maxFTSTerms)
+	want := []string{"ErrNoRows", "db.WithTx", "pg_hba.conf"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("ids = %v, want %v (punctuation trimmed, deduped case-insensitively, plain number excluded)", ids, want)
+	}
+
+	if _, ids := ftsInputs("plain words only here"); len(ids) != 0 {
+		t.Errorf("ids for plain words = %v", ids)
 	}
 }
 
-func splitOR(s string) []string {
-	var out []string
-	cur := ""
-	for _, part := range s {
-		if part == '|' {
-			out = append(out, cur)
-			cur = ""
-			continue
-		}
-		cur += string(part)
+func TestFTSInputsCaps(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 40; i++ {
+		b.WriteString("id_")
+		b.WriteString(strings.Repeat("x", i+1))
+		b.WriteString(" ")
 	}
-	return append(out, cur)
+	if _, ids := ftsInputs(b.String()); len(ids) != maxFTSIdentifiers {
+		t.Errorf("identifier cap: %d, want %d", len(ids), maxFTSIdentifiers)
+	}
+
+	long := strings.Repeat("wordy ", 5000) + "tail_marker"
+	prompt, _ := ftsInputs(long)
+	if len(prompt) > maxFTSPromptBytes {
+		t.Errorf("prompt not capped: %d bytes", len(prompt))
+	}
+	// a multi-byte rune cut at the cap must not leave invalid UTF-8
+	multi := strings.Repeat("я", maxFTSPromptBytes)
+	if p, _ := ftsInputs(multi); strings.ToValidUTF8(p, "") != p {
+		t.Error("invalid UTF-8 after capping")
+	}
+}
+
+func TestStopwordsSortedAndNonEmpty(t *testing.T) {
+	sw := sortedStopwords()
+	if len(sw) < 50 {
+		t.Errorf("stopwords = %d", len(sw))
+	}
+	for i := 1; i < len(sw); i++ {
+		if sw[i-1] > sw[i] {
+			t.Fatal("not sorted")
+		}
+	}
 }

@@ -53,9 +53,9 @@ func (s *Store) searchHybridRRF(
 
 	// Base repo scope (same repo or "*"). $3/$4 are the OR-semantics
 	// tsquery strings (all terms / identifier-like terms), NULL when empty.
-	allQ, idQ := buildFTSQueries(query)
-	args = append(args, embeddingVec, repo, nullable(allQ), nullable(idQ))
-	baseArgCount := argCount + 4
+	prompt, idToks := ftsInputs(query)
+	args = append(args, embeddingVec, repo, prompt, idToks, sortedStopwords())
+	baseArgCount := argCount + 5
 
 	if !opts.IncludeDeprecated {
 		whereClause = " AND r.status IN ('candidate', 'active')"
@@ -88,23 +88,25 @@ func (s *Store) searchHybridRRF(
 			WHERE (repo = $2 OR repo = '*')
 				%s
 		),
+		%s,
 		fts_scored AS (
 			SELECT
-				id,
-				ts_rank(tsvector_content, to_tsquery('simple', $3::text)) AS rk,
-				COALESCE(tsvector_content @@ to_tsquery('simple', $4::text), false) AS id_hit,
+				r.id,
+				ts_rank(r.tsvector_content, fts_q.q_all) AS rk,
+				ts_rank('{1,1,1,1}', r.tsvector_content, fts_q.q_all) AS rk_flat,
+				COALESCE(r.tsvector_content @@ fts_q.q_id, false) AS id_hit,
 				%s AS st
-			FROM records r
-			WHERE (repo = $2 OR repo = '*')
-				AND tsvector_content @@ to_tsquery('simple', $3::text)
+			FROM records r, fts_q
+			WHERE (r.repo = $2 OR r.repo = '*')
+				AND r.tsvector_content @@ fts_q.q_all
 				%s
 		),
 		fts_ranks AS (
-			-- OR-noise guard: identifier-term matches always count; others only
-			-- when close to the best match (see ftsRelativeFloor).
+			-- OR-noise guard: identifier matches always count; others only when
+			-- close to the best match (flat weights; see ftsRelativeFloor).
 			SELECT id, ROW_NUMBER() OVER (ORDER BY rk DESC, st, id) AS fts_rank
 			FROM fts_scored
-			WHERE id_hit OR rk >= %g * (SELECT MAX(rk) FROM fts_scored)
+			WHERE id_hit OR rk_flat >= %g * (SELECT MAX(rk_flat) FROM fts_scored)
 		)
 		SELECT
 			r.id,
@@ -128,7 +130,7 @@ func (s *Store) searchHybridRRF(
 			AND (v.id IS NOT NULL OR f.id IS NOT NULL)
 		ORDER BY rrf_score DESC, %s, similarity DESC, r.id
 		LIMIT $%d
-	`, statusTieBreak, whereClause, statusTieBreak, whereClause, ftsRelativeFloor, rffK, rffK, whereClause, statusTieBreak, baseArgCount)
+	`, statusTieBreak, whereClause, ftsQueryCTE(3, 4, 5), statusTieBreak, whereClause, ftsRelativeFloor, rffK, rffK, whereClause, statusTieBreak, baseArgCount)
 
 	args = append(args, limit)
 
@@ -195,9 +197,9 @@ func (s *Store) searchFullTextOnly(
 	var whereClause string
 	argCount := 1
 
-	allQ, idQ := buildFTSQueries(query)
-	args = append(args, nullable(allQ), repo, nullable(idQ))
-	baseArgCount := argCount + 3
+	prompt, idToks := ftsInputs(query)
+	args = append(args, prompt, repo, idToks, sortedStopwords())
+	baseArgCount := argCount + 4
 
 	// Base repo scope
 	if !opts.IncludeDeprecated {
@@ -222,23 +224,25 @@ func (s *Store) searchFullTextOnly(
 	}
 
 	sqlQuery := fmt.Sprintf(`
-		WITH scored AS (
+		WITH %s,
+		scored AS (
 			SELECT
-				id, kind, title, repo, namespace, files, commit_sha, tags, status, confidence,
-				ts_rank(tsvector_content, to_tsquery('simple', $1::text)) AS score,
-				COALESCE(tsvector_content @@ to_tsquery('simple', $3::text), false) AS id_hit,
+				r.id, r.kind, r.title, r.repo, r.namespace, r.files, r.commit_sha, r.tags, r.status, r.confidence,
+				ts_rank(r.tsvector_content, fts_q.q_all) AS score,
+				ts_rank('{1,1,1,1}', r.tsvector_content, fts_q.q_all) AS rk_flat,
+				COALESCE(r.tsvector_content @@ fts_q.q_id, false) AS id_hit,
 				%s AS st
-			FROM records r
-			WHERE (repo = $2 OR repo = '*')
-				AND tsvector_content @@ to_tsquery('simple', $1::text)
+			FROM records r, fts_q
+			WHERE (r.repo = $2 OR r.repo = '*')
+				AND r.tsvector_content @@ fts_q.q_all
 				%s
 		)
 		SELECT id, kind, title, repo, namespace, files, commit_sha, tags, status, confidence, score
 		FROM scored
-		WHERE id_hit OR score >= %g * (SELECT MAX(score) FROM scored)
+		WHERE id_hit OR rk_flat >= %g * (SELECT MAX(rk_flat) FROM scored)
 		ORDER BY score DESC, st, id
 		LIMIT $%d
-	`, statusTieBreak, whereClause, ftsRelativeFloor, baseArgCount)
+	`, ftsQueryCTE(1, 3, 4), statusTieBreak, whereClause, ftsRelativeFloor, baseArgCount)
 
 	args = append(args, limit)
 
