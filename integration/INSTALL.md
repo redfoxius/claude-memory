@@ -186,7 +186,8 @@ stop it manually if you're sure nothing else uses it.
 Records are partitioned by namespace (e.g. a company vs. a side project).
 Copy `integration/namespaces.example.yaml` to
 `~/.config/claude-memory/namespaces.yaml` and map your project directories to
-namespaces; `MEMORY_NAMESPACE` overrides it per repo. With no file, everything
-lives in `acme`. The upgrade migration backfills existing records to
-`acme` automatically. See the example file for the resolution rules and the
-explicit-only `global` namespace.
+namespaces; `MEMORY_NAMESPACE` overrides it per repo. When no namespace can
+be chosen (no file, no matching path, broken file) records use the shared
+`global` namespace. No namespace is special: the upgrade migration backfilled
+existing records to `acme`, so map your Acme directories to a
+`acme` namespace or those records stay invisible. See the example file.

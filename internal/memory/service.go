@@ -21,9 +21,9 @@ type Service struct {
 	namespace         string
 }
 
-// DefaultNamespace is used when no namespace is configured. It matches the
-// namespace existing records were backfilled to by migration 0002.
-const DefaultNamespace = "acme"
+// DefaultNamespace is used when no namespace is configured or resolvable:
+// the shared global namespace.
+const DefaultNamespace = record.GlobalNamespace
 
 // New constructs a Service with all required dependencies.
 // All adapters must implement the port interfaces declared in ports.go.

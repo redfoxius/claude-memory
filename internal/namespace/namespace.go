@@ -15,8 +15,9 @@ import (
 )
 
 // Fallback is the namespace used when neither the environment, a rule, nor
-// the file's `default:` yields one. It matches migration 0002's backfill.
-const Fallback = "acme"
+// the file's `default:` yields one: the shared "global" namespace. No
+// project (company or otherwise) is special-cased in code.
+const Fallback = "global"
 
 var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
@@ -31,7 +32,7 @@ type Rule struct {
 
 // Config is the parsed namespaces.yaml.
 //
-//	default: acme
+//	default: global
 //	namespaces:
 //	  - namespace: acme
 //	    paths: ["~/work/acme/**"]
@@ -72,7 +73,7 @@ func Load(path string) (*Config, error) {
 
 // Resolve returns the namespace for dir: the rule whose matching path glob
 // is most specific (longest literal prefix, then most path segments) wins;
-// otherwise `default:`, otherwise Fallback.
+// otherwise `default:`, otherwise Fallback (global).
 func (c *Config) Resolve(dir string) string {
 	dir = filepath.Clean(dir)
 	best, bestScore := "", -1

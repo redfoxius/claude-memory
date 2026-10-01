@@ -5,13 +5,18 @@
 #   2. the most specific matching path glob below (longest literal prefix wins;
 #      "**" matches any number of directories; "~" is your home directory)
 #   3. `default:`
-#   4. built-in "acme" (what existing records were backfilled to)
+#   4. built-in "global" (when no namespace can be chosen, records are shared)
 #
 # Records from different namespaces never mix: search, dedup, list and
 # lookups by id are all scoped to the resolved namespace. The special
-# "global" namespace is searched in addition to your own; nothing is ever
-# written to it automatically — pass namespace="global" to memory_store.
-default: acme
+# "global" namespace is searched in addition to your own, and is where
+# records land when no namespace can be chosen — so map every project you
+# care about, or company-specific facts will end up shared. You can also
+# write to it explicitly with memory_store namespace="global".
+#
+# NOTE: existing records were backfilled to "acme" by the upgrade
+# migration; map your Acme directories to it or they stay invisible.
+default: global
 namespaces:
   - namespace: acme
     paths: ["~/work/acme/**"]
