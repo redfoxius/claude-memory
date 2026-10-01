@@ -40,6 +40,44 @@ Fill in `<APP_DB_PASSWORD>` / `<POSTGRES_BIND_IP>` per `DEPLOY.md`.
 file if it is group/world-readable, so the `chmod 600` above is not
 optional.
 
+## 2a. Set up namespaces
+
+Records are partitioned by **namespace** (a company, a side project, ...), so
+facts from one project don't crowd out another's. This is a local,
+single-user database: namespaces are for relevance, not security, and an
+occasional cross-project memory is harmless. This step needs no database,
+DSN or Ollama — only the binary from step 1.
+
+Create the mapping file (`~/.config/claude-memory/namespaces.yaml`, mode
+0600) with one of:
+
+```bash
+# map project areas to namespaces right away (globs: ** = any depth, ~ = home)
+claude-memory namespaces init acme='~/work/acme/**' pet-game='~/src/pet-game/**'
+
+# or start with only the shared default and add projects later
+claude-memory namespaces init
+```
+
+Directories matching no mapping use `default:` — `global` unless you pass
+`--default NAME` (e.g. `init --default acme` to make one project the
+catch-all). Nothing is special-cased in code; any name works
+(lowercase letters, digits, `-`, `_`).
+
+**Upgrading from a pre-namespace install:** the migration backfilled
+existing records to `acme`. Map your Acme directories to it or those
+records stay invisible: `claude-memory namespaces add acme '<path>/**'`.
+
+Check the result:
+
+```bash
+claude-memory namespaces which ~/work/acme/billing-service   # -> acme
+claude-memory namespaces which /tmp                         # -> global (the default)
+```
+
+`integration/namespaces.example.yaml` shows the file format if you prefer to
+edit it by hand.
+
 ## 3. Install and configure Ollama
 
 Follow `integration/ollama.md` in full: `brew install ollama`, `brew
@@ -172,8 +210,8 @@ rm -rf ~/.claude/skills/remember ~/.claude/skills/memory-digest
 
 # CLAUDE.md: manually remove the pasted section from acme/CLAUDE.md
 
-# binary + config (keep ~/.config/claude-memory/env if you plan to
-# reinstall later; otherwise remove it too)
+# binary + config (keep ~/.config/claude-memory/env and namespaces.yaml if
+# you plan to reinstall later; otherwise remove them too)
 rm ~/.local/bin/claude-memory ~/.local/bin/claude-memory-run-with-env.sh
 ```
 
@@ -181,28 +219,23 @@ Ollama itself (`brew services stop ollama`, `brew uninstall ollama`) is
 left running by design — other tools on the laptop may depend on it;
 stop it manually if you're sure nothing else uses it.
 
-## Namespaces
+## Using namespaces
 
-Records are partitioned by namespace (a company, a side project, ...). Local
-single-user database, so this is for relevance, not security: a memory from
-another project showing up occasionally is harmless — a reusable decision
-can even be useful.
+Day to day you don't think about them: the namespace is resolved
+automatically from the project directory each time — by the MCP server (the
+directory Claude Code was started in), the prompt hook (the prompt's
+directory), session extraction (the session's directory) and `ingest-pr`
+(each repo's path). Search covers the current namespace **plus `global`**;
+listing, dedup and lookups by id never leave the current namespace.
 
-Create the mapping file as part of installation (no database needed):
+| I want to... | Do this |
+|---|---|
+| see what a directory maps to | `claude-memory namespaces which [DIR]` |
+| add a project / more paths | `claude-memory namespaces add NAME 'GLOB' ['GLOB'...]` |
+| force a namespace for one repo | set `MEMORY_NAMESPACE` in that repo's `.claude/settings.json` under `env` (beats the file) |
+| share a stack-generic fact everywhere | `memory_store` with `namespace: "global"` (e.g. a Go or Docker gotcha) |
+| start over | `claude-memory namespaces init --force ...` |
 
-```bash
-# one namespace per project area; map as many as you like
-claude-memory namespaces init acme='~/work/acme/**' pet-game='~/src/pet-game/**'
-# or start with just the shared default and add projects later:
-claude-memory namespaces init
-claude-memory namespaces add acme '~/work/acme/**'
-
-claude-memory namespaces which .        # check what the current dir resolves to
-```
-
-Directories that match no mapping use `default:` (`global` unless you chose
-otherwise with `init --default NAME`), and `MEMORY_NAMESPACE` overrides it
-per repo. No namespace is special in the code. The upgrade migration
-backfilled pre-existing records to `acme`, so if you had records before
-namespaces, add a `acme` mapping or they stay invisible. See
-`integration/namespaces.example.yaml`.
+The most specific matching path wins (`~/work/acme/infra/**` beats
+`~/work/acme/**`). When no namespace can be chosen — no file, no match,
+an unreadable file — work lands in `global` instead of failing.

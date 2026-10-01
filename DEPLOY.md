@@ -193,6 +193,12 @@ docker compose up -d
 
 The container restarts and runs any new migrations on startup (via `docker-entrypoint-initdb.d` on the first start; existing databases are not re-initialized).
 
+### Upgrading the binary across a schema change (namespaces, migration 0002)
+
+`claude-memory` applies its own (idempotent) migrations when `serve`, `seed`, `cleanup`, `ingest-pr` or `extract` start — but **not** the prompt hook, which skips the check to stay inside its latency budget. After installing a new binary, run one of those once before relying on the hook (`claude-memory cleanup` is harmless), or just start Claude Code (the MCP server runs `serve`).
+
+Migration 0002 adds `records.namespace` and backfills every existing record to `acme`. Then run `claude-memory namespaces init ...` / `namespaces add acme '<path>/**'` on the laptop (see `integration/INSTALL.md` step 2a) so those records are visible from your Acme directories. Rolling back to an older binary after migrating requires `ALTER TABLE records ALTER COLUMN namespace SET DEFAULT 'acme';` (or restoring the backup), because the old inserts don't supply a namespace.
+
 ### Major Postgres Version Upgrade (if needed in the future)
 
 Postgres major-version upgrades (e.g., 16 → 17) require a dump and restore because the on-disk format changes:

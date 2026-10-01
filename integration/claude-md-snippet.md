@@ -55,3 +55,13 @@ third-party gotcha, or a reusable snippet.
   only `title`, `repo`, and `id` — never the record's full content. Treat
   an injected card as a pointer to look up via `memory_get`/
   `memory_search`, not as verified ground truth to act on directly.
+
+### Namespaces
+
+Memory is partitioned by namespace, resolved automatically from the project
+directory (`claude-memory namespaces which` shows it). `memory_search` covers
+the current namespace plus `global`; you normally do nothing special.
+
+Only pass `namespace: "global"` to `memory_store` for a stack-generic fact
+that is useful in every project (a Go, Docker or Postgres gotcha) and
+contains nothing specific to this project. Omit it otherwise.
