@@ -239,3 +239,25 @@ listing, dedup and lookups by id never leave the current namespace.
 The most specific matching path wins (`~/work/acme/infra/**` beats
 `~/work/acme/**`). When no namespace can be chosen — no file, no match,
 an unreadable file — work lands in `global` instead of failing.
+
+## Staleness warnings
+
+A record remembers the commit it was written at (`commit_sha`) and the files
+it is about. When a card, `memory_search` result or `memory_get` result is for
+the repo you are standing in and any of those files differ at the current
+`HEAD`, it is marked: the hook card ends with
+`⚠ code changed since this was recorded (N commits)`, and search/get carry
+`stale_hint` (+ `stale_commits`). Verify the record against the code, then
+`memory_update` it (a content/files change re-baselines it; or pass
+`commit_sha` alone) or `memory_feedback(outdated)`.
+
+- Needs `git` on `PATH`. No `commit_sha`, no files, another repo, or an unknown
+  commit means "unchecked": no marker, no error.
+- Inline and session records get `commit_sha = HEAD` only when their files
+  have no uncommitted changes at write time; otherwise they stay unchecked
+  until a clean `memory_update`. PR records use the PR's merge commit.
+- The check is capped: `MEMORY_STALE_TIMEOUT_HOOK` (default 50ms, hook) and
+  `MEMORY_STALE_TIMEOUT` (default 500ms, MCP server) in
+  `~/.config/claude-memory/env`. The hook also stops at its own latency
+  budget. Per-session verdicts are cached under
+  `~/.local/state/claude-memory/stale-cache/`.

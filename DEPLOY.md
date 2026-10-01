@@ -94,6 +94,8 @@ These limits leave ample headroom for pre-existing host services (game server, N
    export MEMORY_PG_DSN="postgresql://claude_memory:<APP_DB_PASSWORD>@<POSTGRES_BIND_IP>:5432/claude_memory"
    export MEMORY_OLLAMA_URL="http://127.0.0.1:11434"
    export MEMORY_EMBED_MAX_TOKENS="2048"
+   # optional: staleness-check ceilings (hook / MCP server)
+   # export MEMORY_STALE_TIMEOUT_HOOK="50ms"; export MEMORY_STALE_TIMEOUT="500ms"
    EOF
    chmod 600 ~/.config/claude-memory/env
    ```

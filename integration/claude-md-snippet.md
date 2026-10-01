@@ -65,3 +65,14 @@ the current namespace plus `global`; you normally do nothing special.
 Only pass `namespace: "global"` to `memory_store` for a stack-generic fact
 that is useful in every project (a Go, Docker or Postgres gotcha) and
 contains nothing specific to this project. Omit it otherwise. Records found in `global` are shared by every project: do not enrich them with project-specific details.
+
+### Stale records
+
+A card or result marked `⚠ code changed since this was recorded` (or
+`stale_hint: true`) points at files that changed after the record was
+written: read the current code before trusting it. If the record still holds,
+call `memory_update` with its `commit_sha` set to the current `HEAD` (or edit
+its content); if not, `memory_feedback` it `outdated`/`wrong`. When you call
+`memory_store` and know the relevant `files` (and `commit_sha`), pass them, so
+the record can be checked later. After committing work that a record
+describes, `memory_update` it so it gets a clean baseline.

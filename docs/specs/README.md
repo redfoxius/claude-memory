@@ -3,6 +3,8 @@
 | Feature | Spec ID | Status |
 |---|---|---|
 | [memory-mvp](memory-mvp/01-spec.md) | SPEC-2026-10-01-memory-mvp | clarifying |
+| [namespaces](namespaces/01-spec.md) | namespaces | implemented (integration tests pending a Docker run) |
+| [staleness-metrics](staleness-metrics/01-spec.md) | SPEC-2026-10-01-staleness-metrics | PR A (staleness) implemented; PR B (events + stats) not started |
 
 ## Backlog (next, in order)
 

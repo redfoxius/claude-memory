@@ -1321,3 +1321,53 @@ func TestNamespaceIsolation(t *testing.T) {
 		t.Errorf("ns-b list = %d records", len(list))
 	}
 }
+
+// Search returns files and commit_sha (needed by the staleness check), and
+// Update can persist commit_sha (re-baselining).
+func TestSearchReturnsFilesAndCommitSHA_UpdateRebaselines(t *testing.T) {
+	ctx := context.Background()
+	dsn, cleanup := startPostgresContainer(t, ctx)
+	defer cleanup()
+	store, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	sha := "abcdef1234567"
+	emb := makeTestEmbedding(0.3)
+	created, err := store.Create(ctx, &record.Record{
+		ID: uuid.New().String(), Namespace: testNS, Kind: record.KindGotcha,
+		Title: "stalenessprobe", Content: "stalenessprobe content", Repo: "r",
+		Status: record.StatusActive, Source: record.SourceInline, Confidence: 0.8,
+		Embedding: emb, Files: []string{"a.go", "b/c.go"}, Tags: []string{}, CommitSHA: &sha,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(label string, embedding []float32, wantSHA string) {
+		res, err := store.Search(ctx, "stalenessprobe", embedding, "r", memory.SearchOptions{Namespaces: []string{testNS}, Limit: 5})
+		if err != nil || len(res.Records) != 1 {
+			t.Fatalf("%s: %v %v", label, err, res)
+		}
+		r := res.Records[0]
+		if r.CommitSHA != wantSHA || len(r.Files) != 2 || r.Files[0] != "a.go" {
+			t.Errorf("%s: files=%v commit_sha=%q, want 2 files and %q", label, r.Files, r.CommitSHA, wantSHA)
+		}
+	}
+	check("hybrid", emb, sha)
+	check("full-text only", nil, sha)
+
+	newSHA := "0123456789abcdef"
+	if _, err := store.Update(ctx, created.ID, map[string]interface{}{"commit_sha": newSHA}); err != nil {
+		t.Fatalf("update commit_sha: %v", err)
+	}
+	check("after update", emb, newSHA)
+
+	// a record with no commit_sha comes back as ""
+	if _, err := store.Update(ctx, created.ID, map[string]interface{}{"commit_sha": ""}); err != nil {
+		t.Fatal(err)
+	}
+	check("cleared", emb, "")
+}
