@@ -87,6 +87,10 @@ type DBTarget struct {
 type OllamaTarget struct {
 	URL, Model     string
 	EmbedMaxTokens string // only from the env file or Env; "" = binary default
+	// SkipPull is set by Configure when the user declined to pull a missing
+	// model: Detect then reports the model ok with a warning, so the engine
+	// plans no pull. It is never written to the env file or the manifest.
+	SkipPull bool
 }
 
 // NSRule is one namespaces mapping chosen in Configure (AC-47).

@@ -1,0 +1,5 @@
+\set app_user 'cm_app'
+\set app_db 'cm_db'
+\set app_pw 'S3ntinel-pw_.~x9'
+-- test body
+SELECT 1;

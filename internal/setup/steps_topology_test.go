@@ -136,18 +136,33 @@ func TestTopologyDetect(t *testing.T) {
 	if d := s.Detect(ctx, rp, st); d.State != StateOutdated || !strings.Contains(d.Detail, "replaces local") {
 		t.Errorf("flag differs: %+v", d)
 	}
-	// Configure applied the flag: the post-Apply re-Detect is ok although the
-	// manifest on disk is not written yet.
+	// Configure applied the flag: the manifest does not hold it yet, so the
+	// step is outdated (apply records the header) until Apply marks it recorded.
 	st = topoState(Inputs{Topology: "remote"}, "local", "")
 	st.Topology.Set(TopologyRemote, SourceFlag)
-	if d := s.Detect(ctx, rp, st); d.State != StateOK {
+	if d := s.Detect(ctx, rp, st); d.State != StateOutdated || !strings.Contains(d.Detail, "from local to remote") {
 		t.Errorf("flag applied: %+v", d)
 	}
-	// Set from the flag with no manifest yet: ok (the engine records it).
+	if _, err := s.Apply(ctx, h.wp(), st, Plan{}); err != nil {
+		t.Fatal(err)
+	}
+	if st.Topology.Get() != TopologyRemote || st.Topology.Source() != SourceManifest {
+		t.Errorf("Apply left %v", st.Topology)
+	}
+	if d := s.Detect(ctx, rp, st); d.State != StateOK {
+		t.Errorf("after Apply (the success rule runs before the manifest is written): %+v", d)
+	}
+	// Decided in this run with no manifest yet: outdated ("record"), then ok.
 	st = topoState(Inputs{Topology: "local"}, "", "")
 	st.Topology.Set(TopologyLocal, SourceFlag)
-	if d := s.Detect(ctx, rp, st); d.State != StateOK {
+	if d := s.Detect(ctx, rp, st); d.State != StateOutdated || !strings.Contains(d.Detail, "record topology local") {
 		t.Errorf("flag, no manifest: %+v", d)
+	}
+	// The same value as the recorded one, set again by Configure: nothing to record.
+	st = topoState(Inputs{Reconfigure: true}, "local", "")
+	st.Topology.Set(TopologyLocal, SourcePrompt)
+	if d := s.Detect(ctx, rp, st); d.State != StateOK {
+		t.Errorf("unchanged: %+v", d)
 	}
 	if !s.MissingInput(NewRunState(Inputs{})) || s.MissingInput(st) {
 		t.Error("MissingInput")
@@ -337,5 +352,33 @@ func TestTopologyThroughTheEngine(t *testing.T) {
 	}
 	if len(h2.nonLockWrites()) != 0 {
 		t.Errorf("writes %v", h2.nonLockWrites())
+	}
+}
+
+// A prompt-driven topology change under --reconfigure is recorded in the
+// manifest header even when no other step applies anything (the topology step
+// is a reader of its own field, so rule A re-Detects it as outdated).
+func TestTopologyPromptChangeIsRecordedInTheHeader(t *testing.T) {
+	t.Parallel()
+	h := newEH(t, false)
+	rp := ReadPorts{FS: h.fs, Runner: NewFakeRunner(t), Clock: h.clk, Paths: h.p, DB: &evidenceDB{ok: true, why: "TCP 127.0.0.1:5432 and a socket"}}
+	run := func(ui Prompter, in Inputs) RunResult {
+		e := &Engine{Steps: []Step{TopologyStep{}}, Read: rp, Write: WritePorts{ReadPorts: rp, FS: h.fs}, UI: ui, Reporter: h.rep, Version: "v1.0.0"}
+		return e.Run(context.Background(), in)
+	}
+	if r := run(h.ui, Inputs{Yes: true}); r.ExitCode != ExitOK || h.manifest().Topology != "local" {
+		t.Fatalf("run 1: %+v", r)
+	}
+	ui := NewFakePrompter(t, true).ExpectSelect("Where does Postgres run", 1).ExpectConfirm("stay in the old database", true).ExpectConfirm("Apply this plan?", true)
+	if r := run(ui, Inputs{Reconfigure: true}); r.ExitCode != ExitOK {
+		t.Fatalf("run 2: %+v", r)
+	}
+	if got := h.manifest().Topology; got != "remote" {
+		t.Errorf("manifest topology %q, want remote", got)
+	}
+	// A third plain run is a no-op.
+	before := len(h.nonLockWrites())
+	if r := run(h.ui, Inputs{Yes: true}); r.ExitCode != ExitOK || len(h.nonLockWrites()) != before {
+		t.Errorf("run 3 not a no-op: %+v %v", r, h.nonLockWrites()[before:])
 	}
 }

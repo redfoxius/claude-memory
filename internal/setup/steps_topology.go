@@ -34,8 +34,8 @@ func ParseTopologyFlag(v string) (Topology, error) {
 // TopologyStep owns RunState.Topology (AC-19, Design 16, 22). The choice is
 // stored in the manifest header by the engine (written whenever something is
 // applied), so the step has no artifact of its own to write: Apply is a
-// no-op and Detect is ok once a topology is set and no --topology change is
-// pending.
+// no-op that marks the field recorded, and Detect is ok once the topology is
+// the recorded one.
 type TopologyStep struct{}
 
 var (
@@ -127,7 +127,11 @@ func TopologyDefault(ctx context.Context, rc ReadPorts, st *RunState) (Topology,
 	return TopologyRemote, "no local Postgres server found"
 }
 
-// Detect implements Step.
+// Detect implements Step. A topology decided in this run (Source not
+// manifest: a flag, the prompt or the AC-19 default) that the manifest does
+// not hold yet is outdated, so the step is applied and the engine records the
+// header; Apply then marks the field recorded (Source=manifest), which is why
+// the post-Apply re-Detect, taken before the manifest is written, is ok.
 func (TopologyStep) Detect(ctx context.Context, rc ReadPorts, st *RunState) Detection {
 	flag, _ := ParseTopologyFlag(st.Inputs.Topology) // Seed already refused a bad value
 	a := func(state State, detail string) Detection {
@@ -139,11 +143,15 @@ func (TopologyStep) Detect(ctx context.Context, rc ReadPorts, st *RunState) Dete
 	}
 	cur := st.Topology.Get()
 	// A change requested by --topology is applied by Configure; once it has
-	// set the value, the post-Apply re-Detect finds flag == cur and the step
-	// is ok (the engine records the header after that check, so the recorded
-	// topology must not be compared here).
+	// set the value, flag == cur.
 	if flag != "" && flag != cur {
 		return a(StateOutdated, fmt.Sprintf("--topology %s replaces %s", flag, cur))
+	}
+	if rec := recordedTopology(st); st.Topology.Source() != SourceManifest && rec != cur {
+		if rec == "" {
+			return a(StateOutdated, "record topology "+string(cur))
+		}
+		return a(StateOutdated, fmt.Sprintf("topology changes from %s to %s", rec, cur))
 	}
 	return a(StateOK, string(cur))
 }
@@ -235,8 +243,13 @@ func (TopologyStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch Choic
 	return p, nil
 }
 
-// Apply implements Step: nothing to write; the engine records the topology
-// in the manifest header when the run applies anything.
-func (TopologyStep) Apply(context.Context, WritePorts, *RunState, Plan) (StepResult, error) {
+// Apply implements Step: nothing to write; the engine records the topology in
+// the manifest header after this step succeeds. The step marks its own field
+// recorded (Source=manifest) so the success rule's re-Detect, which runs
+// before that write, finds it ok.
+func (TopologyStep) Apply(_ context.Context, _ WritePorts, st *RunState, _ Plan) (StepResult, error) {
+	if st.Topology.IsSet() {
+		st.Topology.Set(st.Topology.Get(), SourceManifest)
+	}
 	return StepResult{}, nil
 }

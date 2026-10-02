@@ -36,7 +36,7 @@ var ErrNeedsInput = errors.New("input needed but running non-interactively")
 // the engine's list are ignored.
 var FieldReaders = map[string][]string{
 	"BinPath":        {"binary", "hooks.scripts", "mcp", "jobs"},
-	"Topology":       {"database"},
+	"Topology":       {"topology", "database"},
 	"DB":             {"envfile", "database", "migrate"},
 	"Ollama":         {"envfile", "ollama"},
 	"NSRules":        nil,

@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -12,7 +13,7 @@ import (
 // references exists in FS, including the dotfile that a directory pattern
 // would skip (AC-34).
 func TestReferencedAssetsAreEmbedded(t *testing.T) {
-	for _, p := range []string{InitDBAppRole, EnvExample} {
+	for _, p := range []string{InitDBAppRole, InitDBAppRolePSQL, EnvExample} {
 		want, err := os.ReadFile(filepath.FromSlash(p))
 		if err != nil {
 			t.Fatalf("read %s from the tree: %v", p, err)
@@ -28,6 +29,30 @@ func TestReferencedAssetsAreEmbedded(t *testing.T) {
 	}
 	if info, err := fs.Stat(FS, InitDBDir); err != nil || !info.IsDir() {
 		t.Errorf("asset dir %q: %v", InitDBDir, err)
+	}
+}
+
+// TestWrapperRunsSharedPSQL guards the single SQL source: the compose stack's
+// 01-app-role.sh must be a thin wrapper that runs app-role.psql, not a second
+// copy of the statements (plan Design 5).
+func TestWrapperRunsSharedPSQL(t *testing.T) {
+	b, err := fs.ReadFile(FS, InitDBAppRole)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh := string(b)
+	if !strings.Contains(sh, "app-role.psql") {
+		t.Errorf("%s does not reference app-role.psql", InitDBAppRole)
+	}
+	for _, v := range []string{"app_user=", "app_db=", "app_pw="} {
+		if !strings.Contains(sh, v) {
+			t.Errorf("%s does not pass -v %s", InitDBAppRole, v)
+		}
+	}
+	for _, stmt := range []string{"CREATE ROLE", "CREATE DATABASE", "CREATE EXTENSION"} {
+		if strings.Contains(sh, stmt) {
+			t.Errorf("%s still holds %q: the statements live in app-role.psql only", InitDBAppRole, stmt)
+		}
 	}
 }
 

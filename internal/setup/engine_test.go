@@ -191,6 +191,30 @@ func TestEngineRuleAReadersAndNoSpuriousRedetect(t *testing.T) {
 	}
 }
 
+// A Configure change of Topology re-Detects the topology step itself (it is
+// its own reader, so the change is recorded in the manifest header) and the
+// database step.
+func TestEngineRuleATopologyReadersIncludeTopologyStep(t *testing.T) {
+	t.Parallel()
+	h := newEH(t, false)
+	h.world = NewFakeWorld(map[string]State{"topology/topology": StateAbsent, "database/database": StateOK})
+	topo := h.step("topology", nil, "topology/topology")
+	topo.ConfigureF = func(_ Prompter, st *RunState) error {
+		st.Topology.Set(TopologyRemote, SourcePrompt)
+		return nil
+	}
+	topo.MissingF = func(st *RunState) bool { return !st.Topology.IsSet() }
+	db := h.step("database", nil, "database/database")
+	r := h.engine(topo, db).Run(context.Background(), Inputs{Yes: true})
+	wantExit(t, r, ExitOK)
+	// topology: initial + rule A + post-apply; database: initial + rule A.
+	for id, want := range map[string]int{"topology": 3, "database": 2} {
+		if got := h.log.Count("Detect " + id); got != want {
+			t.Errorf("Detect %s ran %d times, want %d (%v)", id, got, want, h.log.Calls())
+		}
+	}
+}
+
 func TestEngineRuleAEnvKeyExceptionInteractive(t *testing.T) {
 	t.Parallel()
 	for _, interactive := range []bool{true, false} {
