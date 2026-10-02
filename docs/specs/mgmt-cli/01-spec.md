@@ -342,6 +342,6 @@ for staleness).
 ## 9. Owner Decisions (answered 2026-10-02, proposed defaults taken)
 1. Auto-memory `type: user` is skipped.
 2. INSIGHTS `Open Questions` / `Session Notes` are skipped.
-3. `rm --hard` asks y/N; `--yes` bypasses; EOF / non-TTY = N.
+3. `rm --hard` asks y/N; `--yes` bypasses; EOF or an empty answer = N (a non-TTY stdin that is at EOF therefore means N; piped `y` is honored).
 4. `created_at` = import time (the store sets it anyway).
 5. TTL re-import is documented; import prints the 30-day reminder.

@@ -369,7 +369,7 @@ func TestStatsCountsSeparateImports(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if _, err := s.pool.Exec(ctx, `ALTER TABLE events DROP CONSTRAINT events_source_check`); err != nil {
+	if _, err := s.pool.Exec(ctx, `ALTER TABLE events DROP CONSTRAINT IF EXISTS events_source_check`); err != nil {
 		t.Fatal(err)
 	}
 

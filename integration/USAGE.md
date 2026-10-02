@@ -98,8 +98,8 @@ Writes go through the same path as the MCP tools (scrubbing, re-embedding,
 events), so `edit` needs Ollama; `ls`, `show`, `rm` and `promote` do not.
 
 ```bash
-claude-memory ls [--status S] [--kind K] [--repo R] [--limit N] [--json]
-claude-memory show ID [--json]
+claude-memory ls [--status S] [--kind K] [--repo R] [--limit N]
+claude-memory show ID
 claude-memory rm ID [--reason TEXT]            # deprecates (reversible)
 claude-memory rm ID --hard [--yes]             # deletes the row; asks y/N first
 claude-memory edit ID                          # opens $VISUAL, else $EDITOR, else vi
@@ -113,8 +113,6 @@ claude-memory review                           # weekly pass over candidates
   (including `global`): pass `--namespace global` for those.
 - `ls` shows `candidate` and `active` records, newest first (50 by default,
   `--limit 0` = all); `--status deprecated` shows the retired ones.
-  `ls --json` and `show --json` print a stable JSON shape (snake_case keys,
-  RFC 3339 UTC times, no embedding) for tooling.
 - `show` prints every field, the content and a stale line: `stale: N commits`,
   `stale`, `fresh` or `unchecked` (unchecked unless the record's repo is the
   current directory's git checkout and it has a baseline commit and files).

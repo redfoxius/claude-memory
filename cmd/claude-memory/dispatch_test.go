@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"claude-memory/internal/config"
+	"claude-memory/internal/memory"
 )
 
 // runChild runs this test binary as claude-memory (TestMain's runMainEnv
@@ -152,5 +156,60 @@ func TestExitCode(t *testing.T) {
 	wrapped := errors.Join(errors.New("ctx"), &exitError{code: 3, err: errors.New("home")})
 	if exitCode(wrapped) != 3 {
 		t.Errorf("wrapped exit code = %d, want 3", exitCode(wrapped))
+	}
+}
+
+// The six management subcommands are dispatched by run() (after config load):
+// --help is answered by the subcommand's own flag set (exit 2, before any
+// database work), an unknown name is still an error.
+func TestManageDispatch(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	env := []string{"HOME=" + home, "MEMORY_PG_DSN=postgresql://u:p@127.0.0.1:1/db"}
+	for _, name := range []string{"ls", "show", "rm", "edit", "promote", "review"} {
+		out, code := runChild(t, env, name, "--help")
+		if code != 2 || !strings.Contains(out, "Usage of "+name) || strings.Contains(out, "unknown subcommand") {
+			t.Errorf("%s --help: exit %d, output:\n%s", name, code, out)
+		}
+		out, code = runChild(t, env, name, "--namespace", "Bad Name", "aaaaaaaa")
+		if code != 2 {
+			t.Errorf("%s with an invalid namespace: exit %d, output:\n%s", name, code, out)
+		}
+	}
+	out, code := runChild(t, env, "frobnicate")
+	if code != 1 || !strings.Contains(out, `unknown subcommand "frobnicate"`) {
+		t.Errorf("unknown: exit %d, output:\n%s", code, out)
+	}
+}
+
+// fakeHistory resolves every directory to one checkout.
+type fakeHistory struct{}
+
+func (fakeHistory) Resolve(context.Context, string) (memory.Checkout, string, bool, error) {
+	return memory.Checkout{Repo: "svc", Dir: "/w/svc"}, "", true, nil
+}
+func (fakeHistory) Head(context.Context, string) (string, error) { return "", nil }
+func (fakeHistory) Changed(context.Context, string, string, string, []string) (bool, int, error) {
+	return false, 0, nil
+}
+func (fakeHistory) Dirty(context.Context, string, []string) (bool, error) { return false, nil }
+
+// scopeManage applies the cwd's namespace first and --namespace last, and
+// keeps the checkout either way.
+func TestScopeManageNamespaceOrder(t *testing.T) {
+	old := resolveNamespace
+	resolveNamespace = func(string) string { return "cwdns" }
+	t.Cleanup(func() { resolveNamespace = old })
+
+	cfg := &config.Config{}
+	base := memory.New(nil, nil, nil, nil, cfg)
+	for _, tc := range []struct{ ns, want string }{{"", "cwdns"}, {"explicit", "explicit"}, {"global", "global"}} {
+		svc := scopeManage(context.Background(), base, fakeHistory{}, cfg, "/w/svc", tc.ns, false)
+		if svc.Namespace() != tc.want {
+			t.Errorf("--namespace %q: namespace = %q, want %q", tc.ns, svc.Namespace(), tc.want)
+		}
+		if co, ok := svc.Checkout(); !ok || co.Repo != "svc" {
+			t.Errorf("--namespace %q: checkout lost (%v %v)", tc.ns, co, ok)
+		}
 	}
 }

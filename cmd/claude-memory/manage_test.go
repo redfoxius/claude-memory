@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -318,39 +317,6 @@ func TestLs(t *testing.T) {
 			t.Errorf("out %q err %v", h.out.String(), err)
 		}
 	})
-
-	t.Run("json is a stable array of snake_case objects", func(t *testing.T) {
-		h := newHarness("", lsRecs()...)
-		if err := runLs(ctx, h.d, []string{"--json"}); err != nil {
-			t.Fatal(err)
-		}
-		var got []map[string]interface{}
-		if err := json.Unmarshal(h.out.Bytes(), &got); err != nil || len(got) != 3 {
-			t.Fatalf("json: %v (%d items)\n%s", err, len(got), h.out.String())
-		}
-		keys := make([]string, 0, len(got[0]))
-		for k := range got[0] {
-			keys = append(keys, k)
-		}
-		slices.Sort(keys)
-		want := []string{"commit_sha", "confidence", "content", "created_at", "deprecation_reason", "files", "id", "kind",
-			"last_used_at", "namespace", "repo", "seen_count", "source", "status", "superseded_by", "tags", "ticket",
-			"title", "updated_at", "used_count"}
-		if !slices.Equal(keys, want) {
-			t.Errorf("keys = %v\nwant   %v", keys, want)
-		}
-		if got[0]["id"] != idA || got[0]["created_at"] != "2026-10-02T11:00:00Z" {
-			t.Errorf("item 0 = %v", got[0])
-		}
-		if tags, ok := got[0]["tags"].([]interface{}); !ok || len(tags) != 0 {
-			t.Errorf("tags = %#v, want []", got[0]["tags"])
-		}
-		// Empty result is [] not null.
-		h = newHarness("")
-		if err := runLs(ctx, h.d, []string{"--json"}); err != nil || strings.TrimSpace(h.out.String()) != "[]" {
-			t.Errorf("empty json = %q err %v", h.out.String(), err)
-		}
-	})
 }
 
 func TestShow(t *testing.T) {
@@ -377,18 +343,17 @@ func TestShow(t *testing.T) {
 
 	t.Run("stale line", func(t *testing.T) {
 		cases := []struct {
-			name     string
-			co       *memory.Checkout
-			hint     *memory.StaleHint
-			sha      *string
-			want     string
-			wantJSON string
+			name string
+			co   *memory.Checkout
+			hint *memory.StaleHint
+			sha  *string
+			want string
 		}{
-			{"stale with count", &memory.Checkout{Repo: "svc", Dir: "/w/svc"}, &memory.StaleHint{Commits: 3}, &sha, "stale: 3 commits", "stale"},
-			{"stale unknown count", &memory.Checkout{Repo: "svc", Dir: "/w/svc"}, &memory.StaleHint{}, &sha, "\nstale\n", "stale"},
-			{"fresh", &memory.Checkout{Repo: "svc", Dir: "/w/svc"}, nil, &sha, "\nfresh\n", "fresh"},
-			{"other repo", &memory.Checkout{Repo: "other", Dir: "/w/other"}, &memory.StaleHint{Commits: 3}, &sha, "\nunchecked\n", "unchecked"},
-			{"no baseline", &memory.Checkout{Repo: "svc", Dir: "/w/svc"}, &memory.StaleHint{Commits: 3}, nil, "\nunchecked\n", "unchecked"},
+			{"stale with count", &memory.Checkout{Repo: "svc", Dir: "/w/svc"}, &memory.StaleHint{Commits: 3}, &sha, "stale: 3 commits"},
+			{"stale unknown count", &memory.Checkout{Repo: "svc", Dir: "/w/svc"}, &memory.StaleHint{}, &sha, "\nstale\n"},
+			{"fresh", &memory.Checkout{Repo: "svc", Dir: "/w/svc"}, nil, &sha, "\nfresh\n"},
+			{"other repo", &memory.Checkout{Repo: "other", Dir: "/w/other"}, &memory.StaleHint{Commits: 3}, &sha, "\nunchecked\n"},
+			{"no baseline", &memory.Checkout{Repo: "svc", Dir: "/w/svc"}, &memory.StaleHint{Commits: 3}, nil, "\nunchecked\n"},
 		}
 		for _, tc := range cases {
 			r := *rec
@@ -400,31 +365,6 @@ func TestShow(t *testing.T) {
 			}
 			if !strings.Contains(h.out.String(), tc.want) {
 				t.Errorf("%s: output lacks %q:\n%s", tc.name, tc.want, h.out.String())
-			}
-			h = newHarness("", &r)
-			h.svc.checkout, h.svc.hint = tc.co, tc.hint
-			if err := runShow(ctx, h.d, []string{"--json", "aaaaaaaa"}); err != nil {
-				t.Fatal(err)
-			}
-			var got map[string]interface{}
-			if err := json.Unmarshal(h.out.Bytes(), &got); err != nil || got["stale"] != tc.wantJSON {
-				t.Errorf("%s: json stale = %v (err %v)", tc.name, got["stale"], err)
-			}
-		}
-	})
-
-	t.Run("json has the record keys plus stale", func(t *testing.T) {
-		h := newHarness("", rec)
-		if err := runShow(ctx, h.d, []string{"aaaaaaaa", "--json"}); err != nil { // flag after the id
-			t.Fatal(err)
-		}
-		var got map[string]interface{}
-		if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
-			t.Fatal(err)
-		}
-		for _, k := range []string{"id", "content", "commit_sha", "stale", "stale_commits", "superseded_by"} {
-			if _, ok := got[k]; !ok {
-				t.Errorf("json lacks %q: %v", k, got)
 			}
 		}
 	})
@@ -492,6 +432,9 @@ func TestRm(t *testing.T) {
 			}
 			if !strings.Contains(h.out.String(), `delete aaaaaaaa "doomed" permanently? [y/N]`) {
 				t.Errorf("prompt missing: %q", h.out.String())
+			}
+			if !wantDel && !strings.Contains(h.out.String(), "not deleted") {
+				t.Errorf("input %q: no 'not deleted' line: %q", in, h.out.String())
 			}
 			if len(h.svc.deprecates) != 0 {
 				t.Error("--hard also deprecated")

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 
@@ -520,6 +521,11 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 
 	tag, err := tx.Exec(ctx, `DELETE FROM records WHERE id = $1`, id)
 	if err != nil {
+		// A reference added after the check above trips the superseded_by FK.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return &memory.ErrReferenced{}
+		}
 		return fmt.Errorf("delete record: %w", err)
 	}
 	if tag.RowsAffected() == 0 {

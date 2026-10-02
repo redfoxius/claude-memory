@@ -139,6 +139,8 @@ func run() error {
 		return cmdEvalRetrieval(cfg)
 	case "migrate":
 		return cmdMigrate(cfg, args[1:])
+	case "ls", "show", "rm", "edit", "promote", "review":
+		return cmdManage(cfg, subcommand, args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand %q", subcommand)
 	}
@@ -391,6 +393,21 @@ func cmdHook(cfg *config.Config) error {
 
 // cmdExtract is implemented in extract.go (WI-12).
 
+// scopeManage scopes the service for a management command: the cwd's
+// namespace and checkout first (stale lines), then --namespace, which always
+// wins. The fallback warning is only for commands that write.
+func scopeManage(ctx context.Context, svc *memory.Service, history memory.CodeHistory, cfg *config.Config, cwd, ns string, warnFallback bool) *memory.Service {
+	cwdNS := resolveNamespace(cwd)
+	if warnFallback && ns == "" {
+		warnIfFallback(cwd, cwdNS)
+	}
+	svc, _ = scopeCheckout(ctx, svc.WithNamespace(cwdNS), history, cfg, cwd)
+	if ns != "" {
+		svc = svc.WithNamespace(ns)
+	}
+	return svc
+}
+
 // cmdManage is the composition root of the record-management subcommands
 // (ls, show, rm, edit, promote, review). The service is built lazily by
 // Open, once the flags are valid: events enabled (the writes emit the same
@@ -405,16 +422,8 @@ func cmdManage(cfg *config.Config, subcommand string, args []string) error {
 				return nil, nil, fmt.Errorf("build service: %w", err)
 			}
 			cwd, _ := os.Getwd()
-			cwdNS := resolveNamespace(cwd)
-			if warnFallback && ns == "" {
-				warnIfFallback(cwd, cwdNS)
-			}
 			history := gitlog.Cached(gitlog.Exec{}, gitlog.NewMapCache(), cfg.StaleTimeout)
-			svc, _ = scopeCheckout(ctx, svc.WithNamespace(cwdNS), history, cfg, cwd)
-			if ns != "" {
-				svc = svc.WithNamespace(ns)
-			}
-			return svc, cleanup, nil
+			return scopeManage(ctx, svc, history, cfg, cwd, ns, warnFallback), cleanup, nil
 		},
 		Stdin:  os.Stdin,
 		Out:    os.Stdout,

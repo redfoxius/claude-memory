@@ -358,3 +358,7 @@ Verify these rejection scenarios to confirm the setup is secure:
    ```
 
 All three should fail cleanly. If they succeed, the server security posture is compromised; re-check `pg_hba.conf`, UFW rules, and Tailscale status.
+
+### Management commands
+
+`claude-memory ls|show|rm|edit|promote|review` manage records from the terminal (see `integration/USAGE.md`). They need no schema change or migration; `rm --hard` deletes a row for good and refuses a record that another record's `superseded_by` points at. Short ids (8 hex) resolve only inside the namespace; use the full UUID for `global` records.

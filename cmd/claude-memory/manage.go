@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -23,8 +22,8 @@ import (
 
 // manageUsage is the usage text of the record-management subcommands.
 const manageUsage = `usage:
-  claude-memory ls [--status S] [--kind K] [--repo R] [--limit N] [--json] [--namespace NS]
-  claude-memory show ID [--json] [--namespace NS]
+  claude-memory ls [--status S] [--kind K] [--repo R] [--limit N] [--namespace NS]
+  claude-memory show ID [--namespace NS]
   claude-memory rm ID [--reason TEXT] [--hard [--yes]] [--namespace NS]
   claude-memory edit ID [--namespace NS]
   claude-memory promote ID [--namespace NS]
@@ -186,62 +185,6 @@ func truncRunes(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// recordJSON is the stable JSON shape of `ls --json` and `show --json` (the
-// export point for tooling): snake_case keys, RFC 3339 UTC times, null for
-// unset optional fields, never the embedding.
-type recordJSON struct {
-	ID                string     `json:"id"`
-	Namespace         string     `json:"namespace"`
-	Kind              string     `json:"kind"`
-	Status            string     `json:"status"`
-	Source            string     `json:"source"`
-	Repo              string     `json:"repo"`
-	Title             string     `json:"title"`
-	Content           string     `json:"content"`
-	Tags              []string   `json:"tags"`
-	Files             []string   `json:"files"`
-	CommitSHA         *string    `json:"commit_sha"`
-	Ticket            *string    `json:"ticket"`
-	Confidence        float64    `json:"confidence"`
-	SeenCount         int        `json:"seen_count"`
-	UsedCount         int        `json:"used_count"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	LastUsedAt        *time.Time `json:"last_used_at"`
-	DeprecationReason *string    `json:"deprecation_reason"`
-	SupersededBy      *string    `json:"superseded_by"`
-}
-
-func toRecordJSON(r *record.Record) recordJSON {
-	nonNil := func(s []string) []string {
-		if s == nil {
-			return []string{}
-		}
-		return s
-	}
-	utc := func(t *time.Time) *time.Time {
-		if t == nil {
-			return nil
-		}
-		u := t.UTC()
-		return &u
-	}
-	return recordJSON{
-		ID: r.ID, Namespace: r.Namespace, Kind: string(r.Kind), Status: string(r.Status),
-		Source: string(r.Source), Repo: r.Repo, Title: r.Title, Content: r.Content,
-		Tags: nonNil(r.Tags), Files: nonNil(r.Files), CommitSHA: r.CommitSHA, Ticket: r.Ticket,
-		Confidence: r.Confidence, SeenCount: r.SeenCount, UsedCount: r.UsedCount,
-		CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(), LastUsedAt: utc(r.LastUsedAt),
-		DeprecationReason: r.DeprecationReason, SupersededBy: r.SupersededBy,
-	}
-}
-
-func writeJSON(w io.Writer, v interface{}) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
-}
-
 // staleInfo is the staleness verdict of one record.
 type staleInfo struct {
 	State   string // "stale", "fresh" or "unchecked"
@@ -338,7 +281,7 @@ func hardDelete(ctx context.Context, d mgmtDeps, in *lineReader, svc mgmtService
 		fmt.Fprintf(d.Out, "delete %s %q permanently? [y/N] ", shortID(rec.ID), oneLine(rec.Title))
 		line, ok := in.Line()
 		if !ok {
-			fmt.Fprintln(d.Out)
+			fmt.Fprintln(d.Out, "not deleted")
 			return false, true, nil
 		}
 		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
@@ -368,7 +311,6 @@ func runLs(ctx context.Context, d mgmtDeps, args []string) error {
 	kind := fs.String("kind", "", "only this kind")
 	repo := fs.String("repo", "", "only this repo")
 	limit := fs.Int("limit", 50, "maximum records (0 = all)")
-	asJSON := fs.Bool("json", false, "print the records as JSON")
 	pos, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -417,13 +359,6 @@ func runLs(ctx context.Context, d mgmtDeps, args []string) error {
 		recs = recs[:*limit]
 	}
 
-	if *asJSON {
-		out := make([]recordJSON, len(recs))
-		for i, r := range recs {
-			out[i] = toRecordJSON(r)
-		}
-		return writeJSON(d.Out, out)
-	}
 	if len(recs) == 0 {
 		fmt.Fprintln(d.Out, "no records")
 		return nil
@@ -436,22 +371,14 @@ func runLs(ctx context.Context, d mgmtDeps, args []string) error {
 	return nil
 }
 
-// showJSON is `show --json`: the record plus its staleness verdict.
-type showJSON struct {
-	recordJSON
-	Stale        string `json:"stale"` // stale | fresh | unchecked
-	StaleCommits *int   `json:"stale_commits"`
-}
-
 // runShow prints one record in full.
 func runShow(ctx context.Context, d mgmtDeps, args []string) error {
 	fs, nsFlag := d.flags("show")
-	asJSON := fs.Bool("json", false, "print the record as JSON")
 	pos, err := parseFlags(fs, args)
 	if err != nil {
 		return err
 	}
-	arg, err := oneID(pos, "show ID [--json] [--namespace NS]")
+	arg, err := oneID(pos, "show ID [--namespace NS]")
 	if err != nil {
 		return err
 	}
@@ -466,13 +393,6 @@ func runShow(ctx context.Context, d mgmtDeps, args []string) error {
 	}
 	st := staleCheck(ctx, svc, rec)
 
-	if *asJSON {
-		out := showJSON{recordJSON: toRecordJSON(rec), Stale: st.State}
-		if st.State == "stale" && st.Commits > 0 {
-			out.StaleCommits = &st.Commits
-		}
-		return writeJSON(d.Out, out)
-	}
 	opt := func(s *string) string {
 		if s == nil || *s == "" {
 			return "-"
