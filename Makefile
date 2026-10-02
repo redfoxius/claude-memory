@@ -26,7 +26,7 @@ test:
 # (each test then gets its own throwaway database).
 test-integration:
 	@echo "Running integration tests..."
-	go test -tags integration -race -count=1 ./internal/postgres/...
+	go test -tags integration -race -count=1 ./internal/postgres/... ./cmd/claude-memory/...
 
 # Lint with golangci-lint (uses default config when no .golangci.yml exists).
 lint:

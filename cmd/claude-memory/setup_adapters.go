@@ -31,6 +31,7 @@ type setupDeps struct {
 	Clock    setup.Clock
 	DB       setup.DBProber     // postgres.Prober
 	Ollama   setup.OllamaProber // ollama.Prober
+	Assets   fs.FS              // package integration's embedded assets
 	Redactor *setup.Redactor
 	Stdout   io.Writer // redacting (AC-30)
 	Stderr   io.Writer // redacting (AC-30)

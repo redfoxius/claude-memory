@@ -49,14 +49,20 @@ type Config struct {
 // error: it yields an empty Config (everything resolves to Fallback).
 func Load(path string) (*Config, error) {
 	home, _ := os.UserHomeDir()
-	c := &Config{home: home}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return c, nil
+		return &Config{home: home}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	return Parse(data, path, home)
+}
+
+// Parse parses and validates namespaces.yaml content read by the caller.
+// path is used in error messages only; home expands "~" in path globs.
+func Parse(data []byte, path, home string) (*Config, error) {
+	c := &Config{home: home}
 	if err := yaml.Unmarshal(data, c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}

@@ -11,10 +11,6 @@ import (
 	"claude-memory/internal/setup"
 )
 
-// migrationIDs are the embedded migrations postgres.New applies, in order
-// (internal/postgres/migrations). migrate_test.go keeps the list in sync.
-var migrationIDs = []string{"0001", "0002"}
-
 // cmdMigrate implements the "migrate" subcommand (AC-3): it runs after the
 // config is loaded (it needs the DSN and the env file's 0600 check), opens
 // the store with postgres.New, which applies the idempotent migrations, and
@@ -28,7 +24,7 @@ func cmdMigrate(cfg *config.Config, args []string) error {
 	if err := migrateDSN(ctx, cfg.PGDSN); err != nil {
 		return err
 	}
-	fmt.Printf("schema up to date (migrations: %s)\n", strings.Join(migrationIDs, ","))
+	fmt.Printf("schema up to date (migrations: %s)\n", strings.Join(postgres.MigrationIDs(), ","))
 	return nil
 }
 

@@ -333,15 +333,22 @@ func ParseEnvFile(path string) (*EnvFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
+	return ParseEnvData(data, info.Mode().Perm()), nil
+}
+
+// ParseEnvData parses env-file content read by the caller (e.g. through
+// internal/setup's FS port) with the file's permission bits: ParseEnvFile
+// without the I/O.
+func ParseEnvData(data []byte, mode fs.FileMode) *EnvFile {
 	ef := parseEnv(string(data))
-	ef.Mode = info.Mode().Perm()
+	ef.Mode = mode.Perm()
 	if ef.Mode&0o077 != 0 {
 		ef.Findings = append([]Finding{{
 			Kind:   FindingGroupWorldReadable,
 			Detail: fmt.Sprintf("mode %#o has group/world bits; the file must be 0600", ef.Mode),
 		}}, ef.Findings...)
 	}
-	return ef, nil
+	return ef
 }
 
 // parseEnv parses env-file content (everything but the mode).

@@ -1,0 +1,205 @@
+{
+  "schema": 1,
+  "version": "test",
+  "platform": {
+    "os": "linux",
+    "arch": "amd64",
+    "jobs": "none",
+    "config_dir": "$ROOT/home/.claude",
+    "bin": "$ROOT/home/.local/bin/claude-memory"
+  },
+  "ok": true,
+  "summary": {
+    "pass": 20,
+    "fail": 0,
+    "warn": 0,
+    "info": 3,
+    "skip": 0
+  },
+  "checks": [
+    {
+      "id": "binary.version",
+      "title": "claude-memory binary",
+      "status": "pass",
+      "detail": "claude-memory test at $ROOT/home/.local/bin/claude-memory",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "env.file",
+      "title": "env file exists",
+      "status": "pass",
+      "detail": "$ROOT/home/.config/claude-memory/env (3 keys)",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "env.perms",
+      "title": "env file permissions",
+      "status": "pass",
+      "detail": "mode 0600",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "env.format",
+      "title": "env file format and DSN",
+      "status": "pass",
+      "detail": "KEY=VALUE format; MEMORY_PG_DSN (env file): user claude_memory @ db.example:5432, database claude_memory",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "pg.connect",
+      "title": "Postgres connection",
+      "status": "pass",
+      "detail": "connected (user claude_memory @ db.example:5432, database claude_memory; PostgreSQL 16.4, no TLS)",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "pg.latency",
+      "title": "Postgres round trip",
+      "status": "pass",
+      "detail": "ping 4 ms",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "pg.vector",
+      "title": "pgvector extension",
+      "status": "pass",
+      "detail": "pgvector 0.7.0",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "pg.schema",
+      "title": "schema migrations",
+      "status": "pass",
+      "detail": "migrations 0001, 0002 applied",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "ollama.reachable",
+      "title": "Ollama reachable",
+      "status": "pass",
+      "detail": "Ollama 0.12.3 at http://127.0.0.1:11434",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "ollama.model",
+      "title": "embedding model pulled",
+      "status": "pass",
+      "detail": "model bge-m3 present",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "ollama.embed",
+      "title": "embedding round trip",
+      "status": "pass",
+      "detail": "1024 dims in 40 ms",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "tools.git",
+      "title": "git on PATH",
+      "status": "pass",
+      "detail": "/usr/bin/git",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "tools.claude",
+      "title": "claude CLI on PATH",
+      "status": "pass",
+      "detail": "$ROOT/home/.local/bin/claude",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "tools.az",
+      "title": "az CLI on PATH",
+      "status": "info",
+      "detail": "not needed: MEMORY_PR_INGEST_REPOS is not set",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "mcp.registered",
+      "title": "MCP server registered",
+      "status": "pass",
+      "detail": "registered: $ROOT/home/.local/bin/claude-memory serve",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "hooks.scripts",
+      "title": "hook scripts",
+      "status": "pass",
+      "detail": "user-prompt-submit.sh, session-end.sh in $ROOT/home/.claude/hooks/claude-memory",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "hooks.settings",
+      "title": "hooks in settings.json",
+      "status": "pass",
+      "detail": "one claude-memory entry each for UserPromptSubmit and SessionEnd",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "skills",
+      "title": "skills",
+      "status": "pass",
+      "detail": "remember, memory-digest match this version",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "claude-md",
+      "title": "CLAUDE.md memory block",
+      "status": "pass",
+      "detail": "memory block up to date in $ROOT/home/.claude/CLAUDE.md",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "namespaces",
+      "title": "namespaces.yaml",
+      "status": "pass",
+      "detail": "1 mapping(s), default global; $ROOT/work → global (default)",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "jobs",
+      "title": "scheduled jobs",
+      "status": "info",
+      "detail": "not checked yet: systemd user timers are detected from slice 2 on",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "dirs.state",
+      "title": "state directory",
+      "status": "pass",
+      "detail": "$ROOT/home/.local/state/claude-memory writable",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "manifest",
+      "title": "install manifest",
+      "status": "info",
+      "detail": "no $ROOT/home/.config/claude-memory/install.json (a manual install, or install has not run yet)",
+      "remedy": "",
+      "duration_ms": 0
+    }
+  ]
+}

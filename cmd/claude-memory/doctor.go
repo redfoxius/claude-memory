@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"claude-memory/internal/setup"
 )
 
 // doctorOptions are the doctor flags (AC-4).
@@ -53,10 +55,43 @@ func parseDoctorFlags(args []string, stderr io.Writer) (doctorOptions, error) {
 }
 
 // cmdDoctor runs the read-only health check (AC-57..AC-60). main.go parses
-// the flags and builds deps (read-only FS and Runner) before calling it.
-//
-// Slice 1 phase 1: dispatch, flags and adapters exist; the check registry and
-// the renderers land with WI-S1-11/WI-S1-12.
-func cmdDoctor(_ context.Context, _ doctorOptions, _ setupDeps) error {
-	return errors.New("doctor: not implemented yet")
+// the flags and builds deps (read-only FS and Runner, the probers, the
+// redacting output sink) before calling it. It returns nil (exit 0) when the
+// report is OK, and a quiet exit-1 error otherwise (the report already says
+// why; main prints nothing more).
+func cmdDoctor(ctx context.Context, opts doctorOptions, deps setupDeps) error {
+	vers := buildVersion().Short()
+	rep := setup.RunDoctor(ctx, setup.DoctorDeps{
+		Paths:    deps.Paths,
+		Env:      deps.Env,
+		Platform: deps.Platform,
+		FS:       deps.FS,
+		Runner:   deps.Runner,
+		Clock:    deps.Clock,
+		DB:       deps.DB,
+		Ollama:   deps.Ollama,
+		Assets:   deps.Assets,
+		Version:  vers,
+		Redactor: deps.Redactor,
+	}, setup.DoctorOptions{Timeout: opts.Timeout, Deadline: opts.Deadline})
+
+	meta := setup.ReportMeta{Version: vers, Platform: deps.Platform, ConfigDir: deps.Paths.ClaudeDir,
+		Bin: deps.Paths.Self, Strict: opts.Strict}
+	write := setup.WriteDoctorText
+	if opts.JSON {
+		write = setup.WriteDoctorJSON
+	}
+	if err := write(deps.Stdout, rep, meta, deps.Redactor); err != nil {
+		return fmt.Errorf("doctor: write report: %w", err)
+	}
+	return doctorExit(rep, opts.Strict)
+}
+
+// doctorExit maps a report to the AC-59 exit status: nil (0) when no check
+// failed and, with --strict, none warned; else a quiet exit 1.
+func doctorExit(rep setup.DoctorReport, strict bool) error {
+	if !rep.OK(strict) {
+		return quietExit(1)
+	}
+	return nil
 }

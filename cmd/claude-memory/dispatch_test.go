@@ -67,9 +67,9 @@ func TestEarlyDispatch(t *testing.T) {
 	}{
 		{"version, empty HOME", emptyHome, []string{"version"}, 0, "claude-memory ", []string{dsnRequired}},
 		{"version, 0644 env file", badPermHome, []string{"version"}, 0, "claude-memory ", []string{"mode 0600"}},
-		// doctor is a stub until WI-S1-11/12: it gets past dispatch and flags.
-		{"doctor --json, empty HOME", emptyHome, []string{"doctor", "--json"}, 1, "not implemented yet", []string{dsnRequired}},
-		{"doctor, 0644 env file", badPermHome, []string{"doctor"}, 1, "not implemented yet", []string{"mode 0600"}},
+		// doctor reports instead of failing to start: exit 1 because checks fail.
+		{"doctor --json, empty HOME", emptyHome, []string{"doctor", "--json"}, 1, `"schema": 1`, []string{dsnRequired, "error:"}},
+		{"doctor, 0644 env file", badPermHome, []string{"doctor"}, 1, "FAIL  env.perms", []string{dsnRequired, "must have mode 0600"}},
 		{"doctor unknown flag", emptyHome, []string{"doctor", "--bogus"}, 2, "flag provided but not defined", nil},
 		{"doctor positional arg", emptyHome, []string{"doctor", "extra"}, 2, "no arguments", nil},
 		{"doctor --latency deferred", emptyHome, []string{"doctor", "--latency=5"}, 2, "§12.1", nil},

@@ -6,6 +6,14 @@ into **user-level** config (`~/.local/bin`, `~/.config/claude-memory`,
 is applied automatically — every step below is something you run
 yourself. Follow them in order.
 
+**Check the result at any time with `claude-memory doctor`** (after step
+1): a read-only health check of every step below — env file, Postgres
+(connection, pgvector, schema), Ollama, MCP registration, hooks, skills,
+CLAUDE.md block, namespaces and the launchd jobs. It never changes
+anything, prints a `fix:` line under each failing check, exits 1 when a
+check fails (`--strict`: also on warnings) and has `--json` for scripts.
+A guided `claude-memory install` is planned (`docs/specs/install-doctor/`).
+
 ## 0. Prerequisites
 
 - The server Postgres is already deployed and reachable over Tailscale
@@ -150,6 +158,9 @@ to the comma-separated local repo paths (or root directories) you want
 `ingest-pr` to scan, if you haven't already.
 
 ## 9. Verify
+
+Start with `claude-memory doctor`: every check should be `pass` or
+`info`. The manual checks below exercise the same paths end to end.
 
 **MCP tool list** (no Claude Code needed — talks to the binary directly):
 

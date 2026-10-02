@@ -7,10 +7,12 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"claude-memory/internal/postgres"
 )
 
-// TestMigrationIDsMatchEmbeddedFiles keeps the "migrate" summary in sync with
-// internal/postgres/migrations.
+// TestMigrationIDsMatchEmbeddedFiles checks that the IDs the "migrate"
+// summary prints (postgres.MigrationIDs) are exactly the migration files.
 func TestMigrationIDsMatchEmbeddedFiles(t *testing.T) {
 	t.Parallel()
 	files, err := filepath.Glob(filepath.Join("..", "..", "internal", "postgres", "migrations", "*.sql"))
@@ -23,8 +25,8 @@ func TestMigrationIDsMatchEmbeddedFiles(t *testing.T) {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	if !reflect.DeepEqual(ids, migrationIDs) {
-		t.Errorf("migrationIDs = %v, migrations dir has %v", migrationIDs, ids)
+	if !reflect.DeepEqual(ids, postgres.MigrationIDs()) {
+		t.Errorf("postgres.MigrationIDs() = %v, migrations dir has %v", postgres.MigrationIDs(), ids)
 	}
 }
 

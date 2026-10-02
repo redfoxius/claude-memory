@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"time"
 
+	"claude-memory/integration"
 	"claude-memory/internal/azuredevops"
 	"claude-memory/internal/config"
 	"claude-memory/internal/extraction"
@@ -30,10 +31,19 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		if !errors.Is(err, errQuiet) {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
 		os.Exit(exitCode(err))
 	}
 }
+
+// errQuiet marks an exit whose reason the command already printed (doctor's
+// report): main exits with the code and prints nothing more.
+var errQuiet = errors.New("exit status already reported")
+
+// quietExit exits with code without an "error:" line.
+func quietExit(code int) error { return &exitError{code: code, err: errQuiet} }
 
 // exitError carries a process exit code other than 1: 2 for usage errors,
 // 3 when doctor cannot start (AC-59).
@@ -212,6 +222,7 @@ func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
 	runner := execRunner{readOnly: true}
 	redactor := setup.NewRedactor()
 	return setupDeps{
+		Assets:   integration.FS,
 		Paths:    paths,
 		Env:      buildEnv(os.Environ()),
 		Platform: detectPlatform(ctx, fsys, runner, runtime.GOOS, runtime.GOARCH),

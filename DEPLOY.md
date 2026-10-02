@@ -41,8 +41,10 @@
    ```
    Edit `deploy/.env` and fill in:
    - `POSTGRES_BIND_IP`: Run `tailscale ip -4` and copy the IPv4 address (e.g., `100.64.0.10`).
-   - `POSTGRES_PASSWORD`: Generate with `openssl rand -base64 32`. Store securely; you will not need it again after initial setup (laptops use the app role instead).
-   - `APP_DB_PASSWORD`: Generate with `openssl rand -base64 32`. Store this; you will need it on the laptop.
+   - `POSTGRES_PASSWORD`: Generate with `openssl rand -hex 32`. Store securely; you will not need it again after initial setup (laptops use the app role instead).
+   - `APP_DB_PASSWORD`: Generate with `openssl rand -hex 32`. Store this; you will need it on the laptop.
+
+   Use the hex form: it is URL-safe. A `base64` password can contain `/`, `+` and `=`, and a `/` in the userinfo of the laptop's `postgresql://` DSN ends the host part, so the DSN no longer parses (`claude-memory doctor` reports it as `env.format: fail`; the fix is to URL-encode it, `/` → `%2F`, or rotate to a hex password).
 
 3. **Start the container**:
    ```bash
@@ -91,23 +93,38 @@ These limits leave ample headroom for pre-existing host services (game server, N
    ```bash
    mkdir -p ~/.config/claude-memory
    cat > ~/.config/claude-memory/env <<'EOF'
-   export MEMORY_PG_DSN="postgresql://claude_memory:<APP_DB_PASSWORD>@<POSTGRES_BIND_IP>:5432/claude_memory"
-   export MEMORY_OLLAMA_URL="http://127.0.0.1:11434"
-   export MEMORY_EMBED_MAX_TOKENS="2048"
+   MEMORY_PG_DSN=postgresql://claude_memory:<APP_DB_PASSWORD>@<POSTGRES_BIND_IP>:5432/claude_memory
+   MEMORY_OLLAMA_URL=http://127.0.0.1:11434
+   MEMORY_EMBED_MAX_TOKENS=2048
    # optional: staleness-check ceilings (hook / MCP server)
-   # export MEMORY_STALE_TIMEOUT_HOOK="50ms"; export MEMORY_STALE_TIMEOUT="500ms"
+   # MEMORY_STALE_TIMEOUT_HOOK=50ms
+   # MEMORY_STALE_TIMEOUT=500ms
    EOF
    chmod 600 ~/.config/claude-memory/env
    ```
-   
+
+   The format is plain `KEY=VALUE`, one per line: **no `export`, no quotes**.
+   `claude-memory` reads this file itself (it is never shell-sourced): an
+   `export KEY=...` line is not read at all, and quotes around a value become
+   part of the value. Every subcommand except `doctor`, `version` and
+   `namespaces` refuses to start when the file is group/world-readable.
+
    Replace:
-   - `<APP_DB_PASSWORD>`: The password you generated for `APP_DB_PASSWORD` on the server.
+   - `<APP_DB_PASSWORD>`: The password you generated for `APP_DB_PASSWORD` on the server (hex, so it needs no URL-encoding).
    - `<POSTGRES_BIND_IP>`: The server's Tailscale IP (e.g., `100.64.0.10`).
 
-3. **Verify connectivity**:
+3. **Verify**:
    ```bash
-   source ~/.config/claude-memory/env
-   psql "$MEMORY_PG_DSN" -c "SELECT version();"
+   claude-memory doctor
+   # pg.connect / pg.vector / pg.schema should pass; `claude-memory migrate`
+   # applies the schema if pg.schema says it is missing or behind.
+   ```
+   `doctor` is read-only (it never migrates, writes or starts the MCP
+   server) and prints a `fix:` line under every failing check; `--json`
+   gives the same report for scripts. To check the connection with `psql`
+   instead:
+   ```bash
+   psql "$(sed -n 's/^MEMORY_PG_DSN=//p' ~/.config/claude-memory/env)" -c "SELECT version();"
    # Output: PostgreSQL 16.x ...
    ```
    If this fails, check:
@@ -236,9 +253,9 @@ docker exec -u postgres claude-memory-postgres pg_restore -d claude_memory \
 
 To change the application role password (for the laptop's DSN):
 
-1. **On the server**, generate a new password:
+1. **On the server**, generate a new password (hex: URL-safe in the DSN):
    ```bash
-   openssl rand -base64 32
+   openssl rand -hex 32
    ```
 
 2. **Update Postgres**:
@@ -249,9 +266,9 @@ To change the application role password (for the laptop's DSN):
 
 3. **On the laptop**, update `~/.config/claude-memory/env`:
    ```bash
-   # Edit ~/.config/claude-memory/env and change MEMORY_PG_DSN password
-   source ~/.config/claude-memory/env
-   psql "$MEMORY_PG_DSN" -c "SELECT version();"
+   # Edit ~/.config/claude-memory/env and change the MEMORY_PG_DSN password
+   # (plain KEY=VALUE line, no export, no quotes), then:
+   claude-memory doctor   # pg.connect must pass
    ```
 
 The superuser (`postgres`) password is not used by any client; if you forget it, it can only be reset by stopping the container and restarting with an environment variable override (advanced recovery; document in internal runbooks if needed).
@@ -299,7 +316,7 @@ This disparity is why Topology B runs Ollama (and the MCP server) on the laptop 
 
 - **`.env` file** (`deploy/.env`) is mode `0600` (readable by root and the docker user only). Never committed.
 - **Laptop config** (`~/.config/claude-memory/env`) is mode `0600` (readable by the user only).
-- **Postgres DSN with password** is sourced into the environment on the laptop before invoking `claude-memory` commands, never logged or printed.
+- **Postgres DSN with password** is read from the env file by `claude-memory` itself (never shell-sourced), and never logged or printed; `claude-memory doctor` masks the password in its output.
 
 ### Negative Tests (AC-54, AC-52)
 

@@ -5,6 +5,7 @@
 | [memory-mvp](memory-mvp/01-spec.md) | SPEC-2026-10-01-memory-mvp | clarifying |
 | [namespaces](namespaces/01-spec.md) | namespaces | implemented (integration tests pending a Docker run) |
 | [staleness-metrics](staleness-metrics/01-spec.md) | SPEC-2026-10-01-staleness-metrics | PR A (staleness) implemented; PR B (events + stats) not started |
+| [install-doctor](install-doctor/01-spec.md) | SPEC-2026-10-01-install-doctor | v0.2; slice 1 (`doctor` + plumbing: `version`, `migrate`, embedded assets, setup libraries) implemented; slice 2 (`install`/`uninstall`) not started; slice 3 (Docker) deferred |
 
 ## Backlog (next, in order)
 
@@ -128,6 +129,17 @@ explicit `migrate` subcommand) and open the hook's pool without them; then
 re-measure p95 over ~50 prompts.
 
 ### 8. `claude-memory install` + `doctor` — interactive, re-runnable setup
+
+**Status (2026-10-02):** specified in `install-doctor/` (spec v0.2, plan,
+architecture review). **Slice 1 implemented**: `claude-memory doctor` (23
+read-only checks, `--json`, `--strict`, `--timeout`/`--deadline`, exit codes
+0–3), `version`, `migrate`, early dispatch, `config.ParseEnvFile`, the
+`integration`/`deploy` embed packages, the `internal/setup` ports, redactor,
+settings.json merge, CLAUDE.md block, `.claude.json` reader, manifest reader
+and launchd detection, and the DEPLOY.md env-file fix. **Slice 2**
+(`install`, `--upgrade`, `uninstall`) is next; slice 3 (Docker topology) and
+the §12.1 follow-ups (latency probe, cron, purge, …) are deferred. The text
+below is the original request, kept for the record.
 
 Added 2026-10-01 at the owner's request. Today installation is ~10 manual steps
 across `integration/INSTALL.md` and `DEPLOY.md` (only `namespaces init` is a
