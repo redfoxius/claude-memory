@@ -62,6 +62,33 @@ deleted; `active` and `deprecated` records are never touched.
 claude-memory cleanup
 ```
 
+It prints the number of deleted candidates, then the number of usage events
+pruned (events older than 365 days), and a third line
+`spool: N draining, M failed files left` only when spool files remain (see
+Usage stats). It also moves any pending hook events into the database and
+removes per-session staleness caches older than 7 days.
+
+## Usage stats
+
+The hook, `memory_feedback` and every write record small usage events (record
+ids, enums and numbers only, never text) in the `events` table. The hook only
+appends them to `~/.local/state/claude-memory/events/spool.jsonl`; `serve`,
+`extract`, `ingest-pr` and `cleanup` move the spool into Postgres.
+
+```bash
+claude-memory stats [--since 30d] [--json]   # window: Nd or a Go duration, e.g. 36h
+```
+
+One block for all namespaces and one per namespace: cards injected and
+distinct records, the precision proxy (records marked `useful` within 2 h of a
+card / distinct records injected) next to the same ratio without the 2 h limit,
+feedback by outcome, records created by source and the current inventory,
+candidate-to-active promotion rate, stale-flag rate and check coverage (cards
+whose staleness could be checked), superseded/deprecated/TTL-deleted counts.
+A ratio with no data prints `n/a`. The last line, `N events still in the
+spool`, tells you the report may lag. The proxy depends on Claude calling
+`memory_feedback(useful)`; compare trends, not absolute numbers.
+
 ## Seeding and correcting records
 
 ```bash

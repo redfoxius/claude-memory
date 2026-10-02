@@ -195,6 +195,7 @@ type staleResult struct {
 	idx     int
 	changed bool
 	commits int
+	checked bool
 }
 
 // annotateStale sets Stale on the top results whose files changed since
@@ -243,7 +244,7 @@ func (s *Service) annotateStale(ctx context.Context, recs []*SearchRecord, minSi
 			if err != nil {
 				changed = false
 			}
-			results <- staleResult{idx: j.idx, changed: changed, commits: commits}
+			results <- staleResult{idx: j.idx, changed: changed, commits: commits, checked: err == nil}
 		}(j)
 	}
 
@@ -258,6 +259,7 @@ func (s *Service) annotateStale(ctx context.Context, recs []*SearchRecord, minSi
 	for range jobs {
 		select {
 		case res := <-results:
+			recs[res.idx].StaleChecked = res.checked
 			if res.changed {
 				recs[res.idx].Stale = &StaleHint{Commits: res.commits}
 			}

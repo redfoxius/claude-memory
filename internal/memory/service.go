@@ -20,6 +20,7 @@ type Service struct {
 	clock             Clock
 	cfg               *config.Config
 	namespace         string
+	events            EventSink // nil = no events
 
 	// Staleness checking (all optional; see staleness.go).
 	history       CodeHistory

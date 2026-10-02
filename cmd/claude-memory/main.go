@@ -19,6 +19,7 @@ import (
 	"claude-memory/integration"
 	"claude-memory/internal/azuredevops"
 	"claude-memory/internal/config"
+	"claude-memory/internal/eventspool"
 	"claude-memory/internal/extraction"
 	"claude-memory/internal/gitlog"
 	"claude-memory/internal/memory"
@@ -114,7 +115,7 @@ func run() error {
 	args := flag.Args()
 
 	if len(args) == 0 {
-		return fmt.Errorf("no subcommand specified; available: serve, hook, extract, ingest-pr, cleanup, seed, eval-retrieval, migrate, namespaces, install, doctor, version")
+		return fmt.Errorf("no subcommand specified; available: serve, hook, extract, ingest-pr, cleanup, stats, seed, eval-retrieval, migrate, namespaces, install, doctor, version")
 	}
 
 	subcommand := args[0]
@@ -130,6 +131,8 @@ func run() error {
 		return cmdIngestPR(cfg)
 	case "cleanup":
 		return cmdCleanup(cfg)
+	case "stats":
+		return cmdStats(cfg, args[1:])
 	case "seed":
 		return cmdSeed(cfg)
 	case "eval-retrieval":
@@ -168,9 +171,22 @@ func buildPostgresStore(ctx context.Context, cfg *config.Config, migrate bool) (
 // This is the composition root: the only place concrete adapters are
 // constructed.
 func buildService(ctx context.Context, cfg *config.Config, migrate bool) (*memory.Service, func(), error) {
+	svc, _, cleanup, err := newService(ctx, cfg, migrate, false)
+	return svc, cleanup, err
+}
+
+// buildServiceWithEvents is buildService for the long-running and scheduled
+// subcommands (serve, extract --run, ingest-pr): the service records its
+// lifecycle events into Postgres, and the same store is returned as the sink
+// the spool drain writes to. The hook never uses it.
+func buildServiceWithEvents(ctx context.Context, cfg *config.Config) (*memory.Service, memory.EventSink, func(), error) {
+	return newService(ctx, cfg, true, true)
+}
+
+func newService(ctx context.Context, cfg *config.Config, migrate, events bool) (*memory.Service, memory.EventSink, func(), error) {
 	store, cleanup, err := buildPostgresStore(ctx, cfg, migrate)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Default namespace for this process: the working directory's. The MCP
@@ -197,8 +213,11 @@ func buildService(ctx context.Context, cfg *config.Config, migrate bool) (*memor
 
 	// Build the memory service.
 	svc := memory.New(store, embedder, scrubber, clock, cfg)
+	if events {
+		svc = svc.WithEvents(store)
+	}
 
-	return svc, cleanup, nil
+	return svc, store, cleanup, nil
 }
 
 // setupValues are the plain values every setup command (doctor, install)
@@ -329,11 +348,14 @@ func (*systemClock) Now() time.Time {
 
 func cmdServe(cfg *config.Config) error {
 	ctx := context.Background()
-	svc, cleanup, err := buildService(ctx, cfg, true)
+	svc, sink, cleanup, err := buildServiceWithEvents(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	// Move the hook's spooled events into Postgres without delaying startup.
+	go drainSpool(ctx, sink, 30*time.Second)
 
 	// Staleness checks: the server's working directory is its checkout.
 	// Resolved once; HEAD is read per call (no pinned head). Outside a
@@ -363,7 +385,7 @@ func cmdHook(cfg *config.Config) error {
 	}
 	defer cleanup()
 
-	deps := hookDeps{History: buildCodeHistory(cfg)}
+	deps := hookDeps{History: buildCodeHistory(cfg), Events: eventspool.Sink{Dir: spoolDir()}}
 	return hookCmd(ctx, cfg, svc, deps, hookStart)
 }
 
@@ -386,11 +408,12 @@ func cmdIngestPR(cfg *config.Config) error {
 
 	var svc extraction.StoreWriter
 	if !*dryRun {
-		s, cleanup, err := buildService(ctx, cfg, true)
+		s, sink, cleanup, err := buildServiceWithEvents(ctx, cfg)
 		if err != nil {
 			return fmt.Errorf("build service: %w", err)
 		}
 		defer cleanup()
+		drainSpool(ctx, sink, 30*time.Second)
 		svc = s
 	}
 
@@ -416,7 +439,7 @@ func cmdCleanup(cfg *config.Config) error {
 	}
 	defer cleanup()
 
-	return cleanupCmd(ctx, cfg, store)
+	return cleanupCmd(ctx, cfg, store, stateDir(), time.Now(), os.Stdout)
 }
 
 // cmdSeed is implemented in seed.go (WI-17).

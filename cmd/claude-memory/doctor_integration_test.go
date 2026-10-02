@@ -144,7 +144,7 @@ func TestMigrateAndDoctorPGChecks(t *testing.T) {
 	// AC-3: migrate twice; the second run is a no-op.
 	for i := 0; i < 2; i++ {
 		out, code := runChild(t, []string{"HOME=" + home}, "migrate")
-		if code != 0 || !strings.Contains(out, "schema up to date (migrations: 0001,0002)") {
+		if code != 0 || !strings.Contains(out, "schema up to date (migrations: 0001,0002,0003)") {
 			t.Fatalf("migrate run %d: exit %d\n%s", i+1, code, out)
 		}
 	}

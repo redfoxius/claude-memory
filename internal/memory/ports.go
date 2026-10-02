@@ -131,6 +131,9 @@ type SearchRecord struct {
 	// Stale is set when the record's files changed since it was recorded;
 	// nil means fresh or unchecked.
 	Stale *StaleHint
+	// StaleChecked is true when the staleness check ran to a verdict (fresh
+	// or stale); false means unchecked. Only events read it.
+	StaleChecked bool
 	Tags       []string
 	Status     record.Status
 	Confidence float64

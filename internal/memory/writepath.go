@@ -79,6 +79,9 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 	var recordID string // Track the ID of the record created/updated by this Store call.
 	var candidates []*Candidate
 	var inJudgmentRange bool
+	// Events are collected inside the transaction and appended only after it
+	// commits, so a rollback records nothing (AC-19, AC-22).
+	var evs []Event
 
 	err = s.store.WithTx(ctx, func(tx TxStore) error {
 		// Acquire advisory lock before fetching candidates (AC-16).
@@ -161,6 +164,7 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			}
 
 			recordID = newRec.ID
+			evs = append(evs, s.createdEvent(ns, newRec.ID, req.Source, newRec.Status))
 
 		case ActionUpdate:
 			// Update the existing record with new content/metadata.
@@ -199,6 +203,9 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			}
 
 			recordID = *targetID
+			ev := s.event(ns, EventRecordUpdated, *targetID)
+			ev.Source = EventSource(req.Source)
+			evs = append(evs, ev)
 
 		case ActionSupersede:
 			// Deprecate the old record and create a new one.
@@ -275,6 +282,10 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			}
 
 			recordID = createdRec.ID
+			sup := s.event(ns, EventRecordSuperseded, *targetID)
+			sup.RelatedID = createdRec.ID
+			sup.Source = EventSource(req.Source)
+			evs = append(evs, sup, s.createdEvent(ns, createdRec.ID, req.Source, newRec.Status))
 
 		case ActionNoop:
 			// Increment seen_count on the existing record (AC-15).
@@ -297,6 +308,9 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			// Promote candidate→active if seen_count >= 2 (AC-34).
 			if currentRec.Status == record.StatusCandidate && newSeenCount >= 2 {
 				updates["status"] = record.StatusActive
+				ev := s.event(ns, EventRecordPromoted, *targetID)
+				ev.Via = ViaSeen
+				evs = append(evs, ev)
 				slog.InfoContext(ctx, "promoting candidate to active via seen_count threshold",
 					"id", *targetID, "seen_count", newSeenCount)
 			}
@@ -316,6 +330,10 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 		return nil, fmt.Errorf("write transaction failed: %w", err)
 	}
 
+	// The transaction committed: record its events (a NOOP that did not
+	// promote has none).
+	s.appendEvents(ctx, evs...)
+
 	// If the inline source was in judgment range, return candidates without writing.
 	// The caller should re-call Store with an ExtractionDecision to proceed (AC-15).
 	if inJudgmentRange {
@@ -333,6 +351,14 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 		Decision:             decision,
 		CandidatesConsidered: candidates,
 	}, nil
+}
+
+// createdEvent builds the record_created event of a new row.
+func (s *Service) createdEvent(ns, id string, src record.Source, status record.Status) Event {
+	ev := s.event(ns, EventRecordCreated, id)
+	ev.Source = EventSource(src)
+	ev.Status = status
+	return ev
 }
 
 // decideWriteAction determines whether to ADD/UPDATE/SUPERSEDE/NOOP based on
