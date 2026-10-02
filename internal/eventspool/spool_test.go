@@ -306,3 +306,24 @@ func TestBatchesOf500(t *testing.T) {
 		t.Errorf("res = %+v err = %v calls = %d", res, err, sink.calls)
 	}
 }
+
+// A spool whose last append was long ago but which is renamed just now must
+// not be read in the same pass: an appender may still hold the old inode.
+func TestJustRenamedOldFileIsNotDrainedInSamePass(t *testing.T) {
+	dir := t.TempDir()
+	if err := (Sink{Dir: dir}).Append(context.Background(), ev(memory.EventCardInjected)); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "spool.jsonl"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	sink := newSink()
+	res, err := Drain(context.Background(), dir, sink)
+	if err != nil || res.Inserted != 0 || sink.calls != 0 {
+		t.Fatalf("res = %+v err = %v calls = %d", res, err, sink.calls)
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "spool.*.draining")); len(files) != 1 {
+		t.Errorf("files = %v", listDir(t, dir))
+	}
+}

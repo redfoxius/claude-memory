@@ -197,8 +197,9 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, deps 
 		return nil
 	}
 
-	// After the output: a failed or slow spool write can never delay or
-	// change what Claude Code receives (AC-22, AC-23).
+	// After the output, so a failed spool write can never change what Claude
+	// Code receives (AC-22, AC-23). The append is sub-millisecond but still
+	// part of the hook's wall time.
 	if deps.Events != nil {
 		evs := cardEvents(cards, svc.Namespace(), input.SessionID, time.Now())
 		if err := deps.Events.Append(ctx, evs...); err != nil {

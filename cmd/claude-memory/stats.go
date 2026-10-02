@@ -21,6 +21,9 @@ import (
 // defaultStatsSince is the reporting window when --since is not given.
 const defaultStatsSince = 30 * 24 * time.Hour
 
+// maxStatsDays bounds --since Nd (events are pruned after 365 days anyway).
+const maxStatsDays = 3650
+
 // statsReader is what `stats` needs from the store, declared by the consumer.
 // *postgres.Store satisfies it. namespace "" means all namespaces.
 type statsReader interface {
@@ -41,6 +44,9 @@ func parseDaysOrDuration(s string) (time.Duration, error) {
 		n, err := strconv.Atoi(days)
 		if err != nil {
 			return 0, fmt.Errorf("invalid duration %q", s)
+		}
+		if n > maxStatsDays {
+			return 0, fmt.Errorf("%q exceeds %d days", s, maxStatsDays)
 		}
 		d = time.Duration(n) * 24 * time.Hour
 	} else {

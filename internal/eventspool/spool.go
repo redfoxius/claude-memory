@@ -94,7 +94,13 @@ func Drain(ctx context.Context, dir string, sink memory.EventSink) (DrainResult,
 	var res DrainResult
 	live := filepath.Join(dir, spoolFile)
 	draining := filepath.Join(dir, fmt.Sprintf("spool.%d.%d.draining", os.Getpid(), time.Now().UnixNano()))
-	if err := os.Rename(live, draining); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Rename(live, draining); err == nil {
+		// Restart the settle clock: the live file's mtime is the last append,
+		// possibly long ago, but an appender that opened it just before the
+		// rename may still write into this inode.
+		now := time.Now()
+		_ = os.Chtimes(draining, now, now)
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return res, fmt.Errorf("rename spool: %w", err)
 	}
 

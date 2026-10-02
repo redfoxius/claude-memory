@@ -227,7 +227,7 @@ Migration 0002 adds `records.namespace` and backfills every existing record to `
 
 ### Usage events (migration 0003)
 
-Migration 0003 adds the `events` table (ids, enums and numbers only; no record text). After installing the new binary run `claude-memory cleanup` (or `claude-memory migrate`) once to apply it; until then the hook keeps working and its events wait in `~/.local/state/claude-memory/events/spool.jsonl`, which the next `serve`, `extract --run`, `ingest-pr` or `cleanup` drains. `claude-memory stats` prints the report; `cleanup` prunes events older than 365 days and removes stale-cache files older than 7 days. Rolling back to the previous binary is safe (it ignores the table and the spool); to remove the feature entirely, `DROP TABLE events;` and delete `~/.local/state/claude-memory/events`.
+Migration 0003 adds the `events` table (ids, enums and numbers only; no record text). After installing the new binary run `claude-memory migrate` once, **before** restarting Claude Code sessions (several `serve` processes starting at once can race on `CREATE TABLE`), to apply it; until then the hook keeps working and its events wait in `~/.local/state/claude-memory/events/spool.jsonl`, which the next `serve`, `extract --run`, `ingest-pr` or `cleanup` drains. `claude-memory stats` prints the report; `cleanup` prunes events older than 365 days and removes stale-cache files older than 7 days. Rolling back to the previous binary is safe (it ignores the table and the spool); to remove the feature entirely, `DROP TABLE events;` and delete `~/.local/state/claude-memory/events`.
 
 **Re-homing records** written to `global` before a mapping existed (records carry their `repo`, so it is one statement per project):
 

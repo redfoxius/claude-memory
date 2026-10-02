@@ -48,7 +48,9 @@ func cleanupCmd(ctx context.Context, cfg *config.Config, store cleanupStore, sta
 	slog.InfoContext(ctx, "cleanup started", "ttl_days", ttlDays)
 
 	spool := filepath.Join(stateDir, "events")
-	if _, err := eventspool.Drain(ctx, spool, store); err != nil {
+	drainCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if _, err := eventspool.Drain(drainCtx, spool, store); err != nil {
 		slog.WarnContext(ctx, "cleanup: event spool drain failed", "error", err)
 	}
 

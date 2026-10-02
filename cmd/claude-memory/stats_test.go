@@ -36,7 +36,7 @@ func TestParseStatsFlags(t *testing.T) {
 	if o, _ := parseStatsFlags([]string{"--json"}, io.Discard); !o.JSON {
 		t.Error("--json not parsed")
 	}
-	for _, in := range []string{"--since x", "--since 0d", "--since -3d", "--since", "--bogus", "extra", "--since 1.5d"} {
+	for _, in := range []string{"--since x", "--since 0d", "--since -3d", "--since", "--bogus", "extra", "--since 1.5d", "--since 3651d", "--since 99999999999d"} {
 		_, err := parseStatsFlags(strings.Fields(in), io.Discard)
 		if err == nil || exitCode(err) != 2 {
 			t.Errorf("%q: err = %v (code %d), want a usage error", in, err, exitCode(err))

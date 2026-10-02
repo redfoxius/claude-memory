@@ -304,7 +304,7 @@ The hook appends one `card_injected` event per card to
 database call; capped at 10 MB). `serve`, `extract --run`, `ingest-pr` and
 `cleanup` drain it into the `events` table (migration 0003); a file the
 database rejected is kept as `spool.*.failed`. Until the new schema is applied
-(run `claude-memory cleanup` or `claude-memory migrate` once after upgrading)
+(run `claude-memory migrate` once after upgrading, before restarting Claude Code sessions: several `serve` processes starting at once can race on `CREATE TABLE`)
 the events simply wait in the spool. `claude-memory stats` reports on them
 (`integration/USAGE.md`, "Usage stats"); events older than 365 days are
 removed by `cleanup`.
