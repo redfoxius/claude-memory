@@ -11,14 +11,14 @@ First run was FAIL `pg.connect` (server `home-server` offline over Tailscale); n
 - **Settings reload for the AC-62 restart line:** not verifiable from inside a session; keep the plan default ("restart open Claude Code sessions").
 
 
-## Slice 2 status (branch `feature/install-s2-core`, from `feature/install-s2-prework`)
-Done and committed: WI-S2-0, 1a, 1b, 1c (+ architecture review fixes), 2, 3, 4a, 5.
-Opus architecture review of 1a/1c: PASS WITH FIXES, all fixed.
-In flight at time of writing: WI-S2-4b, 6, 7 (security-sensitive: `bootstrap.sql`, password alphabet, psql).
-Next: Opus review of 4a/4b/5/6/7 → WI-S2-8 (namespaces), 14a (install command), 14b (final doctor) → PR 2a. Then PR 2b (hooks, MCP, skills, CLAUDE.md, jobs, doctor deltas, uninstall, e2e, docs).
-Open items noted by implementers: ParseDBTarget refuses DSN query options other than `sslmode`; `--jobs-backend` override must be called by 14a (`jobsBackendOverride` + `UnsupportedError` → exit 2); `Renderer.Summary` must be called by `cmd` after `Engine.Run`; Await-wait Select still maps ErrTooManyAttempts to exit 2.
+## Slice 2 status (branch `feature/install-s2a-install-cmd`)
+PR 2a is done on `feature/install-s2a-install-cmd`: WI-S2-8 (namespaces), WI-S2-14a (install command, dry-run) and WI-S2-14b (final doctor, exit-code rule, cross-cutting tests), each with its review fixes. Earlier: WI-S2-0..7 with the Opus reviews. Next: PR 2b (hooks, MCP, skills, CLAUDE.md, jobs, doctor deltas, uninstall, e2e, docs).
 
-## Live system state to restore after restart
-- Server schema: migrations 0001, 0002 applied (records backfilled to `acme`).
-- Installed binary `~/.local/bin/claude-memory` is still the OLD build until replaced; replace from `master`, then restart open Claude Code sessions.
-- `namespaces.yaml` absent: run `claude-memory namespaces init --default global acme='~/work/acme/**'` so backfilled records stay visible in Acme projects.
+## Open follow-ups
+- Engine prompt for a `modified` unparseable `namespaces.yaml` says "a backup is kept", which is misleading; it needs an engine flag per artifact.
+- `LinePrompter` has no ctx: `Select`/`Text` wait for Enter after the first Ctrl-C.
+- `--claude-md`, `--no-jobs`, `--pr-repos` exit 2 in 2a; 2b must undo that (`deferredInstallFlags`).
+- WI-S2-13a must tolerate `launchctl bootout` exit 3 (not loaded), see the WI-S1-0 fixtures above.
+- 14a review carried-over items 10-12: AC-34 child test with `MEMORY_PG_DSN` set; duplicate remote-Ollama warning in the dry-run golden.
+- `manifest` and `dirs.state` doctor checks have no owning step (`unownedChecks`), so their fails are never exempt; decide in 2b whether an owner is wanted.
+- Kept from earlier: ParseDBTarget refuses DSN query options other than `sslmode`; the Await-wait Select maps ErrTooManyAttempts to exit 2.

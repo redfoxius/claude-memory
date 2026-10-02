@@ -1,0 +1,69 @@
+STEP               STATE     CHOICE  DETAIL
+Platform           ok        keep    macOS 15.0 (arm64); jobs: launchd
+Binary             absent    apply   install /opt/build/claude-memory to $HOME/.local/bin/claude-memory
+  - binary/file absent install /opt/build/claude-memory to $HOME/.local/bin/claude-memory
+  - binary/dir absent create $HOME/.local/bin
+Prerequisites      ok        keep    found: git, claude, psql, az, ollama
+Topology           outdated  apply   record topology remote
+Env file           absent    apply   $HOME/.config/claude-memory/env: dir, MEMORY_PG_DSN, MEMORY_OLLAMA_URL, MEMORY_OLLAMA_MODEL
+  - envfile/dir absent create $HOME/.config/claude-memory (mode 0700)
+  - envfile/MEMORY_PG_DSN absent add MEMORY_PG_DSN
+  - envfile/MEMORY_OLLAMA_URL absent add MEMORY_OLLAMA_URL
+  - envfile/MEMORY_OLLAMA_MODEL absent add MEMORY_OLLAMA_MODEL
+Database           ok        keep    connected to postgresql://claude_memory@db.example.com:5432/claude_memory?sslmode=require (pgvector 0.7.0)
+Schema migrations  outdated  apply   schema behind: 0002 (missing records.namespace)
+Ollama             absent    apply   model bge-m3 is not pulled at http://ollama.example.com:11434
+Namespaces         absent    apply   $HOME/.config/claude-memory/namespaces.yaml will be created
+Final doctor       ok        keep    not run in --dry-run
+
+Plan
+
+Binary
+  write   $HOME/.local/bin — create directory
+  write   $HOME/.local/bin/claude-memory — copy /opt/build/claude-memory (mode 0755)
+
+Topology
+  write   $HOME/.config/claude-memory/install.json — record topology remote
+
+Env file
+  write   $HOME/.config/claude-memory — create directory (mode 0700)
+  write   $HOME/.config/claude-memory/env — add MEMORY_PG_DSN
+  write   $HOME/.config/claude-memory/env — add MEMORY_OLLAMA_URL
+  write   $HOME/.config/claude-memory/env — add MEMORY_OLLAMA_MODEL
+  diff $HOME/.config/claude-memory/env
+    --- /dev/null
+    +++ $HOME/.config/claude-memory/env
+    @@ -0,0 +1,3 @@
+    +MEMORY_PG_DSN=postgresql://claude_memory:***@db.example.com:5432/claude_memory?sslmode=require
+    +MEMORY_OLLAMA_URL=http://ollama.example.com:11434
+    +MEMORY_OLLAMA_MODEL=bge-m3
+
+Schema migrations
+  migrate  — apply the embedded schema migrations (the same as `claude-memory migrate`)
+
+Ollama
+  pull    http://ollama.example.com:11434 — pull model bge-m3 (POST /api/pull, then verify 1024 dimensions)
+  warn: Ollama at http://ollama.example.com:11434 is not on this machine: prompts are sent over the network for embedding. The prompt hook gives up after MEMORY_HOOK_TIMEOUT (800 ms by default), and a slow remote Ollama - e.g. on CPU, where DEPLOY.md measured 0.23 s for 15 tokens and 2.3 s for 150 - makes the hook time out and inject nothing at all; memory_search via MCP still works. Doctor's ollama.embed warning (> 500 ms) is the watchdog.
+
+Namespaces
+  write   $HOME/.config/claude-memory — create directory (mode 0700)
+  write   $HOME/.config/claude-memory/namespaces.yaml — create with default namespace global, work=~/work/**
+  diff $HOME/.config/claude-memory/namespaces.yaml
+    --- /dev/null
+    +++ $HOME/.config/claude-memory/namespaces.yaml
+    @@ -0,0 +1,9 @@
+    +# claude-memory namespaces. Maps project directories to memory namespaces.
+    +# Resolution: MEMORY_NAMESPACE env > most specific matching path below >
+    +# default > "global". Paths are globs ("**" = any depth, "~" = home).
+    +# Manage with: claude-memory namespaces add|which|init
+    +default: global
+    +namespaces:
+    +    - namespace: work
+    +      paths:
+    +        - ~/work/**
+
+warn: $HOME/.local/bin is not on PATH: add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile
+warn: Ollama at http://ollama.example.com:11434 is not on this machine: prompts are sent over the network for embedding. The prompt hook gives up after MEMORY_HOOK_TIMEOUT (800 ms by default), and a slow remote Ollama - e.g. on CPU, where DEPLOY.md measured 0.23 s for 15 tokens and 2.3 s for 150 - makes the hook time out and inject nothing at all; memory_search via MCP still works. Doctor's ollama.embed warning (> 500 ms) is the watchdog.
+
+Dry run: nothing was changed.
+

@@ -44,7 +44,8 @@ type Renderer struct {
 }
 
 var (
-	_ Reporter = (*Renderer)(nil)
+	_ Reporter      = (*Renderer)(nil)
+	_ FinalReporter = (*Renderer)(nil)
 )
 
 // NewRenderer returns a Renderer writing to w. Colour needs a TTY, no
@@ -316,6 +317,18 @@ func valueOr(s, d string) string {
 		return d
 	}
 	return s
+}
+
+// Final prints the final doctor report (AC-62) and, when Claude Code settings
+// changed in this run, the restart line.
+func (r *Renderer) Final(fr FinalResult) {
+	var b strings.Builder
+	b.WriteString("\n")
+	_ = WriteDoctorText(&b, fr.Report, fr.Meta, r.red)
+	if fr.Restart {
+		b.WriteString("\nrestart Claude Code sessions to load the changes\n")
+	}
+	r.emit(b.String())
 }
 
 // Summary prints the final line of an install run. It is not part of

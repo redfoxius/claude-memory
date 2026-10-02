@@ -2,6 +2,7 @@ package setup
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 
 	"claude-memory/internal/config"
@@ -44,5 +45,34 @@ func TestPctEncodeRoundTrip(t *testing.T) {
 		if ef.Values["MEMORY_PG_DSN"] != dsn {
 			t.Errorf("env value for %q = %q, want %q", pw, ef.Values["MEMORY_PG_DSN"], dsn)
 		}
+	}
+}
+
+// Only known libpq keywords are echoed in the unsupported-option error; any
+// other key (possibly a pasted secret) is not, and a repeated sslmode is refused.
+func TestParseDBTargetUnsupportedOptionEcho(t *testing.T) {
+	base := "postgresql://u:p@h:5432/db"
+	for q, wantEcho := range map[string]string{
+		"?connect_timeout=5":              "connect_timeout",
+		"?application_name=x":             "application_name",
+		"?Hunter2secret":                  "",
+		"?Hunter2secret=1":                "",
+		"?sslmode=disable&abc=1":          "",
+		"?sslmode=disable&sslrootcert=/x": "sslrootcert",
+	} {
+		_, err := ParseDBTarget(base + q)
+		if err == nil {
+			t.Errorf("%s accepted", q)
+			continue
+		}
+		if strings.Contains(err.Error(), "Hunter2secret") || strings.Contains(err.Error(), "abc") {
+			t.Errorf("%s: key echoed: %v", q, err)
+		}
+		if wantEcho != "" && !strings.Contains(err.Error(), wantEcho) {
+			t.Errorf("%s: known key not named: %v", q, err)
+		}
+	}
+	if _, err := ParseDBTarget(base + "?sslmode=disable&sslmode=require"); err == nil {
+		t.Error("repeated sslmode accepted")
 	}
 }

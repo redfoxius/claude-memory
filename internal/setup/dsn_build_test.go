@@ -249,3 +249,31 @@ func TestHostIsLocal(t *testing.T) {
 		}
 	}
 }
+
+// Any DSN query option other than sslmode is an explicit error that names
+// the key and never echoes a value or other secret.
+func TestParseDBTargetUnsupportedOption(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ dsn, wantKey string }{
+		{"postgresql://u:p@h:5432/d?connect_timeout=5", "connect_timeout"},
+		{"postgresql://u:p@h:5432/d?sslmode=require&application_name=x", "application_name"},
+		{"postgresql://u:p@h:5432/d?password=" + sentinelPassword, "password"},
+		{"postgresql://u:p@h:5432/d?pw-" + sentinelPassword, ""},   // key-only, not option-shaped
+		{"postgresql://u:p@h:5432/d?a=%zz" + sentinelPassword, ""}, // malformed query
+	} {
+		_, err := ParseDBTarget(c.dsn)
+		if err == nil {
+			t.Errorf("accepted %q", c.dsn)
+			continue
+		}
+		if strings.Contains(err.Error(), sentinelPassword) {
+			t.Errorf("error leaks: %v", err)
+		}
+		if c.wantKey != "" && !strings.Contains(err.Error(), c.wantKey) {
+			t.Errorf("%q: error does not name the option: %v", c.dsn, err)
+		}
+	}
+	if _, err := ParseDBTarget("postgresql://u:p@h:5432/d?sslmode=require"); err != nil {
+		t.Errorf("sslmode refused: %v", err)
+	}
+}

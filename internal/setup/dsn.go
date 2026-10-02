@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -219,6 +220,29 @@ func (t DBTarget) String() string {
 // GoString keeps %#v from printing the password.
 func (t DBTarget) GoString() string { return "DBTarget(" + t.String() + ")" }
 
+// knownLibpqOptions is the allowlist of libpq connection keywords whose name
+// may be echoed in the "unsupported option" error. Any other key, even one
+// shaped like a plain word, could be a pasted secret (`?Hunter2secret`) and is
+// never echoed.
+var knownLibpqOptions = map[string]bool{
+	"connect_timeout": true, "application_name": true, "fallback_application_name": true,
+	"sslcert": true, "sslkey": true, "sslrootcert": true, "sslcrl": true, "sslpassword": true,
+	"sslcompression": true, "sslsni": true, "ssl_min_protocol_version": true, "ssl_max_protocol_version": true,
+	"target_session_attrs": true, "options": true, "password": true, "user": true, "host": true,
+	"hostaddr": true, "port": true, "dbname": true, "passfile": true, "service": true, "servicefile": true,
+	"channel_binding": true, "krbsrvname": true, "gsslib": true, "gssencmode": true,
+	"keepalives": true, "keepalives_idle": true, "keepalives_interval": true, "keepalives_count": true,
+	"tcp_user_timeout": true, "client_encoding": true, "replication": true, "requirepeer": true,
+	"load_balance_hosts": true, "requiressl": true, "sslcertmode": true, "sslrootcert_dir": true,
+}
+
+func unsupportedDSNOption(k string) error {
+	if knownLibpqOptions[strings.ToLower(k)] {
+		return fmt.Errorf("DSN option %q is not supported by install (only sslmode); remove it from the DSN", k)
+	}
+	return errors.New("DSN has an unsupported query option (only sslmode is supported); remove it from the DSN")
+}
+
 // ParseDBTarget parses a postgresql:// (or postgres://) URL into a validated
 // DBTarget: a missing port becomes 5432, an empty database is an error. Only
 // the sslmode query option is supported; any other one is refused rather
@@ -235,14 +259,30 @@ func ParseDBTarget(dsn string) (DBTarget, error) {
 	if u.Fragment != "" || u.Opaque != "" {
 		return DBTarget{}, errors.New("DSN: unexpected fragment")
 	}
-	t := DBTarget{User: u.User.Username(), Port: u.Port(), SSLMode: u.Query().Get("sslmode")}
-	pw, _ := u.User.Password()
-	t.password = secret(pw)
-	for k := range u.Query() {
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return DBTarget{}, errors.New("DSN query string is malformed")
+	}
+	// Only sslmode is understood; any other option would be dropped when
+	// install rebuilds the DSN, so it is an explicit error (owner decision).
+	// The message names the key only, never a value; a key that does not look
+	// like a plain option name is not echoed at all.
+	if len(q["sslmode"]) > 1 {
+		return DBTarget{}, errors.New("DSN: sslmode is given more than once")
+	}
+	keys := make([]string, 0, len(q))
+	for k := range q {
 		if k != "sslmode" {
-			return DBTarget{}, fmt.Errorf("DSN option %q is not supported by install (only sslmode)", k)
+			keys = append(keys, k)
 		}
 	}
+	if len(keys) > 0 {
+		sort.Strings(keys)
+		return DBTarget{}, unsupportedDSNOption(keys[0])
+	}
+	t := DBTarget{User: u.User.Username(), Port: u.Port(), SSLMode: q.Get("sslmode")}
+	pw, _ := u.User.Password()
+	t.password = secret(pw)
 	host := u.Hostname()
 	if strings.Contains(u.Host, "[") && !strings.Contains(host, ":") {
 		return DBTarget{}, errors.New("host: not an IPv6 address")

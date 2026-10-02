@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -252,21 +253,45 @@ var _ setup.Prompter = ttyPrompter{}
 
 // newTTYPrompter builds the prompter over stdin/stdout. Every question and
 // option is redacted by red before it is printed (a step's Detail can reach
-// one), and a secret is registered with red before it is returned.
-func newTTYPrompter(stdin, stdout *os.File, red *setup.Redactor) ttyPrompter {
-	return newTTYPrompterWith(stdin, stdout, red, term.IsTerminal, term.ReadPassword)
+// one), and a secret is registered with red before it is returned. A
+// cancelled ctx (Ctrl-C) ends a blocked password read and restores the
+// terminal state.
+func newTTYPrompter(ctx context.Context, stdin, stdout *os.File, red *setup.Redactor) ttyPrompter {
+	return newTTYPrompterWith(ctx, stdin, stdout, red, term.IsTerminal, term.ReadPassword)
 }
 
 // newTTYPrompterWith is newTTYPrompter with the terminal calls injected.
-func newTTYPrompterWith(stdin, stdout *os.File, red *setup.Redactor,
+func newTTYPrompterWith(ctx context.Context, stdin, stdout *os.File, red *setup.Redactor,
 	isTerminal func(fd int) bool, readPassword func(fd int) ([]byte, error)) ttyPrompter {
 	interactive := isTerminal(int(stdin.Fd())) && isTerminal(int(stdout.Fd()))
 	secret := func() (string, error) {
 		if !interactive {
 			return "", errors.New("cannot ask for a password in a non-interactive session")
 		}
-		b, err := readPassword(int(stdin.Fd()))
-		return string(b), err
+		fd := int(stdin.Fd())
+		// ReadPassword turns echo off and only restores it when it returns.
+		// A blocked read cannot be interrupted, so race it against ctx and
+		// restore the saved state ourselves on cancel (the abandoned read
+		// goroutine dies with the process).
+		saved, _ := term.GetState(fd) // nil when fd is not a real terminal
+		type result struct {
+			b   []byte
+			err error
+		}
+		ch := make(chan result, 1)
+		go func() {
+			b, err := readPassword(fd)
+			ch <- result{b, err}
+		}()
+		select {
+		case r := <-ch:
+			return string(r.b), r.err
+		case <-ctx.Done():
+			if saved != nil {
+				_ = term.Restore(fd, saved)
+			}
+			return "", setup.ErrInterrupted
+		}
 	}
 	return ttyPrompter{setup.NewLinePrompter(stdin, stdout, red, secret, interactive)}
 }
@@ -278,20 +303,26 @@ const (
 )
 
 // readStdinSecret reads the --pg-password-stdin value from r (AC-11, AC-31):
-// one line of at most 4 KiB, with an optional trailing newline; a newline
-// inside is an error. The read runs in a goroutine against a timer and ctx,
-// not a read deadline (a pipe has none): on a timeout the goroutine stays
-// blocked on a pipe that never closes, which is acceptable because the
-// process exits. The secret is registered with red before it is returned.
+// exactly one line, up to the first newline and at most 4 KiB, whose
+// terminator may be missing at end of input; anything after the first line is
+// not read. The read runs in a goroutine against a timer and ctx, not a read
+// deadline (a pipe has none): on a timeout the goroutine stays blocked on a
+// pipe that never closes, which is acceptable because the process exits. The
+// secret is registered with red before it is returned. Error messages never
+// contain the input.
 func readStdinSecret(ctx context.Context, r io.Reader, red *setup.Redactor, timeout time.Duration) (string, error) {
 	type result struct {
-		b   []byte
-		err error
+		line string
+		err  error
 	}
 	ch := make(chan result, 1) // buffered: the goroutine never blocks on send
 	go func() {
-		b, err := io.ReadAll(io.LimitReader(r, stdinSecretMax+2))
-		ch <- result{b, err}
+		br := bufio.NewReader(io.LimitReader(r, stdinSecretMax+2))
+		line, err := br.ReadString('\n')
+		if errors.Is(err, io.EOF) {
+			err = nil // a missing terminator at end of input is fine
+		}
+		ch <- result{line, err}
 	}()
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -304,15 +335,12 @@ func readStdinSecret(ctx context.Context, r io.Reader, red *setup.Redactor, time
 		return "", ctx.Err()
 	}
 	if res.err != nil {
-		return "", fmt.Errorf("--pg-password-stdin: %w", res.err)
+		return "", errors.New("--pg-password-stdin: cannot read stdin")
 	}
-	s := string(res.b)
-	s = strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
+	s := strings.TrimSuffix(strings.TrimSuffix(res.line, "\n"), "\r")
 	switch {
 	case len(s) > stdinSecretMax:
 		return "", fmt.Errorf("--pg-password-stdin: password longer than %d bytes", stdinSecretMax)
-	case strings.ContainsAny(s, "\r\n"):
-		return "", errors.New("--pg-password-stdin: expected a single line, found a newline inside")
 	case s == "":
 		return "", errors.New("--pg-password-stdin: empty input")
 	}
@@ -320,4 +348,17 @@ func readStdinSecret(ctx context.Context, r io.Reader, red *setup.Redactor, time
 		red.Register(s)
 	}
 	return s, nil
+}
+
+// readOnlyDB is the dry-run DB for Apply: every probe passes through, Migrate
+// is refused (Design 20's second layer).
+type readOnlyDB struct{ setup.DBProber }
+
+func (readOnlyDB) Migrate(context.Context, string) error { return setup.ErrReadOnly }
+
+// readOnlyOllama is the dry-run Ollama for Apply: Pull is refused.
+type readOnlyOllama struct{ setup.OllamaProber }
+
+func (readOnlyOllama) Pull(context.Context, string, string, func(done, total int64)) error {
+	return setup.ErrReadOnly
 }

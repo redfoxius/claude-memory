@@ -31,7 +31,7 @@ func TestTTYPrompterNonTTYNeverReadsStdin(t *testing.T) {
 	out, _ := pipePair(t)
 	red := setup.NewRedactor()
 	called := false
-	p := newTTYPrompterWith(in, out, red,
+	p := newTTYPrompterWith(context.Background(), in, out, red,
 		func(int) bool { return false },
 		func(int) ([]byte, error) { called = true; return nil, nil })
 	if p.Interactive() {
@@ -66,7 +66,7 @@ func TestTTYPrompterInteractiveNeedsBothFDs(t *testing.T) {
 		{"stdout only", false, true, false},
 	} {
 		inFD, outFD := int(in.Fd()), int(out.Fd())
-		p := newTTYPrompterWith(in, out, nil, func(fd int) bool {
+		p := newTTYPrompterWith(context.Background(), in, out, nil, func(fd int) bool {
 			if fd == inFD {
 				return tc.inTTY
 			}
@@ -93,7 +93,7 @@ func TestTTYPrompterRedactsAndRegisters(t *testing.T) {
 	}
 	red := setup.NewRedactor()
 	const pw = "Sup3r-secret-pw"
-	p := newTTYPrompterWith(inR, outW, red,
+	p := newTTYPrompterWith(context.Background(), inR, outW, red,
 		func(int) bool { return true },
 		func(int) ([]byte, error) { return []byte(pw), nil })
 
@@ -130,7 +130,7 @@ func TestReadStdinSecret(t *testing.T) {
 		{"line with newline", "hunter2hunter2\n", "hunter2hunter2", ""},
 		{"crlf", "hunter2hunter2\r\n", "hunter2hunter2", ""},
 		{"no newline", "hunter2hunter2", "hunter2hunter2", ""},
-		{"newline inside", "abc\ndef\n", "", "single line"},
+		{"only the first line is read", "abc\ndef\n", "abc", ""},
 		{"empty", "", "", "empty"},
 		{"only newline", "\n", "", "empty"},
 		{"too long", strings.Repeat("a", 4097), "", "longer than"},
@@ -177,5 +177,46 @@ func TestReadStdinSecretContextCancel(t *testing.T) {
 	cancel()
 	if _, err := readStdinSecret(ctx, r, nil, time.Minute); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+// A Ctrl-C (ctx cancel) while the password read blocks returns at once with
+// ErrInterrupted instead of hanging.
+func TestTTYPrompterSecretCancel(t *testing.T) {
+	t.Parallel()
+	in, _ := pipePair(t)
+	out, _ := pipePair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+	p := newTTYPrompterWith(ctx, in, out, nil, func(int) bool { return true },
+		func(int) ([]byte, error) { <-block; return nil, nil })
+	done := make(chan error, 1)
+	go func() { _, err := p.Secret("Password"); done <- err }()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, setup.ErrInterrupted) {
+			t.Errorf("err = %v, want ErrInterrupted", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Secret hung after the context was cancelled")
+	}
+}
+
+func TestReadStdinSecretErrorsNeverEchoInput(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{strings.Repeat("S3cret", 1000), "\n"} {
+		_, err := readStdinSecret(context.Background(), strings.NewReader(in), nil, time.Second)
+		if err == nil || strings.Contains(err.Error(), "S3cret") {
+			t.Errorf("err = %v", err)
+		}
+	}
+}
+
+func TestRefuseTerminalStdin(t *testing.T) {
+	t.Parallel()
+	if refuseTerminalStdin(true) == nil || refuseTerminalStdin(false) != nil {
+		t.Error("a terminal stdin must be refused, a pipe accepted")
 	}
 }

@@ -81,6 +81,9 @@ func run() error {
 			return cmdNamespaces(os.Args[2:])
 		case "version":
 			return cmdVersion(os.Args[2:])
+		case "install":
+			// Before config load: no env file or DSN is needed (AC-1).
+			return cmdInstall(os.Args[2:])
 		case "doctor":
 			opts, err := parseDoctorFlags(os.Args[2:], os.Stderr)
 			if err != nil {
@@ -111,7 +114,7 @@ func run() error {
 	args := flag.Args()
 
 	if len(args) == 0 {
-		return fmt.Errorf("no subcommand specified; available: serve, hook, extract, ingest-pr, cleanup, seed, eval-retrieval, migrate, namespaces, doctor, version")
+		return fmt.Errorf("no subcommand specified; available: serve, hook, extract, ingest-pr, cleanup, seed, eval-retrieval, migrate, namespaces, install, doctor, version")
 	}
 
 	subcommand := args[0]
@@ -198,12 +201,22 @@ func buildService(ctx context.Context, cfg *config.Config, migrate bool) (*memor
 	return svc, cleanup, nil
 }
 
-// buildSetupDeps builds the values (Paths, Env, PlatformInfo) and the
-// read-only adapters doctor runs with (AC-57, AC-68). This is the only place
-// internal/setup's adapters are constructed. binDir is the --bin-dir flag
-// ("" = default). The error is errBadHome (or another Paths error) when the
-// paths cannot be computed.
-func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
+// setupValues are the plain values every setup command (doctor, install)
+// computes first: Paths, Env, Platform and the Redactor (Design 20). They
+// need only read-only probing, so they are built before any adapter that can
+// write.
+type setupValues struct {
+	Paths    setup.Paths
+	Env      setup.Env
+	Platform setup.PlatformInfo
+	Redactor *setup.Redactor
+}
+
+// buildSetupValues computes the setupValues from the process (AC-68). binDir
+// is the --bin-dir flag ("" = default). Paths.EphemeralDirs is computed here
+// (AC-35) and detectPlatform gets the uid (systemd bus retry). The error is
+// errBadHome (or another Paths error) when the paths cannot be computed.
+func buildSetupValues(ctx context.Context, binDir string) (setupValues, error) {
 	self, err := os.Executable()
 	if err == nil {
 		if resolved, rerr := filepath.EvalSymlinks(self); rerr == nil {
@@ -215,21 +228,36 @@ func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
 	cwd, _ := os.Getwd()
 	paths, err := buildPaths(os.Getenv, binDir, os.Getuid(), self, cwd)
 	if err != nil {
-		return setupDeps{}, err
+		return setupValues{}, err
 	}
-
 	paths.EphemeralDirs = ephemeralDirs(os.TempDir(), os.Getenv, os.UserCacheDir)
-
-	fsys := readOnlyFS{}
-	runner := execRunner{readOnly: true}
-	redactor := setup.NewRedactor()
-	return setupDeps{
-		Assets:   integration.FS,
+	return setupValues{
 		Paths:    paths,
 		Env:      buildEnv(os.Environ()),
-		Platform: detectPlatform(ctx, fsys, runner, runtime.GOOS, runtime.GOARCH, paths.UID),
-		FS:       fsys,
-		Runner:   runner,
+		Platform: detectPlatform(ctx, readOnlyFS{}, execRunner{readOnly: true}, runtime.GOOS, runtime.GOARCH, paths.UID),
+		Redactor: setup.NewRedactor(),
+	}, nil
+}
+
+// buildSetupDeps builds the values and the read-only adapters doctor runs
+// with (AC-57, AC-68); install builds on it too (writablePorts swaps in the
+// writable FS and Runner). The setup adapters are chosen in this file
+// (buildSetupDeps, readOnlyPorts, writablePorts, cmdInstall for the
+// prompter); their implementations live in setup_adapters.go. binDir is the
+// --bin-dir flag ("" = default).
+func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
+	v, err := buildSetupValues(ctx, binDir)
+	if err != nil {
+		return setupDeps{}, err
+	}
+	redactor := v.Redactor
+	return setupDeps{
+		Assets:   integration.FS,
+		Paths:    v.Paths,
+		Env:      v.Env,
+		Platform: v.Platform,
+		FS:       readOnlyFS{},
+		Runner:   execRunner{readOnly: true},
 		Clock:    &systemClock{},
 		DB:       postgres.Prober{},
 		// No client Timeout: a pull streams for minutes; the checks bound
@@ -260,15 +288,18 @@ func readOnlyPorts(d setupDeps) setup.ReadPorts {
 
 // writablePorts is what Apply gets (install, uninstall): the writable FS, a
 // Runner that allows mutating commands, and the full DB/Ollama probers. With
-// dryRun the FS and Runner are the read-only adapters, a second layer
-// beneath the engine never reaching Apply (Design 20). ClaudeCLI, Jobs and
+// dryRun the FS and Runner are the read-only adapters and DB.Migrate and
+// Ollama.Pull are refused: a second layer beneath the engine never reaching
+// Apply (Design 20). ClaudeCLI, Jobs and
 // Progress are nil in 2a; the renderer sets Progress.
 func writablePorts(d setupDeps, dryRun bool) setup.WritePorts {
 	var fsys setup.FS = newWritableFS()
 	var runner setup.Runner = execRunner{}
+	db, oll := d.DB, d.Ollama
 	if dryRun {
 		fsys = readOnlyFS{}
 		runner = execRunner{readOnly: true}
+		db, oll = readOnlyDB{d.DB}, readOnlyOllama{d.Ollama}
 	}
 	rp := readOnlyPorts(d)
 	rp.FS, rp.Runner = fsys, runner
@@ -276,8 +307,8 @@ func writablePorts(d setupDeps, dryRun bool) setup.WritePorts {
 		ReadPorts: rp,
 		FS:        fsys,
 		Runner:    runner,
-		DB:        d.DB,
-		Ollama:    d.Ollama,
+		DB:        db,
+		Ollama:    oll,
 	}
 }
 

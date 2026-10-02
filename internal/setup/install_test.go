@@ -1,0 +1,57 @@
+package setup
+
+import (
+	"slices"
+	"testing"
+)
+
+// TestInstallStepsRegistry is the 2a registry (AC-7), ending in the final
+// doctor: the exact order, every Requires pointing at an earlier step, and no
+// mcp or jobs step. 2a leaves
+// WritePorts.ClaudeCLI and WritePorts.Jobs (and ReadPorts.Jobs) nil, so a
+// registered step that used them would dereference nil.
+func TestInstallStepsRegistry(t *testing.T) {
+	t.Parallel()
+	steps := InstallSteps("v1.0.0", NewRedactor())
+	var ids []string
+	seen := map[string]bool{}
+	for _, s := range steps {
+		if seen[s.ID()] {
+			t.Errorf("duplicate step %q", s.ID())
+		}
+		for _, req := range s.Requires() {
+			if !seen[req] {
+				t.Errorf("step %q requires %q, which is not registered before it", s.ID(), req)
+			}
+		}
+		seen[s.ID()] = true
+		ids = append(ids, s.ID())
+	}
+	want := []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces", "doctor"}
+	if !slices.Equal(ids, want) {
+		t.Errorf("registry = %v, want %v", ids, want)
+	}
+	for _, banned := range []string{"mcp", "jobs", "hooks.scripts", "hooks.settings", "skills", "claude-md"} {
+		if seen[banned] {
+			t.Errorf("slice 2a must not register %q", banned)
+		}
+	}
+}
+
+// TestSkipAcceptsUnregisteredStepIDs (C4): --skip mcp works in 2a; a truly
+// unknown id is still a usage error.
+func TestSkipAcceptsUnregisteredStepIDs(t *testing.T) {
+	t.Parallel()
+	for _, id := range AllStepIDs {
+		e := &Engine{Steps: []Step{PlatformStep{}}, KnownIDs: AllStepIDs}
+		s := &session{e: e, idx: map[string]*stepRun{}, in: Inputs{Skip: []string{id}}}
+		if err := s.setup(); err != nil {
+			t.Errorf("--skip %s: %v", id, err)
+		}
+	}
+	e := &Engine{Steps: []Step{PlatformStep{}}, KnownIDs: AllStepIDs}
+	s := &session{e: e, idx: map[string]*stepRun{}, in: Inputs{Skip: []string{"nonsense"}}}
+	if err := s.setup(); err == nil {
+		t.Error("--skip nonsense must fail")
+	}
+}
