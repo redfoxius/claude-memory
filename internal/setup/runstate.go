@@ -113,6 +113,7 @@ type Inputs struct {
 	OllamaURL      string
 	OllamaModel    string
 	PRRepos        string
+	Namespaces     []string // --namespace NAME=GLOB, repeatable (AC-47)
 	JobsBackend    string
 	BinDir         string
 	BinDirExplicit bool

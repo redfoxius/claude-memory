@@ -1,0 +1,6 @@
+# claude-memory namespaces. Maps project directories to memory namespaces.
+# Resolution: MEMORY_NAMESPACE env > most specific matching path below >
+# default > "global". Paths are globs ("**" = any depth, "~" = home).
+# Manage with: claude-memory namespaces add|which|init
+default: global
+namespaces: []

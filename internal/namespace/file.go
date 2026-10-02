@@ -15,22 +15,33 @@ const fileHeader = `# claude-memory namespaces. Maps project directories to memo
 # Manage with: claude-memory namespaces add|which|init
 `
 
+// Marshal renders c exactly as Save writes it: the explanatory header
+// followed by the YAML body. It is pure (no I/O), so a caller that owns its
+// own filesystem port (the installer) can write the bytes itself.
+func Marshal(c *Config) ([]byte, error) {
+	body, err := yaml.Marshal(c)
+	if err != nil {
+		return nil, fmt.Errorf("marshal namespaces: %w", err)
+	}
+	return append([]byte(fileHeader), body...), nil
+}
+
 // Save writes c to path (mode 0600, parent dir created), prefixed with a
 // short explanatory header. The write is atomic (temp file + rename).
 func Save(path string, c *Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	body, err := yaml.Marshal(c)
+	out, err := Marshal(c)
 	if err != nil {
-		return fmt.Errorf("marshal namespaces: %w", err)
+		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".namespaces-*.yaml")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(fileHeader + string(body)); err != nil {
+	if _, err := tmp.Write(out); err != nil {
 		tmp.Close()
 		return fmt.Errorf("write namespaces: %w", err)
 	}
@@ -58,7 +69,7 @@ func Init(path, def string, rules []Rule, force bool) error {
 	}
 	c := &Config{Default: def, Namespaces: []Rule{}}
 	for _, r := range rules {
-		if err := c.add(r.Namespace, r.Paths...); err != nil {
+		if err := c.Add(r.Namespace, r.Paths...); err != nil {
 			return err
 		}
 	}
@@ -75,13 +86,15 @@ func Add(path, name string, globs ...string) error {
 	if err != nil {
 		return err
 	}
-	if err := c.add(name, globs...); err != nil {
+	if err := c.Add(name, globs...); err != nil {
 		return err
 	}
 	return Save(path, c)
 }
 
-func (c *Config) add(name string, globs ...string) error {
+// Add appends path globs to namespace name in c (creating the namespace if
+// needed), skipping globs it already holds.
+func (c *Config) Add(name string, globs ...string) error {
 	if !ValidName(name) {
 		return fmt.Errorf("invalid namespace name %q (lowercase letters, digits, '-' and '_')", name)
 	}

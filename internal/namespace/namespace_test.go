@@ -3,6 +3,7 @@ package namespace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -139,5 +140,47 @@ func TestExplainAndTieBreak(t *testing.T) {
 	}
 	if ns, why := (&Config{}).Explain("/q"); ns != Fallback || why != WhyFallback {
 		t.Errorf("empty Explain = %q, %q", ns, why)
+	}
+}
+
+func TestMarshalMatchesSave(t *testing.T) {
+	c := &Config{Default: Fallback, Namespaces: []Rule{}}
+	if err := c.Add("acme", "~/work/acme/**"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Add("acme", "~/work/acme/**", "~/src/x"); err != nil { // duplicate glob skipped
+		t.Fatal(err)
+	}
+	got, err := Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "n.yaml")
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	disk, _ := os.ReadFile(p)
+	if string(got) != string(disk) {
+		t.Errorf("Marshal != Save output:\n%s\n---\n%s", got, disk)
+	}
+	if !strings.HasPrefix(string(got), "# claude-memory namespaces.") {
+		t.Errorf("no header: %s", got)
+	}
+	back, err := Parse(got, p, "/h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Namespaces) != 1 || len(back.Namespaces[0].Paths) != 2 {
+		t.Errorf("round trip: %+v", back.Namespaces)
+	}
+}
+
+func TestConfigAddValidates(t *testing.T) {
+	c := &Config{}
+	if err := c.Add("Bad Name", "/x"); err == nil {
+		t.Error("invalid name accepted")
+	}
+	if err := c.Add("ok"); err == nil {
+		t.Error("no globs accepted")
 	}
 }
