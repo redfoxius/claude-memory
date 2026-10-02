@@ -218,6 +218,8 @@ func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
 		return setupDeps{}, err
 	}
 
+	paths.EphemeralDirs = ephemeralDirs(os.TempDir(), os.Getenv, os.UserCacheDir)
+
 	fsys := readOnlyFS{}
 	runner := execRunner{readOnly: true}
 	redactor := setup.NewRedactor()
@@ -225,7 +227,7 @@ func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
 		Assets:   integration.FS,
 		Paths:    paths,
 		Env:      buildEnv(os.Environ()),
-		Platform: detectPlatform(ctx, fsys, runner, runtime.GOOS, runtime.GOARCH),
+		Platform: detectPlatform(ctx, fsys, runner, runtime.GOOS, runtime.GOARCH, paths.UID),
 		FS:       fsys,
 		Runner:   runner,
 		Clock:    &systemClock{},

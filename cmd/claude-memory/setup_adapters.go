@@ -10,9 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/term"
 
 	"claude-memory/internal/setup"
 )
@@ -233,3 +236,88 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 
 // systemClock (main.go) also implements setup.Clock.
 var _ setup.Clock = (*systemClock)(nil)
+
+// ---- Prompter -------------------------------------------------------------
+
+// ttyPrompter is the interactive Prompter: setup.LinePrompter over stdin and
+// stdout, with term.ReadPassword for secrets (AC-10, Design 1). Interactive
+// is true only when fds 0 and 1 are both terminals (AC-11); in any other
+// session Secret refuses to touch stdin, so a non-TTY run never reads it
+// (stdin belongs to --pg-password-stdin).
+type ttyPrompter struct {
+	*setup.LinePrompter
+}
+
+var _ setup.Prompter = ttyPrompter{}
+
+// newTTYPrompter builds the prompter over stdin/stdout. Every question and
+// option is redacted by red before it is printed (a step's Detail can reach
+// one), and a secret is registered with red before it is returned.
+func newTTYPrompter(stdin, stdout *os.File, red *setup.Redactor) ttyPrompter {
+	return newTTYPrompterWith(stdin, stdout, red, term.IsTerminal, term.ReadPassword)
+}
+
+// newTTYPrompterWith is newTTYPrompter with the terminal calls injected.
+func newTTYPrompterWith(stdin, stdout *os.File, red *setup.Redactor,
+	isTerminal func(fd int) bool, readPassword func(fd int) ([]byte, error)) ttyPrompter {
+	interactive := isTerminal(int(stdin.Fd())) && isTerminal(int(stdout.Fd()))
+	secret := func() (string, error) {
+		if !interactive {
+			return "", errors.New("cannot ask for a password in a non-interactive session")
+		}
+		b, err := readPassword(int(stdin.Fd()))
+		return string(b), err
+	}
+	return ttyPrompter{setup.NewLinePrompter(stdin, stdout, red, secret, interactive)}
+}
+
+// Limits of the --pg-password-stdin read (AC-31).
+const (
+	stdinSecretMax     = 4 << 10
+	stdinSecretTimeout = 5 * time.Second
+)
+
+// readStdinSecret reads the --pg-password-stdin value from r (AC-11, AC-31):
+// one line of at most 4 KiB, with an optional trailing newline; a newline
+// inside is an error. The read runs in a goroutine against a timer and ctx,
+// not a read deadline (a pipe has none): on a timeout the goroutine stays
+// blocked on a pipe that never closes, which is acceptable because the
+// process exits. The secret is registered with red before it is returned.
+func readStdinSecret(ctx context.Context, r io.Reader, red *setup.Redactor, timeout time.Duration) (string, error) {
+	type result struct {
+		b   []byte
+		err error
+	}
+	ch := make(chan result, 1) // buffered: the goroutine never blocks on send
+	go func() {
+		b, err := io.ReadAll(io.LimitReader(r, stdinSecretMax+2))
+		ch <- result{b, err}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	var res result
+	select {
+	case res = <-ch:
+	case <-timer.C:
+		return "", fmt.Errorf("--pg-password-stdin: no complete input within %s", timeout)
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	if res.err != nil {
+		return "", fmt.Errorf("--pg-password-stdin: %w", res.err)
+	}
+	s := string(res.b)
+	s = strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
+	switch {
+	case len(s) > stdinSecretMax:
+		return "", fmt.Errorf("--pg-password-stdin: password longer than %d bytes", stdinSecretMax)
+	case strings.ContainsAny(s, "\r\n"):
+		return "", errors.New("--pg-password-stdin: expected a single line, found a newline inside")
+	case s == "":
+		return "", errors.New("--pg-password-stdin: empty input")
+	}
+	if red != nil {
+		red.Register(s)
+	}
+	return s, nil
+}
