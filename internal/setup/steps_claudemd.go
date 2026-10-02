@@ -29,20 +29,21 @@ var ErrClaudeMDChanged = errors.New("CLAUDE.md changed during install, re-run")
 // library (mdblock.go) is fence-aware and refuses unbalanced, duplicated or
 // out-of-order markers; the step reports that as blocked and never guesses.
 //
-// Target (AC-42):
-//   - default <ClaudeDir>/CLAUDE.md (user level);
-//   - --claude-md PATH (relative to the working directory, "~/" allowed);
-//   - a path recorded in the manifest by an earlier install;
-//   - interactively, Configure offers the user-level file, the CLAUDE.md of the
-//     git repository the working directory is in, or another path.
+// Target (AC-42), no prompt: the --claude-md flag (relative to the working
+// directory, "~/" allowed), else the path an earlier install recorded, else
+// <ClaudeDir>/CLAUDE.md (user level). A flag equal to the recorded path is the
+// recorded one, and equal to the user-level file it is the default.
+//
+// Path policy: a path given literally outside Home is used as it is; a symlink
+// (the file, or its directory) that resolves outside Home is refused.
 //
 // --yes (and --upgrade) writes the user-level default unconditionally (also
-// when Home itself is a git repository: it is the user's own file) and never
-// writes an explicitly given --claude-md path inside a git repository: the step
-// is then skipped with the reason (Detection.SkipReason), exit code 0. A path
-// recorded by an earlier install is refreshed without that rule (its first
-// write was consented to), and an explicit path equal to the user-level file is
-// the default.
+// when Home itself is a git repository: it is the user's own file). It never
+// writes an explicit --claude-md path inside a git repository (the path and its
+// symlink-resolved directory are both walked; a walk error fails closed), and
+// a recorded path in a git repository is only refreshed when its block is
+// outdated, never re-added after the user deleted it. The step is then skipped
+// with the reason (Detection.SkipReason), exit code 0.
 //
 // States come from MDBlockState: ok / outdated (our recorded body) / modified
 // (edited block, or a hand-pasted section without markers: delete it first, so
@@ -63,7 +64,6 @@ type ClaudeMDStep struct {
 var (
 	_ Step           = ClaudeMDStep{}
 	_ Seeder         = ClaudeMDStep{}
-	_ Configurer     = ClaudeMDStep{}
 	_ Adopter        = ClaudeMDStep{}
 	_ ModifiedDiffer = ClaudeMDStep{}
 )
@@ -97,36 +97,29 @@ func resolveClaudeMDPath(p Paths, raw string) (string, error) {
 	return filepath.Clean(raw), nil
 }
 
-func recordedClaudeMDBlock(m *Manifest) (Artifact, bool) {
-	for _, a := range m.Find(KindMDBlock) {
-		if a.Step == ClaudeMDStepID {
-			return a, true
-		}
-	}
-	return Artifact{}, false
-}
-
 // Seed implements Seeder: flag, then the path an earlier install recorded, then
 // the user-level default. An invalid --claude-md value is a usage error.
 func (ClaudeMDStep) Seed(_ context.Context, rc ReadPorts, st *RunState) ([]Note, error) {
 	def := defaultClaudeMD(rc.Paths)
+	rec, hasRec := st.Prior.Manifest.LastMDBlock()
 	switch {
 	case st.Inputs.ClaudeMD != "":
 		p, err := resolveClaudeMDPath(rc.Paths, st.Inputs.ClaudeMD)
 		if err != nil {
 			return nil, fmt.Errorf("--claude-md: %w", err)
 		}
-		if p == def {
+		switch {
+		case p == def:
 			st.ClaudeMDTarget.Set(def, SourceDefault) // the user's own file, not a shared one
-		} else {
+		case hasRec && p == rec.Path:
+			st.ClaudeMDTarget.Set(p, SourceManifest) // consented to by the earlier install
+		default:
 			st.ClaudeMDTarget.Set(p, SourceFlag)
 		}
+	case hasRec && rec.Path != "":
+		st.ClaudeMDTarget.Set(rec.Path, SourceManifest)
 	default:
-		if a, ok := recordedClaudeMDBlock(st.Prior.Manifest); ok && a.Path != "" {
-			st.ClaudeMDTarget.Set(a.Path, SourceManifest)
-		} else {
-			st.ClaudeMDTarget.Set(def, SourceDefault)
-		}
+		st.ClaudeMDTarget.Set(def, SourceDefault)
 	}
 	return nil, nil
 }
@@ -159,6 +152,9 @@ func loadMDView(rfs ReadFS, assets fs.FS, p Paths, st *RunState, target string) 
 	if a, ok := st.Prior.Manifest.Lookup(KindMDBlock, target, ClaudeMDBlockIdentity); ok {
 		v.recorded = a.SHA256
 	}
+	if err := CheckParentInHome(rfs, p.Home, target); err != nil {
+		return v, fmt.Errorf("refusing to edit %s", err)
+	}
 	if v.file, err = ReadSettingsFile(rfs, p.Home, target); err != nil {
 		var sr *SettingsRefusal
 		if errors.As(err, &sr) {
@@ -185,78 +181,35 @@ func (ClaudeMDStep) Detect(_ context.Context, rc ReadPorts, st *RunState) Detect
 	}
 	d := Detection{State: v.state, Detail: target + ": " + v.detail,
 		Artifacts: []ArtifactState{{ID: ClaudeMDArtifact, State: v.state, Detail: v.detail}}}
-	if a, ok := recordedClaudeMDBlock(st.Prior.Manifest); ok && a.Path != target {
+	if a, ok := st.Prior.Manifest.LastMDBlock(); ok && a.Path != target {
 		d.Notes = append(d.Notes, Note{NoteInfo, "a claude-memory block recorded earlier stays in " + a.Path + " (uninstall removes it)"})
 	}
-	if st.Auto && st.ClaudeMDTarget.Source() == SourceFlag && v.state != StateOK {
-		for _, p := range []string{target, v.file.Target} {
-			if in, root, err := InGitRepo(rc.FS, p, rc.Paths.GitCeiling); err == nil && in {
-				d.SkipReason = fmt.Sprintf("--claude-md %s is inside the git repository %s; --yes never writes it (run without --yes to review the diff, or omit --claude-md for %s)",
-					target, root, defaultClaudeMD(rc.Paths))
-				d.Detail = "skipped: --claude-md is inside a git repository"
-				d.Notes = append(d.Notes, Note{NoteWarn, "claude-md skipped: " + d.SkipReason})
-				break
-			}
+	if !strings.HasSuffix(strings.ToLower(target), ".md") {
+		d.Notes = append(d.Notes, Note{NoteWarn, target + " does not end in .md: is that the CLAUDE.md you meant?"})
+	}
+	// AC-42: unattended runs never put the block into a git repository on
+	// their own: an explicit path, or a recorded path whose block is gone.
+	src := st.ClaudeMDTarget.Source()
+	guard := st.Auto && ((src == SourceFlag && v.state != StateOK) || (src == SourceManifest && v.state == StateAbsent))
+	if guard {
+		in, root, err := InGitRepoResolved(rc.FS, target, rc.Paths.GitCeiling)
+		if err == nil && !in && v.file.Target != target {
+			in, root, err = InGitRepoResolved(rc.FS, v.file.Target, rc.Paths.GitCeiling)
+		}
+		switch {
+		case err != nil:
+			d.SkipReason = fmt.Sprintf("cannot tell whether %s is inside a git repository (%v); --yes does not write it", target, err)
+		case in:
+			d.SkipReason = fmt.Sprintf("%s is inside the git repository %s; --yes never writes it there (run without --yes to review the diff, or omit --claude-md for %s)",
+				target, root, defaultClaudeMD(rc.Paths))
+		}
+		if d.SkipReason != "" {
+			d.Detail = "skipped: " + d.SkipReason
+			d.Notes = append(d.Notes, Note{NoteWarn, "claude-md skipped: " + d.SkipReason})
 		}
 	}
 	return d
 }
-
-// Configure implements Configurer: interactive only. Under --yes the target
-// comes from the flag, the manifest or the default and nothing is asked.
-func (ClaudeMDStep) Configure(_ context.Context, rc ReadPorts, ui Prompter, st *RunState) error {
-	if !ui.Interactive() {
-		return nil
-	}
-	switch src := st.ClaudeMDTarget.Source(); {
-	case src == SourceFlag, src == SourceManifest && !st.Inputs.Reconfigure:
-		return nil
-	}
-	cur := claudeMDTarget(rc, st)
-	def := defaultClaudeMD(rc.Paths)
-	paths := []string{def}
-	opts := []string{"user level: " + def + " (recommended)"}
-	if rc.Paths.Cwd != "" {
-		if in, root, err := InGitRepo(rc.FS, filepath.Join(rc.Paths.Cwd, "CLAUDE.md"), rc.Paths.GitCeiling); err == nil && in {
-			if repoFile := filepath.Join(root, "CLAUDE.md"); repoFile != def {
-				paths = append(paths, repoFile)
-				opts = append(opts, "this repository: "+repoFile)
-			}
-		}
-	}
-	opts = append(opts, "another path")
-	defIdx := 0
-	for i, p := range paths {
-		if p == cur {
-			defIdx = i
-		}
-	}
-	i, err := ui.Select("Where should the claude-memory section go?", opts, defIdx)
-	if err != nil {
-		return err
-	}
-	chosen := cur
-	if i < len(paths) {
-		chosen = paths[i]
-	} else {
-		raw, err := ui.Text("Path of the CLAUDE.md file", cur, func(s string) error {
-			_, err := resolveClaudeMDPath(rc.Paths, s)
-			return err
-		})
-		if err != nil {
-			return err
-		}
-		if chosen, err = resolveClaudeMDPath(rc.Paths, raw); err != nil {
-			return err
-		}
-	}
-	if chosen != cur {
-		st.ClaudeMDTarget.Set(chosen, SourcePrompt)
-	}
-	return nil
-}
-
-func mdToken(f *SettingsFile) string { return settingsToken(f) }
 
 // upsert computes the file content with the block written; a hand-pasted
 // section is refused with its hint.
@@ -304,21 +257,18 @@ func (ClaudeMDStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch Choic
 		desc = "create the file with the claude-memory block"
 	}
 	p.Actions = append(p.Actions, Action{Artifact: ClaudeMDArtifact, Verb: "write", Path: v.target, Desc: desc})
-	if v.file.Exists {
+	if v.file.Exists && v.state == StateModified {
 		p.Notes = append(p.Notes, Note{NoteInfo, "a timestamped backup of " + v.file.Target + " is kept beside it"})
 	}
-	for _, c := range []string{v.target, v.file.Target} {
-		if in, root, err := InGitRepo(rc.FS, c, rc.Paths.GitCeiling); err == nil && in {
-			p.Notes = append(p.Notes, Note{NoteInfo, v.target + " is inside the git repository " + root + ": the block becomes part of a shared file; review the diff"})
-			break
-		}
+	if in, root, err := InGitRepoResolved(rc.FS, v.target, rc.Paths.GitCeiling); err == nil && in {
+		p.Notes = append(p.Notes, Note{NoteInfo, v.target + " is inside the git repository " + root + ": the block becomes part of a shared file; review the diff"})
 	}
 	old := v.target
 	if !v.file.Exists {
 		old = ""
 	}
 	p.Diffs = append(p.Diffs, Diff{Artifact: ClaudeMDArtifact, Path: v.target, Unified: UnifiedDiff(old, v.target, v.file.Content, out)})
-	p.Token = mdToken(v.file)
+	p.Token = settingsToken(v.file)
 	return p, nil
 }
 
@@ -343,7 +293,7 @@ func (s ClaudeMDStep) Apply(_ context.Context, wc WritePorts, st *RunState, p Pl
 	if err != nil {
 		return res, err
 	}
-	if p.Token != "" && mdToken(v.file) != p.Token {
+	if p.Token != "" && settingsToken(v.file) != p.Token {
 		return res, fmt.Errorf("%s: %w", v.file.Target, ErrClaudeMDChanged)
 	}
 	out, changed, err := v.upsert()
@@ -351,7 +301,7 @@ func (s ClaudeMDStep) Apply(_ context.Context, wc WritePorts, st *RunState, p Pl
 		return res, err
 	}
 	if changed {
-		backup, err := WriteSettingsFile(wc.FS, wc.Clock, v.file, out)
+		backup, err := WriteTextFile(wc.FS, wc.Clock, v.file, out, v.state == StateModified)
 		if err != nil {
 			if errors.Is(err, ErrSettingsChanged) {
 				err = fmt.Errorf("%s: %w", v.file.Target, ErrClaudeMDChanged)

@@ -646,27 +646,60 @@ func UniqueBackupPath(fsys ReadFS, base string) string {
 // path ("" when the file did not exist). Callers write only when
 // MergeSettings reported changed.
 func WriteSettingsFile(fsys FS, clk Clock, f *SettingsFile, out []byte) (string, error) {
+	return WriteTextFile(fsys, clk, f, out, true)
+}
+
+// WriteTextFile is WriteSettingsFile with the backup optional: with backup
+// false an existing file is rewritten (hash rechecked, mode kept, atomic)
+// without a copy; the claude-md step backs up only a modified block.
+func WriteTextFile(fsys FS, clk Clock, f *SettingsFile, out []byte, backup bool) (string, error) {
 	if err := recheckSettings(fsys, f); err != nil {
 		return "", err
 	}
 	mode := fs.FileMode(0o644)
-	backup := ""
+	bak := ""
 	if f.Exists {
 		mode = f.Mode
-		backup = UniqueBackupPath(fsys, SettingsBackupPath(f.Target, clk))
-		if err := fsys.WriteFileAtomic(backup, f.Content, BackupFileMode); err != nil {
-			return "", fmt.Errorf("backup %s: %w", backup, err)
-		}
-		if err := recheckSettings(fsys, f); err != nil {
-			return backup, err
+		if backup {
+			bak = UniqueBackupPath(fsys, SettingsBackupPath(f.Target, clk))
+			if err := fsys.WriteFileAtomic(bak, f.Content, BackupFileMode); err != nil {
+				return "", fmt.Errorf("backup %s: %w", bak, err)
+			}
+			if err := recheckSettings(fsys, f); err != nil {
+				return bak, err
+			}
 		}
 	} else if err := fsys.MkdirAll(filepath.Dir(f.Target), 0o700); err != nil {
 		return "", err
 	}
 	if err := fsys.WriteFileAtomic(f.Target, out, mode); err != nil {
-		return backup, err
+		return bak, err
 	}
-	return backup, nil
+	return bak, nil
+}
+
+// ErrParentOutsideHome is returned by CheckParentInHome.
+var ErrParentOutsideHome = errors.New("its directory is a symlink that resolves outside the home directory")
+
+// CheckParentInHome is the path policy of the Claude files install writes
+// besides settings.json (skills, CLAUDE.md): a path given literally outside
+// home (CLAUDE_CONFIG_DIR, an explicit --claude-md) is allowed as it is, but a
+// path inside home whose directory is a symlink resolving outside home is
+// refused, like a file symlink pointing outside (AC-38). A directory that does
+// not exist yet is fine.
+func CheckParentInHome(fsys ReadFS, home, p string) error {
+	dir := filepath.Dir(p)
+	if rel, err := filepath.Rel(home, dir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil // literally outside home
+	}
+	resolved, err := fsys.EvalSymlinks(dir)
+	if err != nil {
+		return nil // missing parent: nothing to follow
+	}
+	if !underDir(fsys, resolved, home) {
+		return fmt.Errorf("%s: %w (%s)", p, ErrParentOutsideHome, resolved)
+	}
+	return nil
 }
 
 func recheckSettings(fsys FS, f *SettingsFile) error {

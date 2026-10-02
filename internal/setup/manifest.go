@@ -57,7 +57,9 @@ type Artifact struct {
 	CreatedContainer bool `json:"created_container,omitempty"`
 	// CreatedFile is set on a settings-hook artifact when install created
 	// settings.json itself, so uninstall deletes it only when the unmerge
-	// leaves {} (Design 23). CreatedContainer keeps its own meaning.
+	// leaves {} (Design 23), and on an md-block artifact when install created
+	// the CLAUDE.md file, so uninstall deletes it only when our block is its
+	// only content. CreatedContainer keeps its own meaning.
 	CreatedFile bool `json:"created_file,omitempty"`
 }
 
@@ -166,6 +168,18 @@ func (m *Manifest) Lookup(kind ArtifactKind, path, identity string) (Artifact, b
 	for _, a := range m.Find(kind) {
 		if a.Path == path && a.Identity == identity {
 			return a, true
+		}
+	}
+	return Artifact{}, false
+}
+
+// LastMDBlock returns the md-block artifact the claude-md step recorded last
+// (a later target replaces an earlier one), for the step and doctor alike.
+func (m *Manifest) LastMDBlock() (Artifact, bool) {
+	blocks := m.Find(KindMDBlock)
+	for i := len(blocks) - 1; i >= 0; i-- {
+		if blocks[i].Step == "claude-md" {
+			return blocks[i], true
 		}
 	}
 	return Artifact{}, false

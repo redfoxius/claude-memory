@@ -139,9 +139,9 @@ func TestClaudeMDGolden(t *testing.T) {
 			if a.Kind != KindMDBlock || a.Path != c.target() || a.SHA256 != MDSectionHash(testSection) || a.CreatedFile != (tc.in == "") {
 				t.Errorf("artifact %+v", a)
 			}
-			// A backup (mode 0600) of an existing file; none for a new one.
+			// A backup (mode 0600) only when a modified block is overwritten.
 			baks, _ := filepath.Glob(c.target() + ".bak.claude-memory.*")
-			if (tc.in == "") != (len(baks) == 0) {
+			if (tc.state != StateModified) == (len(baks) != 0) {
 				t.Errorf("backups %v for input %q", baks, tc.in)
 			}
 			for _, b := range baks {
@@ -243,8 +243,8 @@ func TestClaudeMDSymlink(t *testing.T) {
 			t.Errorf("target mode %v", info.Mode().Perm())
 		}
 		checkGolden(t, filepath.Join("testdata", "claudemd", "symlink.golden.md"), mustRead(t, target))
-		if baks, _ := filepath.Glob(target + ".bak.claude-memory.*"); len(baks) != 1 {
-			t.Errorf("backup beside the target: %v", baks)
+		if baks, _ := filepath.Glob(target + ".bak.claude-memory.*"); len(baks) != 0 {
+			t.Errorf("a plain insertion must not leave a backup: %v", baks)
 		}
 		// The artifact is recorded at the path asked, not the resolved target.
 		if len(r.res.Artifacts) != 1 || r.res.Artifacts[0].Path != c.target() {
@@ -361,6 +361,15 @@ func TestClaudeMDSeed(t *testing.T) {
 	if st, _ = seed(Inputs{ClaudeMD: "/y/CLAUDE.md"}, m); st.ClaudeMDTarget.Get() != "/y/CLAUDE.md" {
 		t.Errorf("flag over manifest: %v", st.ClaudeMDTarget.Get())
 	}
+	// A flag equal to the recorded path is the recorded one (M3).
+	if st, _ = seed(Inputs{ClaudeMD: "/x/CLAUDE.md"}, m); st.ClaudeMDTarget.Source() != SourceManifest {
+		t.Errorf("flag equal to the recorded path: %v", st.ClaudeMDTarget.Source())
+	}
+	// The last recorded block wins (M1).
+	m.Upsert(Artifact{Step: "claude-md", Kind: KindMDBlock, Path: "/z/CLAUDE.md", Identity: ClaudeMDBlockIdentity})
+	if st, _ = seed(Inputs{}, m); st.ClaudeMDTarget.Get() != "/z/CLAUDE.md" {
+		t.Errorf("last recorded block: %v", st.ClaudeMDTarget.Get())
+	}
 }
 
 // AC-42: --yes + explicit path in a git repository is skipped with the reason;
@@ -458,69 +467,6 @@ func TestClaudeMDYesAndGit(t *testing.T) {
 	})
 }
 
-// Configure (interactive): the user-level default, the enclosing repository's
-// file, or another path; nothing is asked under --yes, with a flag, or with a
-// recorded target.
-func TestClaudeMDConfigure(t *testing.T) {
-	step := ClaudeMDStep{}
-	ctx := context.Background()
-	setup := func(t *testing.T) (*cmk, string) {
-		c := newCMK(t)
-		repo := filepath.Join(c.root, "work")
-		if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		return c, repo
-	}
-	t.Run("repository option", func(t *testing.T) {
-		c, repo := setup(t)
-		st := c.state(nil)
-		ui := NewFakePrompter(t, true).ExpectSelect("Where should the claude-memory section go", 1)
-		if err := step.Configure(ctx, c.rp(), ui, st); err != nil {
-			t.Fatal(err)
-		}
-		if st.ClaudeMDTarget.Get() != filepath.Join(repo, "CLAUDE.md") || st.ClaudeMDTarget.Source() != SourcePrompt {
-			t.Errorf("target %v %v", st.ClaudeMDTarget.Get(), st.ClaudeMDTarget.Source())
-		}
-	})
-	t.Run("user level keeps the default", func(t *testing.T) {
-		c, _ := setup(t)
-		st := c.state(nil)
-		ui := NewFakePrompter(t, true).ExpectSelect("Where should", 0)
-		if err := step.Configure(ctx, c.rp(), ui, st); err != nil {
-			t.Fatal(err)
-		}
-		if st.ClaudeMDTarget.Get() != c.target() || st.ClaudeMDTarget.Source() != SourceDefault {
-			t.Errorf("target %v %v", st.ClaudeMDTarget.Get(), st.ClaudeMDTarget.Source())
-		}
-	})
-	t.Run("no repository: two options, Enter keeps user level", func(t *testing.T) {
-		c := newCMK(t)
-		st := c.state(nil)
-		ui := NewFakePrompter(t, true).ExpectSelect("Where should", -1)
-		if err := step.Configure(ctx, c.rp(), ui, st); err != nil || st.ClaudeMDTarget.Get() != c.target() {
-			t.Errorf("%v %v", err, st.ClaudeMDTarget.Get())
-		}
-	})
-	t.Run("not asked: yes, flag, recorded target", func(t *testing.T) {
-		c, _ := setup(t)
-		silent := NewFakePrompter(t, false)
-		if err := step.Configure(ctx, c.rp(), silent, c.state(nil)); err != nil {
-			t.Errorf("non-interactive: %v", err)
-		}
-		st := NewRunState(Inputs{ClaudeMD: "x/CLAUDE.md"})
-		_, _ = step.Seed(ctx, c.rp(), st)
-		if err := step.Configure(ctx, c.rp(), NewFakePrompter(t, true), st); err != nil {
-			t.Errorf("flag: %v", err)
-		}
-		m := &Manifest{}
-		m.Upsert(Artifact{Step: "claude-md", Kind: KindMDBlock, Path: "/x/CLAUDE.md", Identity: ClaudeMDBlockIdentity})
-		if err := step.Configure(ctx, c.rp(), NewFakePrompter(t, true), c.state(m)); err != nil {
-			t.Errorf("recorded: %v", err)
-		}
-	})
-}
-
 // ModifiedDiff shows what an overwrite changes; a hand-pasted section errors.
 func TestClaudeMDModifiedDiff(t *testing.T) {
 	c := newCMK(t)
@@ -529,4 +475,130 @@ func TestClaudeMDModifiedDiff(t *testing.T) {
 	if err != nil || !strings.Contains(d, "-mine") || !strings.Contains(d, "+Use memory_search") {
 		t.Errorf("diff %q %v", d, err)
 	}
+}
+
+func autoState(c *cmk, in Inputs, m *Manifest) *RunState {
+	st := NewRunState(in)
+	st.Auto, st.Inputs.Yes = true, true
+	st.Prior.Manifest = m
+	_, _ = ClaudeMDStep{}.Seed(context.Background(), c.rp(), st)
+	return st
+}
+
+// S1: a recorded path inside git is refreshed under --yes only when outdated;
+// a block the user deleted is not re-added.
+func TestClaudeMDYesRecordedPathInGit(t *testing.T) {
+	c := newCMK(t)
+	repo := filepath.Join(c.root, "work", "acme")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(repo, "CLAUDE.md")
+	rec := func(h string) *Manifest {
+		m := &Manifest{}
+		m.Upsert(Artifact{Step: "claude-md", Kind: KindMDBlock, Path: target, Identity: ClaudeMDBlockIdentity, SHA256: h})
+		return m
+	}
+	// Outdated: refreshed.
+	c.write(target, "<!-- BEGIN claude-memory -->\n"+oldSection+"<!-- END claude-memory -->\n", 0o644)
+	m := rec(MDSectionHash(oldSection))
+	if r := c.run(autoState(c, Inputs{}, m), false); r.err != nil || r.det.SkipReason != "" || !r.ran || r.det.State != StateOutdated {
+		t.Fatalf("outdated: %+v %v", r.det, r.err)
+	}
+	// Block deleted by the user: skipped, nothing written.
+	c.write(target, "# the user removed our block\n", 0o644)
+	n := len(c.fs.Writes())
+	r := c.run(autoState(c, Inputs{}, m), false)
+	if r.det.SkipReason == "" {
+		t.Fatalf("a deleted block was re-added: %+v", r.det)
+	}
+	c.assertNoWrites(n)
+}
+
+// gitLstatFails makes the walk for ".git" fail with an I/O error.
+type gitLstatFails struct{ ReadFS }
+
+func (g gitLstatFails) Lstat(p string) (fs.FileInfo, error) {
+	if filepath.Base(p) == ".git" {
+		return nil, errors.New("input/output error")
+	}
+	return g.ReadFS.Lstat(p)
+}
+
+// S2: a walk error fails closed under --yes.
+func TestClaudeMDYesGitWalkErrorFailsClosed(t *testing.T) {
+	c := newCMK(t)
+	dir := filepath.Join(c.root, "work", "plain")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st := autoState(c, Inputs{ClaudeMD: filepath.Join(dir, "CLAUDE.md")}, nil)
+	rp := c.rp()
+	rp.FS = gitLstatFails{c.fs}
+	d := (ClaudeMDStep{}).Detect(context.Background(), rp, st)
+	if !strings.Contains(d.SkipReason, "cannot tell") {
+		t.Fatalf("skip reason %q (detail %q)", d.SkipReason, d.Detail)
+	}
+}
+
+// S3: a directory symlinked into a repository counts as inside it.
+func TestClaudeMDYesSymlinkedDirIntoRepo(t *testing.T) {
+	c := newCMK(t)
+	repo := filepath.Join(c.root, "work", "acme")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(c.root, "work", "link")
+	if err := os.Symlink(repo, link); err != nil {
+		t.Fatal(err)
+	}
+	r := c.run(autoState(c, Inputs{ClaudeMD: filepath.Join(link, "CLAUDE.md")}, nil), false)
+	if !strings.Contains(r.det.SkipReason, "inside the git repository") {
+		t.Fatalf("skip reason %q", r.det.SkipReason)
+	}
+}
+
+// S4: one path rule: a literal path outside Home is allowed; a directory
+// symlink inside Home resolving outside is refused, like a file symlink.
+func TestClaudeMDPathPolicy(t *testing.T) {
+	c := newCMK(t)
+	outside := filepath.Join(c.root, "elsewhere")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Literal outside path: fine.
+	st := NewRunState(Inputs{ClaudeMD: filepath.Join(outside, "CLAUDE.md")})
+	_, _ = ClaudeMDStep{}.Seed(context.Background(), c.rp(), st)
+	if r := c.run(st, false); r.err != nil || !r.ran {
+		t.Fatalf("literal outside path: %+v %v", r.det, r.err)
+	}
+	// Directory symlink inside Home pointing outside: refused.
+	if err := os.MkdirAll(c.p.Home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(c.p.Home, "proj")); err != nil {
+		t.Fatal(err)
+	}
+	st = NewRunState(Inputs{ClaudeMD: filepath.Join(c.p.Home, "proj", "CLAUDE.md")})
+	_, _ = ClaudeMDStep{}.Seed(context.Background(), c.rp(), st)
+	n := len(c.fs.Writes())
+	r := c.run(st, false)
+	if r.det.State != StateBlocked || !strings.Contains(r.det.Detail, "outside") {
+		t.Fatalf("detect %s (%s)", r.det.State, r.det.Detail)
+	}
+	c.assertNoWrites(n)
+}
+
+// S6: a target that does not end in .md gets a warning.
+func TestClaudeMDNonMarkdownTargetWarns(t *testing.T) {
+	c := newCMK(t)
+	st := NewRunState(Inputs{ClaudeMD: filepath.Join(c.p.Cwd, "notes.txt")})
+	_, _ = ClaudeMDStep{}.Seed(context.Background(), c.rp(), st)
+	d := (ClaudeMDStep{}).Detect(context.Background(), c.rp(), st)
+	for _, n := range d.Notes {
+		if n.Level == NoteWarn && strings.Contains(n.Text, "does not end in .md") {
+			return
+		}
+	}
+	t.Errorf("notes %+v", d.Notes)
 }

@@ -236,7 +236,6 @@ type stepRun struct {
 
 	userSkip bool   // --skip, an interactive skip, or a skipped Await
 	skipWhy  string // "skipped by you" / "skipped by --skip"
-	autoSkip bool   // userSkip comes from Detection.SkipReason (re-Detect may lift it)
 	afterDep string // planned only once this prerequisite is applied
 
 	resolved bool // a blocked step whose re-check passed
@@ -467,13 +466,9 @@ func (s *session) setup() error {
 // after the step.
 func (s *session) detect(r *stepRun) {
 	r.det = r.step.Detect(s.ctx, s.e.Read, s.st)
-	switch {
-	case r.det.SkipReason != "":
-		if !r.userSkip {
-			r.userSkip, r.autoSkip, r.skipWhy = true, true, "skipped: "+r.det.SkipReason
-		}
-	case r.autoSkip:
-		r.userSkip, r.autoSkip, r.skipWhy = false, false, ""
+	if r.det.SkipReason != "" && !r.userSkip {
+		// One-way: a documented refusal (AC-42) is not lifted by a re-Detect.
+		r.userSkip, r.skipWhy = true, "skipped: "+r.det.SkipReason
 	}
 	if len(r.det.Artifacts) == 0 && r.det.State != StateBlocked {
 		r.det.Artifacts = []ArtifactState{{ID: r.step.ID(), State: r.det.State, Detail: r.det.Detail}}
@@ -650,9 +645,16 @@ func (s *session) askOverwrite(r *stepRun, a ArtifactState) (bool, error) {
 	if !ok {
 		return s.ui().Confirm(fmt.Sprintf("overwrite your modified %s? a backup is kept", a.ID), false)
 	}
+	// A diff that cannot be built means an overwrite is impossible (a hand
+	// pasted section, a symlink outside Home): say why and keep.
+	d, derr := md.ModifiedDiff(s.ctx, s.e.Read, s.st, a.ID)
+	if derr != nil {
+		s.report().Notes([]Note{{NoteWarn, fmt.Sprintf("%s differs from this version and is kept: %s", a.ID, derr)}})
+		return false, nil
+	}
 	opts := []string{"keep", "overwrite (a backup is kept)", "show diff"}
 	for {
-		i, err := s.ui().Select(fmt.Sprintf("%s was modified by you", a.ID), opts, 0)
+		i, err := s.ui().Select(fmt.Sprintf("%s differs from this version (edited, or a manual install)", a.ID), opts, 0)
 		if err != nil {
 			return false, err
 		}
@@ -660,10 +662,6 @@ func (s *session) askOverwrite(r *stepRun, a ArtifactState) (bool, error) {
 		case 1:
 			return true, nil
 		case 2:
-			d, derr := md.ModifiedDiff(s.ctx, s.e.Read, s.st, a.ID)
-			if derr != nil {
-				d = "cannot show the diff: " + derr.Error()
-			}
 			s.report().Notes([]Note{{NoteInfo, strings.TrimRight(d, "\n")}})
 		default:
 			return false, nil
@@ -1180,7 +1178,11 @@ func (s *session) adoptPhase() error {
 		}
 		var fresh []Artifact
 		for _, a := range ad.Adopt(s.ctx, s.e.Read, s.st) {
-			if _, known := s.man.Lookup(a.Kind, a.Path, a.Identity); !known {
+			known, ok := s.man.Lookup(a.Kind, a.Path, a.Identity)
+			// A known artifact whose recorded hash is stale (the user updated
+			// the file by hand to the current version) is re-recorded; hashes
+			// only, so an unchanged re-run still writes nothing (AC-50).
+			if !ok || (a.SHA256 != "" && known.SHA256 != a.SHA256) {
 				fresh = append(fresh, a)
 			}
 		}

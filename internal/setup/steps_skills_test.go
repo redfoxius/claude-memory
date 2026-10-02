@@ -369,3 +369,28 @@ func TestSkillsModifiedDiff(t *testing.T) {
 		t.Error("unknown id accepted")
 	}
 }
+
+// S4: a skill directory symlinked outside Home is refused (modified, an
+// overwrite is an error), the target untouched.
+func TestSkillsDirSymlinkOutsideHome(t *testing.T) {
+	s := newSK(t)
+	outside := filepath.Join(s.root, "elsewhere", "remember")
+	s.write(filepath.Join(outside, "SKILL.md"), "remember v1\n", 0o644)
+	if err := os.MkdirAll(s.p.SkillsDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(s.p.SkillsDir(), "remember")); err != nil {
+		t.Fatal(err)
+	}
+	r := s.run(nil, nil)
+	if r.stateOf(idRemember) != StateModified {
+		t.Fatalf("state %s", r.stateOf(idRemember))
+	}
+	r = s.run(nil, map[string]Choice{idRemember: ChoiceApply})
+	if r.err == nil || !strings.Contains(r.err.Error(), "outside") {
+		t.Errorf("overwrite through an outside directory symlink: %v", r.err)
+	}
+	if string(mustRead(t, filepath.Join(outside, "SKILL.md"))) != "remember v1\n" {
+		t.Error("outside file touched")
+	}
+}

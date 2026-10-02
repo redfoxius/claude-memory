@@ -2,7 +2,7 @@
 
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-01-install-doctor
-- Status: v0.7 (small WI-S2-9/10 review changes, §0.7; v0.6 one AC-62 wording change, §0.6; otherwise v0.5). Slice 1 is implemented and merged, with the review 04
+- Status: v0.8 (small WI-S2-11/12 changes, §0.8; v0.7 small WI-S2-9/10 review changes, §0.7; v0.6 one AC-62 wording change, §0.6; otherwise v0.5). Slice 1 is implemented and merged, with the review 04
   fixes in. Slice 2 is re-planned after the slice-2 plan review
   (`05-slice-2-plan-review.md`, v0.3 edits in §0.3) and its iteration-2
   and iteration-3 re-reviews (`06-slice-2-plan-rereview.md`, v0.4 edits
@@ -132,6 +132,17 @@ Small and reversible: restore the old wording of each AC to undo it.
 | AC-39 | The settings backup is mode 0600 (was: the original's mode) and never overwrites an existing backup (a `.N` suffix is added when the name exists). | 2b-1 security A8 |
 | AC-40 | An entry with our command and args but extra `env` is `modified` (kept unless the overwrite is confirmed), not `outdated`; replacing it drops that env, and the plan names the keys. | 2b-1 conformance F4 |
 | AC-51 | Already-correct artifacts that are `ok` but not in the manifest are recorded on the first run (adoption), without any write to the artifact. | 2b-1 conformance F2 |
+
+### 0.8 Changes in v0.8 (WI-S2-11/12, 2026-10-02)
+
+Small and reversible: restore the old wording of each AC to undo it.
+
+| AC / § | Change | Finding |
+|---|---|---|
+| AC-42 | Target = `--claude-md` flag, else the path recorded in the manifest, else `<ClaudeDir>/CLAUDE.md`; no interactive target prompt. A flag equal to the recorded path is the recorded one, equal to the user-level file it is the default. `--yes` + an explicit path in a git repository (the path and its symlink-resolved directory are walked; a walk error fails closed) is skipped with the reason, exit 0. A recorded path in a git repository is refreshed under `--yes` only when `outdated`, never re-added after the user deleted the block. A backup of the file is made only when a `modified` block is overwritten. A target not ending in `.md` warns. | WI-S2-12 reviews |
+| AC-41/AC-6 | A step may implement `ModifiedDiffer`: its modified artifacts get "keep / overwrite (backup kept) / show diff" instead of the extra Confirm; when no diff can be built (hand-pasted section, symlink outside Home) overwrite is not offered. A skills backup is made only when a modified file is overwritten. | WI-S2-11/12 reviews |
+| AC-12/§10 | `Detection.SkipReason` makes the engine skip a step with a documented, non-failing reason (one-way). `RunState.Auto` tells a step whether nothing is asked (`--yes`, `--upgrade`, non-TTY dry-run). | WI-S2-12 |
+| AC-51 | Adoption also re-records a known artifact whose recorded hash differs from the ok on-disk one (hand-updated file). | WI-S2-11/12 conformance |
 
 ## 1. Overview & Problem
 

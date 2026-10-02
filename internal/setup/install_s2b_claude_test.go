@@ -292,8 +292,8 @@ func TestInteractiveSkillOverwriteWithDiff(t *testing.T) {
 	}
 	r.ui = NewFakePrompter(t, true).
 		ExpectSelect("Skills [modified]", 0).
-		ExpectSelect("skills/remember/SKILL.md was modified by you", 2). // show diff
-		ExpectSelect("skills/remember/SKILL.md was modified by you", 1). // overwrite
+		ExpectSelect("skills/remember/SKILL.md differs from this version", 2). // show diff
+		ExpectSelect("skills/remember/SKILL.md differs from this version", 1). // overwrite
 		ExpectConfirm("Apply this plan?", true)
 	res := r.run(r.inputs(func(in *Inputs) { in.Yes = false }))
 	if res.ExitCode != ExitOK {
@@ -314,11 +314,62 @@ func TestInteractiveSkillOverwriteWithDiff(t *testing.T) {
 	}
 	r.ui = NewFakePrompter(t, true).
 		ExpectSelect("Skills [modified]", 0).
-		ExpectSelect("was modified by you", 0)
+		ExpectSelect("differs from this version", 0)
 	if res := r.run(r.inputs(func(in *Inputs) { in.Yes = false })); res.ExitCode != ExitOK {
 		t.Fatalf("exit %d\n%s", res.ExitCode, r.out)
 	}
 	if string(mustRead(t, skill)) != "again mine\n" {
 		t.Error("kept file changed")
+	}
+}
+
+// S9: when no diff can be built (a hand-pasted section), the interactive run
+// does not offer "overwrite": it says why and keeps.
+func TestInteractiveHandPastedSectionIsKept(t *testing.T) {
+	r := newFullRig(t)
+	r.mustConverge()
+	md := filepath.Join(r.p.ClaudeDir, "CLAUDE.md")
+	pasted := "# mine\n\n" + embeddedSection(t)
+	if err := os.WriteFile(md, []byte(pasted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.ui = NewFakePrompter(t, true).ExpectSelect("CLAUDE.md section [modified]", 0) // apply; no further question
+	res := r.run(r.inputs(func(in *Inputs) { in.Yes = false }))
+	if res.ExitCode != ExitOK {
+		t.Fatalf("exit %d\n%s", res.ExitCode, r.out)
+	}
+	if string(mustRead(t, md)) != pasted {
+		t.Error("the hand-pasted file changed")
+	}
+	if !strings.Contains(r.out.String(), "hand-pasted") {
+		t.Errorf("the reason is not printed:\n%s", r.out)
+	}
+}
+
+// M2: a block recorded at v1, updated by hand to v2, and then v3 released: the
+// adoption refreshes the stale hash (so v3 is "outdated", not "modified"); the
+// no-op re-run still writes nothing (AC-50).
+func TestAdoptRefreshesStaleHash(t *testing.T) {
+	r := newFullRig(t)
+	r.mustConverge()
+	md := filepath.Join(r.p.ClaudeDir, "CLAUDE.md")
+	m := loadManifestOf(t, r)
+	blk, _ := m.LastMDBlock()
+	m.Upsert(Artifact{Step: blk.Step, Kind: blk.Kind, Path: blk.Path, Identity: blk.Identity, SHA256: MDSectionHash("v1 wording\n"), Version: blk.Version, CreatedFile: blk.CreatedFile})
+	if err := SaveManifest(r.fs, r.p, m); err != nil {
+		t.Fatal(err)
+	}
+	_ = md
+	if res := r.run(r.inputs()); res.ExitCode != ExitOK {
+		t.Fatalf("exit %d\n%s", res.ExitCode, r.out)
+	}
+	got, _ := loadManifestOf(t, r).LastMDBlock()
+	if got.SHA256 != MDSectionHash(embeddedSection(t)) || !got.CreatedFile {
+		t.Errorf("stale hash not refreshed: %+v", got)
+	}
+	writes := r.nonLockWrites()
+	r.out.Reset()
+	if res := r.run(r.inputs()); res.ExitCode != ExitOK || r.nonLockWrites() != writes {
+		t.Errorf("no-op re-run wrote %v", r.fs.Writes()[writes:])
 	}
 }

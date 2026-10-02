@@ -16,7 +16,6 @@ const SkillsStepID = "skills"
 
 func skillFileArtifact(name, rel string) string { return SkillsStepID + "/" + name + "/" + rel }
 func skillDirArtifact(name string) string       { return SkillsStepID + "/" + name }
-func skillBackupSuffix(ts string) string        { return ".bak.claude-memory." + ts }
 
 // SkillsStep copies each embedded skill directory (remember, memory-digest) to
 // <ClaudeDir>/skills/<name>/ and records the sha256 of every file (AC-41). One
@@ -138,9 +137,15 @@ func analyzeSkills(rfs ReadFS, assets fs.FS, p Paths, st *RunState) (skillsAnaly
 				path: filepath.Join(dir, filepath.FromSlash(rel)), embedded: emb}
 			f.target = f.path
 			f.recorded = recordedSkillHash(st.Prior.Manifest, f.path)
-			sf, err := ReadSettingsFile(rfs, p.Home, f.path)
+			var sf *SettingsFile
+			err = CheckParentInHome(rfs, p.Home, f.path)
+			if err == nil {
+				sf, err = ReadSettingsFile(rfs, p.Home, f.path)
+			}
 			var sr *SettingsRefusal
 			switch {
+			case errors.Is(err, ErrParentOutsideHome):
+				f.refused, f.state, f.detail = fmt.Errorf("refusing to edit %w", err), StateModified, err.Error()
 			case errors.As(err, &sr):
 				f.refused, f.state, f.detail = fmt.Errorf("refusing to edit %s: %s", f.path, sr.Reason), StateModified, sr.Reason
 			case err != nil:
@@ -315,7 +320,7 @@ func (s SkillsStep) Apply(_ context.Context, wc WritePorts, st *RunState, p Plan
 			if f.exists {
 				mode = f.mode
 				if f.state == StateModified {
-					bak := UniqueBackupPath(wc.FS, f.target+skillBackupSuffix(wc.Clock.Now().UTC().Format("20060102T150405Z")))
+					bak := UniqueBackupPath(wc.FS, SettingsBackupPath(f.target, wc.Clock))
 					if err := wc.FS.WriteFileAtomic(bak, f.content, BackupFileMode); err != nil {
 						return res, fmt.Errorf("back up %s: %w", f.path, err)
 					}

@@ -322,8 +322,8 @@ func (d *doctor) checkSkills(context.Context) (Status, string, string) {
 func (d *doctor) checkClaudeMD(context.Context) (Status, string, string) {
 	target := filepath.Join(d.Paths.ClaudeDir, "CLAUDE.md")
 	recordedHash := ""
-	if blocks := d.manifestM().Find(KindMDBlock); len(blocks) > 0 {
-		target, recordedHash = blocks[0].Path, blocks[0].SHA256
+	if a, ok := d.manifestM().LastMDBlock(); ok {
+		target, recordedHash = a.Path, a.SHA256
 	}
 	section, err := fs.ReadFile(d.Assets, assetClaudeMDSection)
 	if err != nil {
