@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -14,8 +16,10 @@ const MCPStepID = "mcp"
 // MCPStep registers the user-scope MCP server (AC-40):
 // `claude mcp add --scope user claude-memory -- <bin> serve`, preceded by
 // `claude mcp remove --scope user claude-memory` when an entry with another
-// command, args or env is registered (outdated). It never passes -e and never
-// writes .claude.json itself.
+// command or args is registered (outdated). An entry with our command and args
+// but extra env is modified (a user customization): kept unless the overwrite
+// is confirmed, and then replaced, which drops that env (the plan names the
+// keys). It never passes -e and never writes .claude.json itself.
 //
 // Detect is a file read only (ReadMCPRegistration against RunState.BinPath):
 // it never runs `claude mcp get|list` or the registered command, both of which
@@ -63,8 +67,8 @@ func (MCPStep) Detect(_ context.Context, rc ReadPorts, st *RunState) Detection {
 		d.Notes = append(d.Notes, Note{NoteWarn, "a local-scope " + MCPServerName + " entry overrides the user scope in: " +
 			strings.Join(capList(reg.LocalShadows, 3), ", ") + "; remove it with `claude mcp remove --scope local " + MCPServerName + "` there"})
 	}
-	if state == StateOK {
-		return d
+	if state == StateOK || state == StateModified {
+		return d // modified is kept by default: no claude needed to keep it
 	}
 	if _, err := rc.Runner.LookPath("claude"); err != nil {
 		remedy := mcpAddCommand(bin)
@@ -91,8 +95,12 @@ func (MCPStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch Choices) (
 	switch state {
 	case StateOK:
 		return p, nil
-	case StateOutdated:
-		p.Actions = append(p.Actions, Action{Artifact: MCPStepID, Verb: "run", Desc: mcpRemoveCommand()})
+	case StateOutdated, StateModified:
+		desc := mcpRemoveCommand()
+		if len(reg.Server.Env) > 0 {
+			desc += " (drops its env: " + strings.Join(slices.Sorted(maps.Keys(reg.Server.Env)), ", ") + ")"
+		}
+		p.Actions = append(p.Actions, Action{Artifact: MCPStepID, Verb: "run", Desc: desc})
 	}
 	p.Actions = append(p.Actions, Action{Artifact: MCPStepID, Verb: "register", Desc: mcpAddCommand(bin)})
 	return p, nil
@@ -113,8 +121,11 @@ func (m MCPStep) Apply(ctx context.Context, wc WritePorts, st *RunState, p Plan)
 	if err != nil {
 		return res, err
 	}
+	if reg.ParseError != nil {
+		return res, fmt.Errorf("%s (registration unknown); not registering over it", reg.ParseError)
+	}
 	state, _ := reg.State(bin)
-	if state == StateOutdated {
+	if state == StateOutdated || state == StateModified {
 		if err := wc.ClaudeCLI.MCPRemove(ctx, MCPServerName); err != nil {
 			return res, fmt.Errorf("claude mcp remove: %w", err)
 		}
@@ -124,6 +135,27 @@ func (m MCPStep) Apply(ctx context.Context, wc WritePorts, st *RunState, p Plan)
 			return res, fmt.Errorf("claude mcp add: %w", err)
 		}
 	}
-	res.Artifacts = append(res.Artifacts, Artifact{Step: MCPStepID, Kind: KindMCP, Path: wc.Paths.ClaudeJSON, Identity: MCPServerName, Version: m.Version})
+	res.Artifacts = append(res.Artifacts, mcpArtifact(wc.Paths, bin, m.Version))
 	return res, nil
 }
+
+// mcpArtifact is the manifest record: Entry is the command line we registered,
+// so uninstall can check .claude.json still shows our command before removing.
+func mcpArtifact(p Paths, bin, version string) Artifact {
+	return Artifact{Step: MCPStepID, Kind: KindMCP, Path: p.ClaudeJSON, Identity: MCPServerName, Entry: bin + " serve", Version: version}
+}
+
+// Adopt implements Adopter: an ok registration is recorded (AC-51).
+func (m MCPStep) Adopt(_ context.Context, rc ReadPorts, st *RunState) []Artifact {
+	bin := binTarget(rc, st)
+	reg, err := ReadMCPRegistration(rc.FS, rc.Paths)
+	if err != nil {
+		return nil
+	}
+	if state, _ := reg.State(bin); state != StateOK {
+		return nil
+	}
+	return []Artifact{mcpArtifact(rc.Paths, bin, m.Version)}
+}
+
+var _ Adopter = MCPStep{}

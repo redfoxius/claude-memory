@@ -132,6 +132,17 @@ type Reporter interface {
 	StepDone(o StepOutcome)
 }
 
+// Adopter is optionally implemented by a Step to record artifacts that are
+// already correct on disk but not in the manifest (a hand install, AC-51: "ok
+// and recorded"). Adopt runs on read-only ports after Apply, never on a dry
+// run, for steps that ran cleanly; it returns every artifact that is ok now
+// (never one the step would still have to change, and never a directory it did
+// not create). The engine records only those whose key the manifest lacks, so
+// a re-run writes nothing (AC-50).
+type Adopter interface {
+	Adopt(ctx context.Context, rc ReadPorts, st *RunState) []Artifact
+}
+
 // FinalView is what the engine tells a Finalizer about the run it follows.
 type FinalView struct {
 	// NotInstalled maps a step id to the step name to print in "not
@@ -385,6 +396,9 @@ func (s *session) run(res *RunResult) (code int, err error) {
 
 		// Phase 6: apply, then phase 7: the final doctor.
 		if err := s.applyPhase(); err != nil {
+			return err
+		}
+		if err := s.adoptPhase(); err != nil {
 			return err
 		}
 		return s.finalPhase()
@@ -954,10 +968,16 @@ func (s *session) applyStep(r *stepRun) error {
 	chosen := applyIDs(r.choices)
 	plan := r.plan
 	if !r.planned {
+		firstToken := r.plan.Token // from the plan the user confirmed (phase 5)
 		var err error
 		if plan, err = r.step.Plan(s.ctx, s.e.Read, s.st, r.choices); err != nil {
 			r.failed, r.failErr = true, fmt.Errorf("plan: %w", err)
 			return nil
+		}
+		// A Rule-B re-plan must not reset the Token: it carries what the
+		// confirmed plan was based on, so a change since then is caught.
+		if firstToken != "" && plan.Token != "" {
+			plan.Token = firstToken
 		}
 	}
 	r.ran = true
@@ -1096,6 +1116,34 @@ func cloneManifest(m *Manifest) *Manifest {
 	c := *m
 	c.Artifacts = slices.Clone(m.Artifacts)
 	return &c
+}
+
+// ---- Adoption -------------------------------------------------------------
+
+// adoptPhase records the already-correct artifacts of every Adopter step that
+// ended cleanly and that the manifest does not know yet (AC-51). It runs after
+// Apply, so what a step just wrote is already recorded and is not repeated.
+func (s *session) adoptPhase() error {
+	for _, r := range s.runs {
+		ad, ok := r.step.(Adopter)
+		if !ok || r.userSkip || r.failed || r.blocked != "" || r.det.State == StateBlocked {
+			continue
+		}
+		var fresh []Artifact
+		for _, a := range ad.Adopt(s.ctx, s.e.Read, s.st) {
+			if _, known := s.man.Lookup(a.Kind, a.Path, a.Identity); !known {
+				fresh = append(fresh, a)
+			}
+		}
+		if len(fresh) == 0 {
+			continue
+		}
+		if err := s.persist(StepResult{Artifacts: fresh}); err != nil {
+			r.failed, r.failErr = true, fmt.Errorf("write manifest: %w", err)
+			s.report().StepDone(s.outcomeOf(r))
+		}
+	}
+	return s.checkCtx()
 }
 
 // ---- Final doctor (phase 7) -----------------------------------------------

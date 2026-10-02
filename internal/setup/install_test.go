@@ -31,8 +31,9 @@ func TestInstallStepsRegistry(t *testing.T) {
 	if !slices.Equal(ids, want) {
 		t.Errorf("registry = %v, want %v", ids, want)
 	}
-	if !slices.Contains(steps[slices.IndexFunc(steps, func(s Step) bool { return s.ID() == "hooks.settings" })].Requires(), "migrate") {
-		t.Error("hooks.settings must require migrate (AC-7)")
+	hs := steps[slices.IndexFunc(steps, func(s Step) bool { return s.ID() == "hooks.settings" })].Requires()
+	if !slices.Contains(hs, "migrate") || !slices.Contains(hs, "hooks.scripts") {
+		t.Errorf("hooks.settings must require migrate and hooks.scripts (AC-7), has %v", hs)
 	}
 	for _, banned := range []string{"jobs", "skills", "claude-md"} {
 		if seen[banned] {

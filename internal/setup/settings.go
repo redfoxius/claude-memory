@@ -619,10 +619,28 @@ func SettingsBackupPath(target string, c Clock) string {
 	return target + SettingsBackupSuffix + c.Now().UTC().Format("20060102T150405Z")
 }
 
+// BackupFileMode is the mode of every backup install makes: owner-only, so a
+// backup never exposes more than the original did.
+const BackupFileMode fs.FileMode = 0o600
+
+// UniqueBackupPath returns base, or base with a ".1", ".2", ... suffix when
+// that name exists, so a backup never overwrites an earlier one (two writes
+// in one second share a timestamp). The FS port has no exclusive create, so
+// the name is checked with Lstat; install holds the process lock meanwhile.
+func UniqueBackupPath(fsys ReadFS, base string) string {
+	p := base
+	for i := 1; ; i++ {
+		if _, err := fsys.Lstat(p); errors.Is(err, fs.ErrNotExist) {
+			return p
+		}
+		p = fmt.Sprintf("%s.%d", base, i)
+	}
+}
+
 // WriteSettingsFile saves out over f (AC-39): it re-reads the file and
 // aborts with ErrSettingsChanged if its hash changed since f was read,
-// copies the original to a timestamped backup with the same mode (one
-// backup per write; rotation is deferred, spec §12.1), re-checks the hash
+// copies the original to a timestamped backup at mode 0600, never over an
+// existing backup (one backup per write; rotation is deferred, spec §12.1), re-checks the hash
 // once more right before the write, and writes atomically keeping the mode
 // (0644 for a new file, its directory created 0700). It returns the backup
 // path ("" when the file did not exist). Callers write only when
@@ -635,8 +653,8 @@ func WriteSettingsFile(fsys FS, clk Clock, f *SettingsFile, out []byte) (string,
 	backup := ""
 	if f.Exists {
 		mode = f.Mode
-		backup = SettingsBackupPath(f.Target, clk)
-		if err := fsys.WriteFileAtomic(backup, f.Content, mode); err != nil {
+		backup = UniqueBackupPath(fsys, SettingsBackupPath(f.Target, clk))
+		if err := fsys.WriteFileAtomic(backup, f.Content, BackupFileMode); err != nil {
 			return "", fmt.Errorf("backup %s: %w", backup, err)
 		}
 		if err := recheckSettings(fsys, f); err != nil {

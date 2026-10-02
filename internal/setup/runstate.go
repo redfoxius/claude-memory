@@ -256,7 +256,11 @@ type Plan struct {
 	// Token is opaque, step-private data carried from Plan to Apply: the
 	// hooks.settings step puts the sha256 of the settings file it planned
 	// against here, so Apply can abort when the file changed while the user
-	// was confirming (AC-39).
+	// was confirming (AC-39); hooks.scripts does the same per script. The
+	// engine keeps the Token of the plan the user confirmed when it re-plans
+	// a step after a prerequisite was applied (Rule B). Limit: a step planned
+	// only after its prerequisite (afterDep) has no confirmed plan, so its
+	// Token covers just the span from that re-plan to Apply.
 	Token string
 }
 

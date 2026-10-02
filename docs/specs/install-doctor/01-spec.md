@@ -2,7 +2,7 @@
 
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-01-install-doctor
-- Status: v0.6 (one AC-62 wording change, §0.6; otherwise v0.5). Slice 1 is implemented and merged, with the review 04
+- Status: v0.7 (small WI-S2-9/10 review changes, §0.7; v0.6 one AC-62 wording change, §0.6; otherwise v0.5). Slice 1 is implemented and merged, with the review 04
   fixes in. Slice 2 is re-planned after the slice-2 plan review
   (`05-slice-2-plan-review.md`, v0.3 edits in §0.3) and its iteration-2
   and iteration-3 re-reviews (`06-slice-2-plan-rereview.md`, v0.4 edits
@@ -121,6 +121,17 @@ Small and reversible: restore the old AC-62 sentence to undo it.
 | AC / § | Change | Finding |
 |---|---|---|
 | AC-62 | The restart line is printed only when the run applied a change, and reads "restart Claude Code sessions to load the changes". | 14b review #2 |
+
+### 0.7 Changes in v0.7 (WI-S2-9/10 review, 2026-10-02)
+
+Small and reversible: restore the old wording of each AC to undo it.
+
+| AC / § | Change | Finding |
+|---|---|---|
+| AC-7 | `hooks.settings` requires `hooks.scripts` as well as `migrate`, so no entry points at a script that was not installed. | 2b-1 conformance F1 |
+| AC-39 | The settings backup is mode 0600 (was: the original's mode) and never overwrites an existing backup (a `.N` suffix is added when the name exists). | 2b-1 security A8 |
+| AC-40 | An entry with our command and args but extra `env` is `modified` (kept unless the overwrite is confirmed), not `outdated`; replacing it drops that env, and the plan names the keys. | 2b-1 conformance F4 |
+| AC-51 | Already-correct artifacts that are `ok` but not in the manifest are recorded on the first run (adoption), without any write to the artifact. | 2b-1 conformance F2 |
 
 ## 1. Overview & Problem
 
@@ -482,8 +493,9 @@ internal/namespace  (Parse reused; + Marshal, Config.Add exported, pure) [S2]
   `database`): `platform`, `binary`, `prereqs`,
   `topology`, `envfile`, `database`, `migrate`, `ollama`, `namespaces`,
   `hooks.scripts`, `hooks.settings`, `mcp`, `skills`, `claude-md`, `jobs`,
-  `doctor`. `hooks.settings` requires `migrate`, so a failed migration
-  never leaves a wired hook against an empty schema. Verify: a failing
+  `doctor`. `hooks.settings` requires `migrate` and `hooks.scripts`, so a failed
+  migration never leaves a wired hook against an empty schema (v0.7: and no
+  entry points at a missing script). Verify: a failing
   `database` blocks `migrate` and `hooks.settings`, and leaves `skills`
   unaffected.
 - AC-8 [S2] (Unwanted): IF a step's Apply fails, THEN the engine shall
@@ -949,7 +961,7 @@ Both are acceptable for a single-user tool.
   unchanged.
 - AC-39 [S2] (Ubiquitous): Before any write to `settings.json`, the step
   shall copy the original to `settings.json.bak.claude-memory.<UTC
-  yyyymmddThhmmssZ>` with the same mode (one backup per write; pruning old
+  yyyymmddThhmmssZ>` at mode 0600, never over an existing backup (v0.7; one backup per write; pruning old
   backups is deferred, §12.1). Right before the rename it shall re-read
   the file and abort if its hash changed since Detect, in case Claude Code
   wrote it meanwhile. A half-applied `settings.json` cannot exist (single
@@ -962,7 +974,8 @@ Both are acceptable for a single-user tool.
   read-only, strict JSON, tolerant of a missing file or key: top-level
   `mcpServers["claude-memory"]` with `command == <installed bin>` and
   `args == ["serve"]` → `ok`; present with another `command` or `args` →
-  `outdated`; missing → `absent`. A `claude-memory` entry under
+  `outdated`; the right command and args with extra `env` → `modified`
+  (v0.7: kept unless the overwrite is confirmed); missing → `absent`. A `claude-memory` entry under
   `projects.<path>.mcpServers` (local scope, which overrides user scope in
   that project) is reported as `warn` by doctor. **`claude mcp get` and
   `claude mcp list` are never executed** (they spawn the server). The

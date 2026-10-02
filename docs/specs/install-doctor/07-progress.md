@@ -12,9 +12,13 @@ First run was FAIL `pg.connect` (server `home-server` offline over Tailscale); n
 
 
 ## Slice 2 status (branch `feature/install-s2a-install-cmd`)
-PR 2a is done on `feature/install-s2a-install-cmd`: WI-S2-8 (namespaces), WI-S2-14a (install command, dry-run) and WI-S2-14b (final doctor, exit-code rule, cross-cutting tests), each with its review fixes. Earlier: WI-S2-0..7 with the Opus reviews. Next: PR 2b (hooks, MCP, skills, CLAUDE.md, jobs, doctor deltas, uninstall, e2e, docs).
+PR 2a is done on `feature/install-s2a-install-cmd`: WI-S2-8 (namespaces), WI-S2-14a (install command, dry-run) and WI-S2-14b (final doctor, exit-code rule, cross-cutting tests), each with its review fixes. Earlier: WI-S2-0..7 with the Opus reviews. PR 2b part 1 is done on `feature/install-s2b-claude-steps`: WI-S2-9 (`hooks.scripts`, `hooks.settings`) and WI-S2-10 (`mcp`, `claudeCLI` adapter), with the Opus security and conformance review fixes (token kept across a Rule-B re-plan, per-script change check, adoption of ok-but-unrecorded artifacts through the new optional `Adopter` step method, 0600 unique backups, env-only MCP difference is `modified`, `hooks.settings` also requires `hooks.scripts`; spec v0.7 §0.7). Next in PR 2b: skills, CLAUDE.md, jobs, doctor deltas, uninstall, e2e, docs.
 
 ## Open follow-ups
+- Uninstall (WI-S2-15) must handle an owned `hooks/claude-memory` dir that is not in the manifest: a failed `hooks.scripts` Apply (AC-8: nothing recorded) can leave the directory created but unrecorded. Treat an empty, unrecorded dir under `<ClaudeDir>/hooks/claude-memory` as removable, or record it before the first write.
+- `Adopter` is generic: skills, claude-md and jobs (WI-S2-11..13) should implement it, returning only artifacts that are `ok` now, never a directory the step did not create.
+- `Plan.Token` of a step planned only after its prerequisite (`afterDep`) covers just the span from that re-plan to Apply; no confirmed plan exists for it.
+- MCP `outdated` (other command/args) still drops any user env on replace; the plan names the env keys. `modified` (env only) needs the overwrite Confirm.
 - Engine prompt for a `modified` unparseable `namespaces.yaml` says "a backup is kept", which is misleading; it needs an engine flag per artifact.
 - `LinePrompter` has no ctx: `Select`/`Text` wait for Enter after the first Ctrl-C.
 - `--claude-md`, `--no-jobs`, `--pr-repos` exit 2 in 2a; 2b must undo that (`deferredInstallFlags`).

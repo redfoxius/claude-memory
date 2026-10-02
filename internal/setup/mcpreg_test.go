@@ -27,7 +27,7 @@ func TestReadMCPRegistration(t *testing.T) {
 		{fixture: "no-type-no-env", state: StateOK, present: true},
 		{fixture: "other-command", state: StateOutdated, present: true, detailHas: "command /Users/owner/go/bin/claude-memory"},
 		{fixture: "other-args", state: StateOutdated, present: true, detailHas: `args ["serve" "--verbose"]`},
-		{fixture: "env-set", state: StateOutdated, present: true, detailHas: "env sets MEMORY_PG_DSN", detailHasnt: "S3ntinel"},
+		{fixture: "env-set", state: StateModified, present: true, detailHas: "env sets MEMORY_PG_DSN", detailHasnt: "S3ntinel"},
 		{fixture: "local-shadow", state: StateOK, present: true, shadows: []string{"/Users/owner/acme"}},
 		{fixture: "unparseable", state: StateAbsent, parseErr: true, detailHas: "unreadable"},
 		{fixture: "mcpservers-not-object", state: StateAbsent, parseErr: true},

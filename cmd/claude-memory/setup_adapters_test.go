@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"claude-memory/internal/setup"
 )
@@ -292,5 +293,19 @@ func TestClaudeCLIAdapter(t *testing.T) {
 	}
 	if err := ro.MCPRemove(ctx, "x"); !errors.Is(err, setup.ErrReadOnly) {
 		t.Errorf("read-only MCPRemove = %v", err)
+	}
+}
+
+// A7: CLI output in an error has no control characters and is cut on a rune
+// boundary.
+func TestCleanCLIText(t *testing.T) {
+	t.Parallel()
+	got := cleanCLIText("\x1b[31mred\x1b[0m\nline2\r\n")
+	if strings.ContainsAny(got, "\x1b\n\r") || !strings.Contains(got, "red") || !strings.Contains(got, "line2") {
+		t.Errorf("not cleaned: %q", got)
+	}
+	long := cleanCLIText(strings.Repeat("é", 500))
+	if !utf8.ValidString(long) || !strings.HasSuffix(long, "...") || len(long) > maxClaudeErr+3 {
+		t.Errorf("bad cut: valid=%v len=%d", utf8.ValidString(long), len(long))
 	}
 }

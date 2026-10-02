@@ -88,7 +88,7 @@ func (d *doctor) checkMCP(context.Context) (Status, string, string) {
 	switch st {
 	case StateAbsent:
 		return StatusFail, detail, addCmd
-	case StateOutdated:
+	case StateOutdated, StateModified:
 		status = StatusWarn
 		warns = append(warns, detail)
 		remedy = "claude mcp remove --scope user " + MCPServerName + " && " + addCmd

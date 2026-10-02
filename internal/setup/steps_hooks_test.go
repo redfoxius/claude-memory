@@ -328,7 +328,9 @@ func (h *hk) fixture(name, suffix string) []byte {
 	if b == nil {
 		return nil
 	}
-	return bytes.ReplaceAll(b, []byte(testScriptsDir), []byte(h.p.HookScriptsDir()))
+	b = bytes.ReplaceAll(b, []byte(testScriptsDir), []byte(h.p.HookScriptsDir()))
+	esc := func(s string) []byte { return []byte(strings.ReplaceAll(s, "/", `\/`)) } // JSON-escaped slashes
+	return bytes.ReplaceAll(b, esc(testScriptsDir), esc(h.p.HookScriptsDir()))
 }
 
 // The step reproduces the library goldens (same inputs, same results) and a
@@ -338,24 +340,32 @@ func TestHooksSettingsGoldens(t *testing.T) {
 		name      string
 		fixture   string // "" = no settings.json
 		golden    string
-		overwrite bool // the user confirmed overwriting modified entries
+		recorded  string // "", "desired" or "old": entries the manifest recorded
+		overwrite bool   // the user confirmed overwriting modified entries
 		wantWrite bool
 		after     State // aggregate state after the run
 	}{
-		{"absent file", "", "missing", false, true, StateOK},
-		{"empty object", "empty-object", "empty-object", false, true, StateOK},
-		{"no hooks key", "no-hooks-key", "no-hooks-key", false, true, StateOK},
-		{"other events", "other-events", "other-events", false, true, StateOK},
-		{"other hooks on the same event", "other-hooks-same-event", "other-hooks-same-event", false, true, StateOK},
-		{"identical", "ours-identical", "ours-identical", false, false, StateOK},
-		{"legacy $HOME kept", "ours-legacy-home", "ours-legacy-home", false, false, StateModified},
-		{"legacy $HOME overwritten", "ours-legacy-home", "ours-legacy-home-overwrite", true, true, StateOK},
-		{"duplicates kept (AC-70 note only)", "ours-duplicated", "ours-duplicated", false, false, StateModified},
-		{"duplicates collapsed", "ours-duplicated", "ours-duplicated-overwrite", true, true, StateOK},
-		{"crlf", "crlf", "crlf", false, true, StateOK},
-		{"tab indented", "tab-indented", "tab-indented", false, true, StateOK},
-		{"four spaces", "four-space", "four-space", false, true, StateOK},
-		{"no trailing newline", "no-trailing-newline", "no-trailing-newline", false, true, StateOK},
+		{"absent file", "", "missing", "", false, true, StateOK},
+		{"empty object", "empty-object", "empty-object", "", false, true, StateOK},
+		{"no hooks key", "no-hooks-key", "no-hooks-key", "", false, true, StateOK},
+		{"other events", "other-events", "other-events", "", false, true, StateOK},
+		{"other hooks on the same event", "other-hooks-same-event", "other-hooks-same-event", "", false, true, StateOK},
+		{"identical", "ours-identical", "ours-identical", "", false, false, StateOK},
+		{"legacy $HOME kept", "ours-legacy-home", "ours-legacy-home", "", false, false, StateModified},
+		{"legacy $HOME overwritten", "ours-legacy-home", "ours-legacy-home-overwrite", "", true, true, StateOK},
+		{"duplicates kept (AC-70 note only)", "ours-duplicated", "ours-duplicated", "", false, false, StateModified},
+		{"duplicates collapsed", "ours-duplicated", "ours-duplicated-overwrite", "", true, true, StateOK},
+		{"crlf", "crlf", "crlf", "", false, true, StateOK},
+		{"tab indented", "tab-indented", "tab-indented", "", false, true, StateOK},
+		{"four spaces", "four-space", "four-space", "", false, true, StateOK},
+		{"no trailing newline", "no-trailing-newline", "no-trailing-newline", "", false, true, StateOK},
+		{"user-raised timeout kept", "ours-user-timeout", "ours-user-timeout", "desired", false, false, StateModified},
+		{"user-raised timeout overwritten", "ours-user-timeout", "ours-user-timeout-overwrite", "desired", true, true, StateOK},
+		{"recorded outdated under a matcher", "ours-under-matcher", "ours-under-matcher", "old", false, true, StateOK},
+		{"unknown top-level keys order", "unknown-top-level-keys-order", "unknown-top-level-keys-order", "", false, true, StateOK},
+		{"unicode escapes unchanged", "unicode-escapes-unchanged-noop", "unicode-escapes-unchanged-noop", "", false, false, StateOK},
+		{"unicode escapes merged", "unicode-escapes-merge", "unicode-escapes-merge", "", false, true, StateOK},
+		{"big number unchanged", "big-number-unchanged", "big-number-unchanged", "", false, true, StateOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -369,7 +379,18 @@ func TestHooksSettingsGoldens(t *testing.T) {
 			}
 			step := HooksSettingsStep{Version: "v1.0.0"}
 			n := len(h.fs.Writes())
-			r := h.run(step, h.state(nil), choose)
+			var prior *Manifest
+			if tc.recorded != "" {
+				dir := h.p.HookScriptsDir()
+				if tc.recorded == "old" {
+					dir = "/opt/old/hooks/claude-memory"
+				}
+				prior = &Manifest{}
+				for _, e := range DesiredHooks(dir) {
+					prior.Upsert(Artifact{Step: "hooks.settings", Kind: KindSettingsHook, Path: h.p.SettingsJSON(), Identity: e.Event, Entry: e.Canonical()})
+				}
+			}
+			r := h.run(step, h.state(prior), choose)
 			if r.err != nil {
 				t.Fatal(r.err)
 			}
@@ -389,7 +410,13 @@ func TestHooksSettingsGoldens(t *testing.T) {
 
 			// Second run: nothing to apply, nothing written, same state.
 			n = len(h.fs.Writes())
-			r2 := h.run(step, h.state(manifestOf(r.res)), nil)
+			if prior == nil {
+				prior = &Manifest{}
+			}
+			for _, a := range r.res.Artifacts {
+				prior.Upsert(a)
+			}
+			r2 := h.run(step, h.state(prior), nil)
 			if r2.err != nil || r2.det.State != tc.after || r2.ran {
 				t.Errorf("second run: det %s ran %v err %v, want %s and no apply", r2.det.State, r2.ran, r2.err, tc.after)
 			}
@@ -631,11 +658,10 @@ func TestHooksSettingsDuplicateNotes(t *testing.T) {
 	}
 }
 
-// Requires migrate (AC-7), and an in-Home read of a read-only world works with
-// the dry-run FS: Detect/Plan never need a write method.
-func TestHooksSettingsRequiresMigrate(t *testing.T) {
+// Requires migrate and hooks.scripts (AC-7, v0.7).
+func TestHooksSettingsRequires(t *testing.T) {
 	t.Parallel()
-	if got := (HooksSettingsStep{}).Requires(); len(got) != 1 || got[0] != MigrateStepID {
+	if got := (HooksSettingsStep{}).Requires(); len(got) != 2 || got[0] != MigrateStepID || got[1] != HooksScriptsStepID {
 		t.Errorf("Requires = %v", got)
 	}
 }

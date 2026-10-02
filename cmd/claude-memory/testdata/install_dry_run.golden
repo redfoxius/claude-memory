@@ -73,6 +73,62 @@ Hook scripts
   write   $HOME/.claude/hooks/claude-memory — create directory (mode 0755)
   write   $HOME/.claude/hooks/claude-memory/user-prompt-submit.sh — create (mode 0755)
   write   $HOME/.claude/hooks/claude-memory/session-end.sh — create (mode 0755)
+  diff $HOME/.claude/hooks/claude-memory/user-prompt-submit.sh
+    --- /dev/null
+    +++ $HOME/.claude/hooks/claude-memory/user-prompt-submit.sh
+    @@ -0,0 +1,26 @@
+    +#!/usr/bin/env bash
+    +# Claude Code UserPromptSubmit hook wrapper.
+    +#
+    +# Claude Code invokes this script with the hook's JSON on stdin and reads
+    +# structured output from stdout. This wrapper is a thin pass-through to
+    +# `claude-memory hook`, which performs the actual search/threshold logic
+    +# (internal/memory + internal/ollama + internal/postgres, in-process).
+    +#
+    +# AC-31: a missing binary, a down Ollama, or an unreachable Postgres must
+    +# never fail or delay prompt submission — always exit 0, with no stderr
+    +# noise Claude Code would otherwise surface to the user.
+    +set -u
+    +
+    +CLAUDE_MEMORY_BIN="${CLAUDE_MEMORY_BIN:-$HOME/.local/bin/claude-memory}"
+    +
+    +if [ ! -x "$CLAUDE_MEMORY_BIN" ]; then
+    +  # Not installed yet (or PATH misconfigured): nothing to inject.
+    +  exit 0
+    +fi
+    +
+    +# `claude-memory hook` itself enforces MEMORY_HOOK_TIMEOUT (default 800ms)
+    +# internally and exits 0 silently on any error (AC-31); no need to
+    +# duplicate that timeout here.
+    +"$CLAUDE_MEMORY_BIN" hook
+    +
+    +exit 0
+  diff $HOME/.claude/hooks/claude-memory/session-end.sh
+    --- /dev/null
+    +++ $HOME/.claude/hooks/claude-memory/session-end.sh
+    @@ -0,0 +1,22 @@
+    +#!/usr/bin/env bash
+    +# Claude Code SessionEnd hook wrapper.
+    +#
+    +# Claude Code invokes this script with the hook's JSON (including
+    +# transcript_path) on stdin. This wrapper is a thin pass-through to
+    +# `claude-memory extract`, which itself launches a fully detached
+    +# background re-exec of itself (`extract --run <transcript_path>`) and
+    +# returns immediately without waiting for extraction to finish (AC-21).
+    +#
+    +# This script must return immediately: it must never block session-end,
+    +# and it must never fail it (no non-zero exit, no surfaced error).
+    +set -u
+    +
+    +CLAUDE_MEMORY_BIN="${CLAUDE_MEMORY_BIN:-$HOME/.local/bin/claude-memory}"
+    +
+    +if [ ! -x "$CLAUDE_MEMORY_BIN" ]; then
+    +  exit 0
+    +fi
+    +
+    +"$CLAUDE_MEMORY_BIN" extract
+    +
+    +exit 0
 
 Hook entries in settings.json
   write   $HOME/.claude/settings.json — add the UserPromptSubmit entry

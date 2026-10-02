@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 
@@ -364,6 +366,27 @@ var _ setup.ClaudeCLI = claudeCLI{}
 // maxClaudeErr bounds the stderr quoted in an error.
 const maxClaudeErr = 400
 
+// cleanCLIText makes CLI output safe to print in an error: control characters
+// (terminal escapes, newlines) become spaces, and the text is cut to
+// maxClaudeErr bytes on a rune boundary.
+func cleanCLIText(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == utf8.RuneError {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > maxClaudeErr {
+		cut := maxClaudeErr
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "..."
+	}
+	return s
+}
+
 func (c claudeCLI) run(ctx context.Context, args ...string) error {
 	argv := append([]string{"claude", "mcp"}, args...)
 	res, err := c.runner.Run(ctx, setup.Cmd{Argv: argv, Mutating: true})
@@ -371,12 +394,9 @@ func (c claudeCLI) run(ctx context.Context, args ...string) error {
 		return err
 	}
 	if res.ExitCode != 0 {
-		msg := strings.TrimSpace(string(res.Stderr))
+		msg := cleanCLIText(string(res.Stderr))
 		if msg == "" {
-			msg = strings.TrimSpace(string(res.Stdout))
-		}
-		if len(msg) > maxClaudeErr {
-			msg = msg[:maxClaudeErr] + "..."
+			msg = cleanCLIText(string(res.Stdout))
 		}
 		return fmt.Errorf("exit %d: %s", res.ExitCode, msg)
 	}

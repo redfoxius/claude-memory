@@ -161,7 +161,6 @@ func TestYesKeepsModifiedHookScript(t *testing.T) {
 func TestMCPOutdatedThroughEngine(t *testing.T) {
 	r := newFullRig(t)
 	r.mustConverge()
-	r.claude.path = r.p.ClaudeJSON
 	if err := os.WriteFile(r.p.ClaudeJSON, []byte(`{"mcpServers":{"claude-memory":{"type":"stdio","command":"/old/claude-memory","args":["serve"],"env":{}}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -198,5 +197,136 @@ func TestMCPNoClaudeBlockedThroughEngine(t *testing.T) {
 	}
 	if len(r.claude.Calls()) != 0 {
 		t.Errorf("claude calls %v", r.claude.Calls())
+	}
+}
+
+// A1 (AC-39): on a fresh install migrate is applied in the same run, so the
+// engine re-plans hooks.settings (Rule B) after the user's confirmation. The
+// Token of the confirmed plan must survive that, or a settings.json written
+// meanwhile (Claude Code) would be merged over unseen.
+func TestHooksSettingsChangeAfterConfirmationAbortsAcrossRuleB(t *testing.T) {
+	r := newFullRig(t)
+	theirs := "{\"model\": \"opus\"}\n"
+	r.tamper = func() {
+		if err := os.MkdirAll(r.p.ClaudeDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(r.p.SettingsJSON(), []byte(theirs), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := r.run(r.inputs())
+	if o := outcomeOf(res, "migrate"); o != OutcomeApplied {
+		t.Fatalf("migrate: %q (Rule B needs it applied in this run)\n%s", o, r.out)
+	}
+	if o := outcomeOf(res, "hooks.settings"); o != OutcomeFailed || res.ExitCode != ExitFailed {
+		t.Fatalf("hooks.settings: %q, exit %d, want failed/1\n%s", o, res.ExitCode, r.out)
+	}
+	if !strings.Contains(r.out.String(), "changed during install, re-run") {
+		t.Errorf("no re-run message:\n%s", r.out)
+	}
+	if b, _ := os.ReadFile(r.p.SettingsJSON()); string(b) != theirs {
+		t.Errorf("the concurrent settings.json was overwritten:\n%s", b)
+	}
+}
+
+// AC-7: a failing database blocks migrate and hooks.settings; independent
+// steps (hooks.scripts) still run.
+func TestFailingDatabaseBlocksMigrateAndHookSettings(t *testing.T) {
+	r := newFullRig(t)
+	r.db.armed.Store(true)
+	res := r.run(r.inputs())
+	for _, id := range []string{"migrate", "hooks.settings"} {
+		if o := outcomeOf(res, id); o != OutcomeBlocked && o != OutcomeFailed {
+			t.Errorf("%s: %q, want blocked or failed\n%s", id, o, r.out)
+		}
+	}
+	if o := outcomeOf(res, "hooks.settings"); o != OutcomeBlocked {
+		t.Errorf("hooks.settings: %q, want blocked", o)
+	}
+	if _, err := os.Stat(r.p.SettingsJSON()); err == nil {
+		t.Error("settings.json was written")
+	}
+	if o := outcomeOf(res, "hooks.scripts"); o != OutcomeApplied {
+		t.Errorf("hooks.scripts: %q, want applied (independent)", o)
+	}
+	if res.ExitCode != ExitFailed {
+		t.Errorf("exit %d, want 1", res.ExitCode)
+	}
+}
+
+// F2 / AC-51 / AC-50: a converged install whose manifest is gone (a hand
+// install) is adopted on the first run: the hook scripts, entries and MCP
+// registration are recorded, nothing of them is rewritten and `claude` is not
+// called; the run after that writes nothing and leaves the manifest alone.
+func TestAdoptHandInstalledArtifacts(t *testing.T) {
+	r := newFullRig(t)
+	r.mustConverge()
+	if err := os.Remove(r.p.Manifest()); err != nil {
+		t.Fatal(err)
+	}
+	claudeCalls := len(r.claude.Calls())
+	mark := len(r.fs.Writes())
+	if res := r.run(r.inputs()); res.ExitCode != ExitOK {
+		t.Fatalf("adopting run: exit %d\n%s", res.ExitCode, r.out)
+	}
+	for _, w := range r.fs.Writes()[mark:] {
+		if strings.Contains(w, "/.claude/") || strings.Contains(w, ".claude.json") {
+			t.Errorf("an ok Claude artifact was rewritten: %s", w)
+		}
+	}
+	if len(r.claude.Calls()) != claudeCalls {
+		t.Errorf("claude called: %v", r.claude.Calls()[claudeCalls:])
+	}
+	man, err := LoadManifest(r.fs, r.p)
+	if err != nil || !man.Present() {
+		t.Fatalf("manifest: %v", err)
+	}
+	m := man.Manifest
+	for _, name := range []string{"user-prompt-submit.sh", "session-end.sh"} {
+		if _, ok := m.Lookup(KindFile, filepath.Join(r.p.HookScriptsDir(), name), ""); !ok {
+			t.Errorf("script %s not adopted", name)
+		}
+	}
+	if rec := m.RecordedHooks(r.p.SettingsJSON()); len(rec) != 2 {
+		t.Errorf("settings entries not adopted: %v", rec)
+	}
+	if a, ok := m.Lookup(KindMCP, r.p.ClaudeJSON, MCPServerName); !ok || a.Entry != r.p.InstalledBinary()+" serve" {
+		t.Errorf("mcp not adopted: %+v", a)
+	}
+	if _, ok := m.Lookup(KindDir, r.p.HookScriptsDir(), ""); ok {
+		t.Error("an adopted install must not claim the directory")
+	}
+
+	// AC-50 after adoption.
+	before, _ := os.ReadFile(r.p.Manifest())
+	writes := r.nonLockWrites()
+	if res := r.run(r.inputs()); res.ExitCode != ExitOK {
+		t.Fatalf("re-run: exit %d", res.ExitCode)
+	}
+	if n := r.nonLockWrites() - writes; n != 0 {
+		t.Errorf("re-run after adoption wrote %d times: %v", n, r.fs.Writes()[writes:])
+	}
+	if after, _ := os.ReadFile(r.p.Manifest()); string(after) != string(before) {
+		t.Error("manifest changed on the re-run after adoption")
+	}
+}
+
+// Adoption writes nothing on --dry-run.
+func TestAdoptNotOnDryRun(t *testing.T) {
+	r := newFullRig(t)
+	r.mustConverge()
+	if err := os.Remove(r.p.Manifest()); err != nil {
+		t.Fatal(err)
+	}
+	writes := r.nonLockWrites()
+	if res := r.run(r.inputs(func(in *Inputs) { in.DryRun = true })); res.ExitCode != ExitOK {
+		t.Fatalf("exit %d", res.ExitCode)
+	}
+	if r.nonLockWrites() != writes {
+		t.Errorf("dry-run wrote: %v", r.fs.Writes()[writes:])
+	}
+	if _, err := os.Stat(r.p.Manifest()); err == nil {
+		t.Error("dry-run recreated the manifest")
 	}
 }

@@ -89,7 +89,7 @@ func TestMCPOutdatedRemovesThenAdds(t *testing.T) {
 	cases := []struct{ name, command, args, env string }{
 		{"other command", "/old/claude-memory", `["serve"]`, `{}`},
 		{"other args", "BIN", `["serve","--x"]`, `{}`},
-		{"env set", "BIN", `["serve"]`, `{"MEMORY_PG_DSN":"x"}`},
+		{"env and command", "/old/claude-memory", `["serve"]`, `{"MEMORY_PG_DSN":"x"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,7 +104,7 @@ func TestMCPOutdatedRemovesThenAdds(t *testing.T) {
 			if got := r.claude.Calls(); strings.Join(got, "|") != strings.Join(want, "|") {
 				t.Errorf("calls %v, want %v", got, want)
 			}
-			if len(out.plan.Actions) != 2 || out.plan.Actions[0].Desc != "claude mcp remove --scope user claude-memory" {
+			if len(out.plan.Actions) != 2 || !strings.HasPrefix(out.plan.Actions[0].Desc, "claude mcp remove --scope user claude-memory") {
 				t.Errorf("plan %+v", out.plan.Actions)
 			}
 			if det := (MCPStep{}).Detect(context.Background(), r.rp(), r.state(nil)); det.State != StateOK {
@@ -116,6 +116,64 @@ func TestMCPOutdatedRemovesThenAdds(t *testing.T) {
 
 // AC-67 (Detect half): even when the registered command is a sentinel, Detect
 // and Plan run nothing; an ok registration needs no claude call.
+// F4: our command and args with an added env is a user customization:
+// modified, kept by default, replaced (env dropped, named in the plan) only
+// when the overwrite is confirmed.
+func TestMCPEnvOnlyDifferenceIsModified(t *testing.T) {
+	r := newMCPRig(t)
+	bin := r.p.InstalledBinary()
+	r.register(bin, `["serve"]`, `{"MEMORY_PG_DSN":"x","B_KEY":"y"}`)
+	out := r.runMCP(r.state(nil), "")
+	if out.err != nil || out.det.State != StateModified || out.ran || len(r.claude.Calls()) != 0 {
+		t.Fatalf("default: state %s ran %v calls %v err %v", out.det.State, out.ran, r.claude.Calls(), out.err)
+	}
+	out = r.runMCP(r.state(nil), ChoiceApply)
+	if out.err != nil {
+		t.Fatal(out.err)
+	}
+	if want := "claude mcp remove --scope user claude-memory (drops its env: B_KEY, MEMORY_PG_DSN)"; out.plan.Actions[0].Desc != want {
+		t.Errorf("plan desc %q, want %q", out.plan.Actions[0].Desc, want)
+	}
+	if got := r.claude.Calls(); len(got) != 2 || got[0] != "remove claude-memory" {
+		t.Errorf("calls %v", got)
+	}
+	if strings.Contains(out.plan.Actions[0].Desc, `"x"`) {
+		t.Error("env values must never be shown")
+	}
+	if a := out.res.Artifacts[0]; a.Entry != bin+" serve" {
+		t.Errorf("recorded entry %q (F6)", a.Entry)
+	}
+}
+
+// A5: Apply refuses to register over an unreadable .claude.json.
+func TestMCPApplyRefusesUnparseable(t *testing.T) {
+	r := newMCPRig(t)
+	st, ctx := r.state(nil), context.Background()
+	plan, _ := MCPStep{}.Plan(ctx, r.rp(), st, Choices{MCPStepID: ChoiceApply})
+	r.write(r.p.ClaudeJSON, "{ half", 0o600) // Claude Code is mid-write
+	if _, err := (MCPStep{}).Apply(ctx, r.wp(), st, plan); err == nil || len(r.claude.Calls()) != 0 {
+		t.Errorf("err %v calls %v", err, r.claude.Calls())
+	}
+}
+
+// F2: an ok hand-installed registration is adopted.
+func TestMCPAdopt(t *testing.T) {
+	r := newMCPRig(t)
+	st, ctx := r.state(nil), context.Background()
+	if got := (MCPStep{Version: "v1"}).Adopt(ctx, r.rp(), st); len(got) != 0 {
+		t.Errorf("absent registration adopted: %+v", got)
+	}
+	r.register("/old/claude-memory", `["serve"]`, `{}`)
+	if got := (MCPStep{Version: "v1"}).Adopt(ctx, r.rp(), st); len(got) != 0 {
+		t.Errorf("outdated registration adopted: %+v", got)
+	}
+	r.register(r.p.InstalledBinary(), `["serve"]`, `{}`)
+	got := (MCPStep{Version: "v1"}).Adopt(ctx, r.rp(), st)
+	if len(got) != 1 || got[0].Kind != KindMCP || got[0].Entry != r.p.InstalledBinary()+" serve" {
+		t.Errorf("adopt = %+v", got)
+	}
+}
+
 func TestMCPDetectNeverRunsAnything(t *testing.T) {
 	r := newMCPRig(t)
 	sentinelCmd := r.root + "/sentinel-server"

@@ -72,6 +72,23 @@ func (a armStep) Apply(context.Context, WritePorts, *RunState, Plan) (StepResult
 	return StepResult{}, nil
 }
 
+// tamperStep is a test-only step whose Apply runs fn once.
+type tamperStep struct{ fn func() }
+
+func (tamperStep) ID() string         { return "tamper" }
+func (tamperStep) Title() string      { return "Tamper" }
+func (tamperStep) Requires() []string { return nil }
+func (tamperStep) Plan(context.Context, ReadPorts, *RunState, Choices) (Plan, error) {
+	return Plan{}, nil
+}
+func (tamperStep) Detect(context.Context, ReadPorts, *RunState) Detection {
+	return Detection{State: StateAbsent}
+}
+func (t tamperStep) Apply(context.Context, WritePorts, *RunState, Plan) (StepResult, error) {
+	t.fn()
+	return StepResult{}, nil
+}
+
 type fullRig struct {
 	t      *testing.T
 	p      Paths
@@ -84,6 +101,9 @@ type fullRig struct {
 	red    *Redactor
 	out    *bytes.Buffer
 	arm    bool // insert armStep before the doctor
+	// tamper, when set, runs as a step placed right before hooks.settings
+	// (after migrate): a change made after the user confirmed the plan.
+	tamper func()
 }
 
 func newFullRig(t *testing.T) *fullRig {
@@ -134,6 +154,10 @@ func (r *fullRig) run(in Inputs) RunResult {
 	steps := InstallSteps("v1.2.0", r.red)
 	if r.arm {
 		steps = slices.Insert(steps, len(steps)-1, Step(armStep{r.db}))
+	}
+	if r.tamper != nil {
+		i := slices.IndexFunc(steps, func(s Step) bool { return s.ID() == "hooks.settings" })
+		steps = slices.Insert(steps, i, Step(tamperStep{r.tamper}))
 	}
 	wp := WritePorts{ReadPorts: rp, FS: r.fs, Runner: r.runner, DB: r.db, Ollama: r.oll, ClaudeCLI: r.claude, Progress: rend.Progress}
 	e := &Engine{Steps: steps, Read: rp, Write: wp, UI: NewFakePrompter(r.t, false), Reporter: rend,
@@ -274,7 +298,7 @@ func TestNoOpRerun(t *testing.T) {
 		t.Error("the doctor must run on a no-op re-run")
 	}
 	if !strings.Contains(r.out.String(), "Done: 13 unchanged\n") {
-		t.Errorf("want the summary \"Done: 10 unchanged\" (nothing applied):\n%s", r.out)
+		t.Errorf("want the summary \"Done: 13 unchanged\" (nothing applied):\n%s", r.out)
 	}
 }
 

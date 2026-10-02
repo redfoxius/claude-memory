@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -77,15 +78,6 @@ type scriptsAnalysis struct {
 	dir        string
 	dirMissing bool
 	scripts    []hookScript
-}
-
-func (a scriptsAnalysis) find(id string) (hookScript, bool) {
-	for _, s := range a.scripts {
-		if hookScriptArtifact(s.name) == id {
-			return s, true
-		}
-	}
-	return hookScript{}, false
 }
 
 func recordedScriptHash(m *Manifest, path string) string {
@@ -174,6 +166,26 @@ func (HooksScriptsStep) Detect(_ context.Context, rc ReadPorts, st *RunState) De
 	return d
 }
 
+// ErrHookScriptChanged is returned by Apply when a script differs from what
+// Plan saw, e.g. the user edited it while the plan awaited confirmation: the
+// planned overwrite was confirmed for another content (AC-6), so it is not
+// done.
+var ErrHookScriptChanged = errors.New("hook script changed during install, re-run")
+
+// scriptToken is the hash of a script as Plan saw it ("absent" when missing).
+func scriptToken(s hookScript) string {
+	if !s.exists {
+		return s.name + "=absent"
+	}
+	return s.name + "=" + sha256Hex(s.content)
+}
+
+// modeOnly reports an outdated script whose content is already the rendered
+// one: only its mode is wrong.
+func (s hookScript) modeOnly() bool {
+	return s.exists && s.state == StateOutdated && bytes.Equal(s.content, s.rendered)
+}
+
 // Plan implements Step.
 func (HooksScriptsStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch Choices) (Plan, error) {
 	an, err := analyzeScripts(rc.FS, rc.Assets, rc.Paths, st, binTarget(rc, st))
@@ -181,6 +193,7 @@ func (HooksScriptsStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch C
 		return Plan{}, err
 	}
 	var p Plan
+	var tokens []string
 	for _, s := range an.scripts {
 		id := hookScriptArtifact(s.name)
 		if ch[id] != ChoiceApply || s.state == StateOK {
@@ -188,6 +201,11 @@ func (HooksScriptsStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch C
 		}
 		if an.dirMissing && len(p.Actions) == 0 {
 			p.Actions = append(p.Actions, Action{Artifact: HookScriptsDirArtifact, Verb: "write", Path: an.dir, Desc: "create directory (mode 0755)"})
+		}
+		tokens = append(tokens, scriptToken(s))
+		if s.modeOnly() {
+			p.Actions = append(p.Actions, Action{Artifact: id, Verb: "chmod", Path: s.path, Desc: "chmod 0755"})
+			continue
 		}
 		desc := "create (mode 0755)"
 		switch s.state {
@@ -197,16 +215,21 @@ func (HooksScriptsStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch C
 			desc = "replace your modified script (a timestamped backup is kept)"
 		}
 		p.Actions = append(p.Actions, Action{Artifact: id, Verb: "write", Path: s.path, Desc: desc})
-		if s.exists { // a new script is the embedded asset: no diff worth showing
-			p.Diffs = append(p.Diffs, Diff{Artifact: id, Path: s.path, Unified: UnifiedDiff(s.path, s.path, s.content, s.rendered)})
+		old := s.path
+		if !s.exists {
+			old = ""
 		}
+		p.Diffs = append(p.Diffs, Diff{Artifact: id, Path: s.path, Unified: UnifiedDiff(old, s.path, s.content, s.rendered)})
 	}
+	p.Token = strings.Join(tokens, ";")
 	return p, nil
 }
 
-// Apply implements Step: it re-reads every script, so a concurrent edit is
-// not overwritten unseen, writes each chosen one atomically at 0755 and
-// records the hash of every script that now equals the rendered one.
+// Apply implements Step: it re-reads every script and aborts when a chosen one
+// is not what Plan saw (Token), so an overwrite the user confirmed for one
+// content never hits another (AC-6). It writes each chosen script atomically
+// at 0755 and records the hash of every script that now equals the rendered
+// one.
 func (h HooksScriptsStep) Apply(_ context.Context, wc WritePorts, st *RunState, p Plan) (StepResult, error) {
 	var res StepResult
 	if len(p.Actions) == 0 {
@@ -219,6 +242,18 @@ func (h HooksScriptsStep) Apply(_ context.Context, wc WritePorts, st *RunState, 
 	an, err := analyzeScripts(wc.FS, wc.Assets, wc.Paths, st, binTarget(wc.ReadPorts, st))
 	if err != nil {
 		return res, err
+	}
+	planned := map[string]bool{}
+	for _, t := range strings.Split(p.Token, ";") {
+		if name, _, ok := strings.Cut(t, "="); ok {
+			planned[name] = true
+		}
+	}
+	tokens := strings.Split(p.Token, ";")
+	for _, s := range an.scripts {
+		if chosen[hookScriptArtifact(s.name)] && s.state != StateOK && planned[s.name] && !slices.Contains(tokens, scriptToken(s)) {
+			return res, fmt.Errorf("%s: %w", s.path, ErrHookScriptChanged)
+		}
 	}
 	if an.dirMissing {
 		if _, err := wc.FS.Stat(wc.Paths.ClaudeDir); errors.Is(err, fs.ErrNotExist) {
@@ -233,27 +268,56 @@ func (h HooksScriptsStep) Apply(_ context.Context, wc WritePorts, st *RunState, 
 	}
 	for _, s := range an.scripts {
 		if chosen[hookScriptArtifact(s.name)] && s.state != StateOK {
-			if s.state == StateModified && s.exists && s.content != nil {
-				bak := s.path + hookScriptBackupSuffix(wc.Clock.Now().UTC().Format("20060102T150405Z"))
-				if err := wc.FS.WriteFileAtomic(bak, s.content, s.mode); err != nil {
-					return res, fmt.Errorf("back up %s: %w", s.path, err)
+			switch {
+			case s.modeOnly():
+				if err := wc.FS.Chmod(s.path, 0o755); err != nil {
+					return res, fmt.Errorf("chmod %s: %w", s.path, err)
 				}
-				res.Notes = append(res.Notes, Note{NoteInfo, "backup of your modified " + s.name + ": " + bak})
-			}
-			if err := wc.FS.WriteFileAtomic(s.path, s.rendered, 0o755); err != nil {
-				return res, fmt.Errorf("write %s: %w", s.path, err)
-			}
-			if s.exists {
-				res.Diffs = append(res.Diffs, Diff{Artifact: hookScriptArtifact(s.name), Path: s.path, Unified: UnifiedDiff(s.path, s.path, s.content, s.rendered)})
+			default:
+				if s.state == StateModified && s.exists && s.content != nil {
+					bak := UniqueBackupPath(wc.FS, s.path+hookScriptBackupSuffix(wc.Clock.Now().UTC().Format("20060102T150405Z")))
+					if err := wc.FS.WriteFileAtomic(bak, s.content, BackupFileMode); err != nil {
+						return res, fmt.Errorf("back up %s: %w", s.path, err)
+					}
+					res.Notes = append(res.Notes, Note{NoteInfo, "backup of your modified " + s.name + ": " + bak})
+				}
+				if err := wc.FS.WriteFileAtomic(s.path, s.rendered, 0o755); err != nil {
+					return res, fmt.Errorf("write %s: %w", s.path, err)
+				}
+				if s.exists {
+					res.Diffs = append(res.Diffs, Diff{Artifact: hookScriptArtifact(s.name), Path: s.path, Unified: UnifiedDiff(s.path, s.path, s.content, s.rendered)})
+				}
 			}
 		} else if s.state != StateOK {
 			continue // kept (modified or not chosen): not ours to record
 		}
-		res.Artifacts = append(res.Artifacts, Artifact{Step: HooksScriptsStepID, Kind: KindFile, Path: s.path,
-			SHA256: sha256Hex(s.rendered), Version: h.Version})
+		res.Artifacts = append(res.Artifacts, h.fileArtifact(s))
 	}
 	return res, nil
 }
+
+func (h HooksScriptsStep) fileArtifact(s hookScript) Artifact {
+	return Artifact{Step: HooksScriptsStepID, Kind: KindFile, Path: s.path, SHA256: sha256Hex(s.rendered), Version: h.Version}
+}
+
+// Adopt implements Adopter: a script that already equals the rendered one with
+// an executable mode is recorded (AC-51). The directory is not: this step did
+// not create it.
+func (h HooksScriptsStep) Adopt(_ context.Context, rc ReadPorts, st *RunState) []Artifact {
+	an, err := analyzeScripts(rc.FS, rc.Assets, rc.Paths, st, binTarget(rc, st))
+	if err != nil {
+		return nil
+	}
+	var out []Artifact
+	for _, s := range an.scripts {
+		if s.state == StateOK {
+			out = append(out, h.fileArtifact(s))
+		}
+	}
+	return out
+}
+
+var _ Adopter = HooksScriptsStep{}
 
 // ---- hooks.settings ----------------------------------------------------------
 
@@ -262,7 +326,8 @@ func (h HooksScriptsStep) Apply(_ context.Context, wc WritePorts, st *RunState, 
 // (Design 18). The merge keeps every other byte of the file; a modified
 // entry (legacy $HOME form, user-raised timeout, duplicates) is kept unless
 // the user confirmed its overwrite. It requires migrate (AC-7), so a failed
-// migration never leaves a wired hook against an empty schema.
+// migration never leaves a wired hook against an empty schema, and
+// hooks.scripts, so no entry points at a script that was not installed.
 //
 // The canonical entry written per event is recorded, plus CreatedFile when
 // this run created settings.json and CreatedContainer when it created the
@@ -282,7 +347,9 @@ func (HooksSettingsStep) ID() string { return HooksSettingsStepID }
 func (HooksSettingsStep) Title() string { return "Hook entries in settings.json" }
 
 // Requires implements Step.
-func (HooksSettingsStep) Requires() []string { return []string{MigrateStepID} }
+func (HooksSettingsStep) Requires() []string {
+	return []string{MigrateStepID, HooksScriptsStepID}
+}
 
 type settingsView struct {
 	path     string
@@ -356,14 +423,24 @@ func (HooksSettingsStep) Detect(_ context.Context, rc ReadPorts, st *RunState) D
 
 // mergeFor merges the events chosen apply into the file; a modified event is
 // overwritten only because the choice says so (the engine asked the Confirm).
+// want returns the desired entry of an event.
+func (v settingsView) want(event string) HookEntry {
+	for _, d := range v.desired {
+		if d.Event == event {
+			return d
+		}
+	}
+	return HookEntry{Event: event}
+}
+
 func (v settingsView) mergeFor(ch map[string]bool) ([]byte, MergeSummary, bool, error) {
 	var want []HookEntry
 	overwrite := map[string]bool{}
-	for i, e := range v.analysis.Events {
+	for _, e := range v.analysis.Events {
 		if !ch[hookSettingsArtifact(e.Event)] || e.State == StateOK {
 			continue
 		}
-		want = append(want, v.desired[i])
+		want = append(want, v.want(e.Event))
 		if e.State == StateModified {
 			overwrite[e.Event] = true
 		}
@@ -400,6 +477,9 @@ func (HooksSettingsStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch 
 			desc = "replace the " + e.Event + " entry written by an earlier install"
 		case StateModified:
 			desc = "replace your modified " + e.Event + " entry"
+			if n := len(e.Ours) - 1; n > 0 {
+				desc += fmt.Sprintf(" and remove %d duplicate entries", n)
+			}
 		}
 		p.Actions = append(p.Actions, Action{Artifact: id, Verb: "write", Path: v.path, Desc: desc})
 	}
@@ -472,15 +552,43 @@ func (h HooksSettingsStep) Apply(_ context.Context, wc WritePorts, st *RunState,
 			createdFile = true
 		}
 	}
-	for i, e := range after.Events {
+	for _, e := range after.Events {
 		if e.State != StateOK {
 			continue
 		}
 		res.Artifacts = append(res.Artifacts, Artifact{
 			Step: HooksSettingsStepID, Kind: KindSettingsHook, Path: v.path, Identity: e.Event,
-			Entry: v.desired[i].Canonical(), Version: h.Version,
+			Entry: v.want(e.Event).Canonical(), Version: h.Version,
 			CreatedContainer: container, CreatedFile: createdFile,
 		})
 	}
 	return res, nil
 }
+
+// Adopt implements Adopter: an event whose single entry already equals the
+// desired one (a hand install in the absolute form) is recorded (AC-51). The
+// Created* flags of an earlier run are kept; an adopted entry creates nothing.
+func (h HooksSettingsStep) Adopt(_ context.Context, rc ReadPorts, st *RunState) []Artifact {
+	v, err := loadSettingsView(rc.FS, rc.Paths, st)
+	if err != nil {
+		return nil
+	}
+	m := st.Prior.Manifest
+	container := m.CreatedHooksKey(v.path)
+	createdFile := false
+	for _, a := range m.Find(KindSettingsHook) {
+		if a.Path == v.path && a.CreatedFile {
+			createdFile = true
+		}
+	}
+	var out []Artifact
+	for _, e := range v.analysis.Events {
+		if e.State == StateOK {
+			out = append(out, Artifact{Step: HooksSettingsStepID, Kind: KindSettingsHook, Path: v.path, Identity: e.Event,
+				Entry: v.want(e.Event).Canonical(), Version: h.Version, CreatedContainer: container, CreatedFile: createdFile})
+		}
+	}
+	return out
+}
+
+var _ Adopter = HooksSettingsStep{}
