@@ -271,7 +271,7 @@ func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
 
 // readOnlyPorts is what Detect, Seed, Configure, Plan and the final doctor
 // get (Design 20): the narrowed read interfaces over deps' read-only
-// adapters. Jobs is nil: no 2a step reads it.
+// adapters. Jobs is nil: no registered step reads it yet.
 func readOnlyPorts(d setupDeps) setup.ReadPorts {
 	return setup.ReadPorts{
 		FS:       d.FS, // setup.ReadFS view of the read-only adapter
@@ -290,8 +290,9 @@ func readOnlyPorts(d setupDeps) setup.ReadPorts {
 // Runner that allows mutating commands, and the full DB/Ollama probers. With
 // dryRun the FS and Runner are the read-only adapters and DB.Migrate and
 // Ollama.Pull are refused: a second layer beneath the engine never reaching
-// Apply (Design 20). ClaudeCLI, Jobs and
-// Progress are nil in 2a; the renderer sets Progress.
+// Apply (Design 20). ClaudeCLI runs over that same Runner, so under dryRun it
+// is read-only guarded (ErrReadOnly). Jobs is nil until WI-S2-13a; the
+// renderer sets Progress.
 func writablePorts(d setupDeps, dryRun bool) setup.WritePorts {
 	var fsys setup.FS = newWritableFS()
 	var runner setup.Runner = execRunner{}
@@ -309,6 +310,7 @@ func writablePorts(d setupDeps, dryRun bool) setup.WritePorts {
 		Runner:    runner,
 		DB:        db,
 		Ollama:    oll,
+		ClaudeCLI: claudeCLI{runner: runner},
 	}
 }
 

@@ -21,8 +21,8 @@ import (
 // may change one is decided by the manifest: only an entry equal to the
 // canonical entry install recorded is ours to replace (outdated); any other
 // entry of ours is modified (drift) and is kept unless the caller passes
-// overwriteModified (which slice 2 does only after an explicit Confirm). No
-// marker key is ever written inside a hook entry.
+// overwrite for that event (which the hooks.settings step does only after an
+// explicit Confirm). No marker key is ever written inside a hook entry.
 
 // Hook events install manages.
 const (
@@ -385,10 +385,11 @@ type MergeSummary struct {
 // MergeSettings ensures exactly one desired entry per event (AC-37). The
 // returned bytes equal b, and changed is false, when nothing semantic
 // changes — regardless of formatting. Modified entries are kept and listed
-// in Drift unless overwriteModified is set, in which case the preferred one
-// (an entry already equal to desired, else the first) is replaced in place
-// and the other entries of ours removed.
-func MergeSettings(b []byte, desired []HookEntry, recorded RecordedHooks, overwriteModified bool) ([]byte, MergeSummary, bool, error) {
+// in Drift unless overwrite[event] is set (the caller's confirmed, per-event
+// choice, Design 18), in which case the preferred one (an entry already
+// equal to desired, else the first) is replaced in place and the other
+// entries of ours removed. A nil map overwrites nothing.
+func MergeSettings(b []byte, desired []HookEntry, recorded RecordedHooks, overwrite map[string]bool) ([]byte, MergeSummary, bool, error) {
 	var sum MergeSummary
 	m, err := loadSettingsModel(b)
 	if err != nil {
@@ -410,7 +411,7 @@ func MergeSettings(b []byte, desired []HookEntry, recorded RecordedHooks, overwr
 			}
 			sum.Replaced++
 		case StateModified:
-			if !overwriteModified {
+			if !overwrite[d.Event] {
 				sum.Drift = append(sum.Drift, d.Event+": "+detail)
 				continue
 			}

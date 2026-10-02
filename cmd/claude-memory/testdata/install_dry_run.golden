@@ -1,20 +1,27 @@
-STEP               STATE     CHOICE  DETAIL
-Platform           ok        keep    macOS 15.0 (arm64); jobs: launchd
-Binary             absent    apply   install /opt/build/claude-memory to $HOME/.local/bin/claude-memory
+STEP                           STATE     CHOICE  DETAIL
+Platform                       ok        keep    macOS 15.0 (arm64); jobs: launchd
+Binary                         absent    apply   install /opt/build/claude-memory to $HOME/.local/bin/claude-memory
   - binary/file absent install /opt/build/claude-memory to $HOME/.local/bin/claude-memory
   - binary/dir absent create $HOME/.local/bin
-Prerequisites      ok        keep    found: git, claude, psql, az, ollama
-Topology           outdated  apply   record topology remote
-Env file           absent    apply   $HOME/.config/claude-memory/env: dir, MEMORY_PG_DSN, MEMORY_OLLAMA_URL, MEMORY_OLLAMA_MODEL
+Prerequisites                  ok        keep    found: git, claude, psql, az, ollama
+Topology                       outdated  apply   record topology remote
+Env file                       absent    apply   $HOME/.config/claude-memory/env: dir, MEMORY_PG_DSN, MEMORY_OLLAMA_URL, MEMORY_OLLAMA_MODEL
   - envfile/dir absent create $HOME/.config/claude-memory (mode 0700)
   - envfile/MEMORY_PG_DSN absent add MEMORY_PG_DSN
   - envfile/MEMORY_OLLAMA_URL absent add MEMORY_OLLAMA_URL
   - envfile/MEMORY_OLLAMA_MODEL absent add MEMORY_OLLAMA_MODEL
-Database           ok        keep    connected to postgresql://claude_memory@db.example.com:5432/claude_memory?sslmode=require (pgvector 0.7.0)
-Schema migrations  outdated  apply   schema behind: 0002 (missing records.namespace)
-Ollama             absent    apply   model bge-m3 is not pulled at http://ollama.example.com:11434
-Namespaces         absent    apply   $HOME/.config/claude-memory/namespaces.yaml will be created
-Final doctor       ok        keep    not run in --dry-run
+Database                       ok        keep    connected to postgresql://claude_memory@db.example.com:5432/claude_memory?sslmode=require (pgvector 0.7.0)
+Schema migrations              outdated  apply   schema behind: 0002 (missing records.namespace)
+Ollama                         absent    apply   model bge-m3 is not pulled at http://ollama.example.com:11434
+Namespaces                     absent    apply   $HOME/.config/claude-memory/namespaces.yaml will be created
+Hook scripts                   absent    apply   user-prompt-submit.sh: will be created; session-end.sh: will be created
+  - hooks.scripts/user-prompt-submit.sh absent will be created
+  - hooks.scripts/session-end.sh absent will be created
+Hook entries in settings.json  absent    apply   $HOME/.claude/settings.json will be created
+  - hooks.settings/UserPromptSubmit absent no claude-memory entry
+  - hooks.settings/SessionEnd absent no claude-memory entry
+MCP registration               absent    apply   $HOME/.claude.json does not exist
+Final doctor                   ok        keep    not run in --dry-run
 
 Plan
 
@@ -61,6 +68,48 @@ Namespaces
     +    - namespace: work
     +      paths:
     +        - ~/work/**
+
+Hook scripts
+  write   $HOME/.claude/hooks/claude-memory — create directory (mode 0755)
+  write   $HOME/.claude/hooks/claude-memory/user-prompt-submit.sh — create (mode 0755)
+  write   $HOME/.claude/hooks/claude-memory/session-end.sh — create (mode 0755)
+
+Hook entries in settings.json
+  write   $HOME/.claude/settings.json — add the UserPromptSubmit entry
+  write   $HOME/.claude/settings.json — add the SessionEnd entry
+  diff $HOME/.claude/settings.json
+    --- /dev/null
+    +++ $HOME/.claude/settings.json
+    @@ -0,0 +1,26 @@
+    +{
+    +  "hooks": {
+    +    "UserPromptSubmit": [
+    +      {
+    +        "hooks": [
+    +          {
+    +            "type": "command",
+    +            "command": "$HOME/.claude/hooks/claude-memory/user-prompt-submit.sh",
+    +            "timeout": 5
+    +          }
+    +        ]
+    +      }
+    +    ],
+    +    "SessionEnd": [
+    +      {
+    +        "hooks": [
+    +          {
+    +            "type": "command",
+    +            "command": "$HOME/.claude/hooks/claude-memory/session-end.sh",
+    +            "timeout": 5
+    +          }
+    +        ]
+    +      }
+    +    ]
+    +  }
+    +}
+
+MCP registration
+  register — claude mcp add --scope user claude-memory -- $HOME/.local/bin/claude-memory serve
 
 warn: $HOME/.local/bin is not on PATH: add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile
 warn: Ollama at http://ollama.example.com:11434 is not on this machine: prompts are sent over the network for embedding. The prompt hook gives up after MEMORY_HOOK_TIMEOUT (800 ms by default), and a slow remote Ollama - e.g. on CPU, where DEPLOY.md measured 0.23 s for 15 tokens and 2.3 s for 150 - makes the hook time out and inject nothing at all; memory_search via MCP still works. Doctor's ollama.embed warning (> 500 ms) is the watchdog.

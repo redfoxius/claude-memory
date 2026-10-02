@@ -5,11 +5,10 @@ import (
 	"testing"
 )
 
-// TestInstallStepsRegistry is the 2a registry (AC-7), ending in the final
+// TestInstallStepsRegistry is the registry in AC-7 order, ending in the final
 // doctor: the exact order, every Requires pointing at an earlier step, and no
-// mcp or jobs step. 2a leaves
-// WritePorts.ClaudeCLI and WritePorts.Jobs (and ReadPorts.Jobs) nil, so a
-// registered step that used them would dereference nil.
+// skills, claude-md or jobs step yet. WritePorts.Jobs (and ReadPorts.Jobs) are
+// still nil, so a registered step that used them would dereference nil.
 func TestInstallStepsRegistry(t *testing.T) {
 	t.Parallel()
 	steps := InstallSteps("v1.0.0", NewRedactor())
@@ -27,18 +26,22 @@ func TestInstallStepsRegistry(t *testing.T) {
 		seen[s.ID()] = true
 		ids = append(ids, s.ID())
 	}
-	want := []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces", "doctor"}
+	want := []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces",
+		"hooks.scripts", "hooks.settings", "mcp", "doctor"}
 	if !slices.Equal(ids, want) {
 		t.Errorf("registry = %v, want %v", ids, want)
 	}
-	for _, banned := range []string{"mcp", "jobs", "hooks.scripts", "hooks.settings", "skills", "claude-md"} {
+	if !slices.Contains(steps[slices.IndexFunc(steps, func(s Step) bool { return s.ID() == "hooks.settings" })].Requires(), "migrate") {
+		t.Error("hooks.settings must require migrate (AC-7)")
+	}
+	for _, banned := range []string{"jobs", "skills", "claude-md"} {
 		if seen[banned] {
-			t.Errorf("slice 2a must not register %q", banned)
+			t.Errorf("%q arrives in a later work item and must not be registered yet", banned)
 		}
 	}
 }
 
-// TestSkipAcceptsUnregisteredStepIDs (C4): --skip mcp works in 2a; a truly
+// TestSkipAcceptsUnregisteredStepIDs (C4): --skip works for the ids this build does not register (skills, jobs); a truly
 // unknown id is still a usage error.
 func TestSkipAcceptsUnregisteredStepIDs(t *testing.T) {
 	t.Parallel()

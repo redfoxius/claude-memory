@@ -350,6 +350,49 @@ func readStdinSecret(ctx context.Context, r io.Reader, red *setup.Redactor, time
 	return s, nil
 }
 
+// ---- Claude CLI -----------------------------------------------------------
+
+// claudeCLI is the setup.ClaudeCLI adapter: `claude mcp add|remove --scope
+// user` through the exec Runner (argv only, Mutating set, so the read-only
+// Runner of --dry-run refuses it with ErrReadOnly). It has no read side:
+// `claude mcp get|list` spawn the registered server, so registration is read
+// from .claude.json instead (AC-40, AC-67). It never passes -e.
+type claudeCLI struct{ runner setup.Runner }
+
+var _ setup.ClaudeCLI = claudeCLI{}
+
+// maxClaudeErr bounds the stderr quoted in an error.
+const maxClaudeErr = 400
+
+func (c claudeCLI) run(ctx context.Context, args ...string) error {
+	argv := append([]string{"claude", "mcp"}, args...)
+	res, err := c.runner.Run(ctx, setup.Cmd{Argv: argv, Mutating: true})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		msg := strings.TrimSpace(string(res.Stderr))
+		if msg == "" {
+			msg = strings.TrimSpace(string(res.Stdout))
+		}
+		if len(msg) > maxClaudeErr {
+			msg = msg[:maxClaudeErr] + "..."
+		}
+		return fmt.Errorf("exit %d: %s", res.ExitCode, msg)
+	}
+	return nil
+}
+
+// MCPAdd runs `claude mcp add --scope user <name> -- <argv...>`.
+func (c claudeCLI) MCPAdd(ctx context.Context, name string, argv []string) error {
+	return c.run(ctx, append([]string{"add", "--scope", "user", name, "--"}, argv...)...)
+}
+
+// MCPRemove runs `claude mcp remove --scope user <name>`.
+func (c claudeCLI) MCPRemove(ctx context.Context, name string) error {
+	return c.run(ctx, "remove", "--scope", "user", name)
+}
+
 // readOnlyDB is the dry-run DB for Apply: every probe passes through, Migrate
 // is refused (Design 20's second layer).
 type readOnlyDB struct{ setup.DBProber }

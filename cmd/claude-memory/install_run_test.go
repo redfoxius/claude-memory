@@ -282,8 +282,21 @@ func TestWritablePortsDryRun(t *testing.T) {
 		} else if werr != nil || rerr != nil || merr != nil || perr != nil {
 			t.Errorf("writable ports refused: %v, %v, %v, %v", werr, rerr, merr, perr)
 		}
-		if wp.ClaudeCLI != nil || wp.Jobs != nil || wp.ReadPorts.Jobs != nil {
-			t.Errorf("2a leaves ClaudeCLI, Jobs and ReadPorts.Jobs nil: %+v", wp)
+		if wp.Jobs != nil || wp.ReadPorts.Jobs != nil {
+			t.Errorf("Jobs and ReadPorts.Jobs stay nil until the jobs step: %+v", wp)
+		}
+		if wp.ClaudeCLI == nil {
+			t.Fatal("ClaudeCLI must be set")
+		}
+		if dry {
+			// The adapter runs over the read-only Runner: `claude mcp add` is
+			// refused before anything is executed.
+			if err := wp.ClaudeCLI.MCPAdd(context.Background(), "x", []string{"/bin/x", "serve"}); !errors.Is(err, setup.ErrReadOnly) {
+				t.Errorf("dry-run MCPAdd = %v, want ErrReadOnly", err)
+			}
+			if err := wp.ClaudeCLI.MCPRemove(context.Background(), "x"); !errors.Is(err, setup.ErrReadOnly) {
+				t.Errorf("dry-run MCPRemove = %v, want ErrReadOnly", err)
+			}
 		}
 	}
 	rp := readOnlyPorts(setupDeps{FS: readOnlyFS{}})
@@ -292,8 +305,9 @@ func TestWritablePortsDryRun(t *testing.T) {
 	}
 }
 
-// TestInstallSkipUnregisteredStep (C4): --skip mcp works in 2a.
+// TestInstallSkipUnregisteredStep (C4): --skip works for registered steps and
+// for ids this build does not register yet (skills, jobs).
 func TestInstallSkipUnregisteredStep(t *testing.T) {
-	f := newDryRunFixture(t, append([]string{"--skip", "mcp,jobs,doctor"}, dryRunArgs...)...)
+	f := newDryRunFixture(t, append([]string{"--skip", "mcp,hooks.settings,skills,jobs,doctor"}, dryRunArgs...)...)
 	f.execute(t)
 }

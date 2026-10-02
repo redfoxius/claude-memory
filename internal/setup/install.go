@@ -6,17 +6,17 @@ import (
 )
 
 // InstallSteps is the step registry of `claude-memory install` (AC-7), in
-// execution order. This is slice 2a: platform, binary, prereqs, topology,
-// envfile, database, migrate, ollama, namespaces. The Claude integration and
-// jobs steps (hooks.scripts, hooks.settings, mcp, skills, claude-md, jobs)
-// arrive in slice 2b together with the WritePorts they need (ClaudeCLI,
-// Jobs): in 2a those ports are nil, so no 2a step may dereference them and
-// the registry must not contain an mcp or jobs step (registry test).
+// execution order: platform, binary, prereqs, topology, envfile, database,
+// migrate, ollama, namespaces, hooks.scripts, hooks.settings, mcp, doctor.
+// The remaining slice-2b steps (skills, claude-md, jobs) arrive with their
+// own work items; until then WritePorts.Jobs (and ReadPorts.Jobs) are nil, so
+// the registry must not contain a jobs step (registry test). The mcp step
+// needs WritePorts.ClaudeCLI, which the composition root sets.
 //
 // version is the running binary's version; red is the run's Redactor, which
 // the steps that handle passwords or error text from the network need.
 //
-// The final `doctor` Step (AC-62) is registered last, after namespaces. It is
+// The final `doctor` Step (AC-62) is registered last. It is
 // a Finalizer: the engine runs it after Apply on read-only ports, never on a
 // dry run; Inputs.NoDoctor makes it do nothing.
 func InstallSteps(version string, red *Redactor) []Step {
@@ -30,12 +30,15 @@ func InstallSteps(version string, red *Redactor) []Step {
 		MigrateStep{Redactor: red},
 		OllamaStep{Redactor: red},
 		NamespacesStep{Version: version},
+		HooksScriptsStep{Version: version},
+		HooksSettingsStep{Version: version},
+		MCPStep{Version: version},
 		DoctorStep{Version: version, Redactor: red},
 	}
 }
 
 // AllStepIDs are the ids of the whole AC-7 pipeline, in order. `--skip`
-// accepts every one of them, also those 2a does not register (a no-op), so a
+// accepts every one of them, also those this build does not register (a no-op), so a
 // script written for the full install keeps working.
 var AllStepIDs = []string{
 	"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces",

@@ -253,6 +253,11 @@ type Plan struct {
 	Actions []Action
 	Diffs   []Diff
 	Notes   []Note
+	// Token is opaque, step-private data carried from Plan to Apply: the
+	// hooks.settings step puts the sha256 of the settings file it planned
+	// against here, so Apply can abort when the file changed while the user
+	// was confirming (AC-39).
+	Token string
 }
 
 // Await asks the user to do something outside install, then re-check

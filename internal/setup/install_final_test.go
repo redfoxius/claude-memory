@@ -78,6 +78,7 @@ type fullRig struct {
 	root   string
 	fs     *FakeFS
 	runner *FakeRunner
+	claude *fakeClaude
 	db     *statefulDB
 	oll    *scriptOllama
 	red    *Redactor
@@ -107,7 +108,7 @@ func newFullRig(t *testing.T) *fullRig {
 	r.Script(ArgvPrefix("xattr"), Result{ExitCode: 1})
 	oll := newOllama()
 	oll.hasModel = false
-	return &fullRig{t: t, p: p, root: root, fs: NewFakeFS(t, root), runner: r, db: newStatefulDB(), oll: oll,
+	return &fullRig{t: t, p: p, root: root, fs: NewFakeFS(t, root), runner: r, claude: newFakeClaude(t, p), db: newStatefulDB(), oll: oll,
 		red: NewRedactor(), out: &bytes.Buffer{}}
 }
 
@@ -134,7 +135,7 @@ func (r *fullRig) run(in Inputs) RunResult {
 	if r.arm {
 		steps = slices.Insert(steps, len(steps)-1, Step(armStep{r.db}))
 	}
-	wp := WritePorts{ReadPorts: rp, FS: r.fs, Runner: r.runner, DB: r.db, Ollama: r.oll, Progress: rend.Progress}
+	wp := WritePorts{ReadPorts: rp, FS: r.fs, Runner: r.runner, DB: r.db, Ollama: r.oll, ClaudeCLI: r.claude, Progress: rend.Progress}
 	e := &Engine{Steps: steps, Read: rp, Write: wp, UI: NewFakePrompter(r.t, false), Reporter: rend,
 		Version: "v1.2.0", KnownIDs: AllStepIDs}
 	res := e.Run(context.Background(), in)
@@ -218,6 +219,11 @@ func TestFullRunSentinel(t *testing.T) {
 				t.Errorf("password form %q in a command: %v", f, c.Argv)
 			}
 		}
+		for _, c := range r.claude.Calls() {
+			if strings.Contains(c, f) {
+				t.Errorf("password form %q in a claude mcp call: %s", f, c)
+			}
+		}
 	}
 	if !strings.Contains(r.out.String(), "claude-memory doctor") {
 		t.Errorf("the final doctor report is missing:\n%s", r.out)
@@ -234,6 +240,7 @@ func TestNoOpRerun(t *testing.T) {
 	manifest, _ := os.ReadFile(r.p.Manifest())
 	info, _ := os.Stat(r.p.Manifest())
 	writes, mut, migrated, pulled := r.nonLockWrites(), r.runner.MutatingCalls(), len(r.db.migrated), r.pulls()
+	claudeCalls := len(r.claude.Calls())
 
 	res := r.run(r.inputs())
 	if res.ExitCode != ExitOK {
@@ -254,7 +261,11 @@ func TestNoOpRerun(t *testing.T) {
 	if len(r.db.migrated) != migrated || r.pulls() != pulled {
 		t.Error("re-run migrated or pulled again")
 	}
-	for _, id := range []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces"} {
+	if n := len(r.claude.Calls()); n != claudeCalls {
+		t.Errorf("re-run made %d claude calls, want 0 (an ok registration needs none, AC-40)", n-claudeCalls)
+	}
+	for _, id := range []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces",
+		"hooks.scripts", "hooks.settings", "mcp"} {
 		if o := outcomeOf(res, id); o != OutcomeUnchanged {
 			t.Errorf("%s: outcome %q on a no-op re-run, want unchanged", id, o)
 		}
@@ -262,7 +273,7 @@ func TestNoOpRerun(t *testing.T) {
 	if !strings.Contains(r.out.String(), "claude-memory doctor") {
 		t.Error("the doctor must run on a no-op re-run")
 	}
-	if !strings.Contains(r.out.String(), "Done: 10 unchanged\n") {
+	if !strings.Contains(r.out.String(), "Done: 13 unchanged\n") {
 		t.Errorf("want the summary \"Done: 10 unchanged\" (nothing applied):\n%s", r.out)
 	}
 }
