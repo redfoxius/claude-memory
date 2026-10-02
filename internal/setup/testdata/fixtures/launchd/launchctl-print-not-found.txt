@@ -1,0 +1,2 @@
+Bad request.
+Could not find service "io.github.claude-memory.cleanup" in domain for port

@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/prompt-logger"
+          },
+          {
+            "type": "command",
+            "command": "/opt/old/hooks/claude-memory/user-prompt-submit.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

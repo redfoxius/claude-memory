@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "claude-memory": {
+      "type": "stdio",
+      "command": "/Users/owner/.local/bin/claude-memory",
+      "args": ["serve", "--verbose"],
+      "env": {}
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"mcpServers": {"claude-memory": {"command": "/Users/owner/.local/bin/claude-memory", "args": ["serve"]}}}

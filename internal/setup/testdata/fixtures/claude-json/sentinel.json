@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "claude-memory": {
+      "type": "stdio",
+      "command": "/tmp/ac67-sentinel-must-never-run",
+      "args": ["serve"],
+      "env": {}
+    }
+  }
+}

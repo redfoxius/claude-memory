@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      "not an object"
+    ]
+  }
+}

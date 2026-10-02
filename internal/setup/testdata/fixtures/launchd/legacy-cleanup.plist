@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>io.github.claude-memory.cleanup</string>
+
+	<!--
+	__HOME__ is a placeholder: INSTALL.md's install step substitutes the
+	real $HOME (e.g. with `sed`) before copying this file into
+	~/Library/LaunchAgents/ — launchd plists do not expand shell
+	variables themselves.
+	-->
+	<key>ProgramArguments</key>
+	<array>
+		<string>__HOME__/.local/bin/claude-memory-run-with-env.sh</string>
+		<string>cleanup</string>
+	</array>
+
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>7</integer>
+		<key>Minute</key>
+		<integer>15</integer>
+	</dict>
+
+	<key>RunAtLoad</key>
+	<false/>
+
+	<key>StandardOutPath</key>
+	<string>__HOME__/.local/state/claude-memory/cleanup.log</string>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/.local/state/claude-memory/cleanup.log</string>
+</dict>
+</plist>
