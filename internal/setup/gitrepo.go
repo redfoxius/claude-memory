@@ -15,7 +15,7 @@ import (
 // The walk stops after checking ceiling (inclusive), like git's
 // GIT_CEILING_DIRECTORIES; "" walks up to the filesystem root. Production
 // passes ""; tests pass their temp root so the walk never leaves it.
-func InGitRepo(fsys FS, path, ceiling string) (bool, string, error) {
+func InGitRepo(fsys ReadFS, path, ceiling string) (bool, string, error) {
 	dir := filepath.Dir(filepath.Clean(path))
 	if ceiling != "" {
 		ceiling = filepath.Clean(ceiling)

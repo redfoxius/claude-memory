@@ -239,6 +239,46 @@ func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
 	}, nil
 }
 
+// readOnlyPorts is what Detect, Seed, Configure, Plan and the final doctor
+// get (Design 20): the narrowed read interfaces over deps' read-only
+// adapters. Jobs is nil: no 2a step reads it.
+func readOnlyPorts(d setupDeps) setup.ReadPorts {
+	return setup.ReadPorts{
+		FS:       d.FS, // setup.ReadFS view of the read-only adapter
+		Runner:   d.Runner,
+		DB:       d.DB,
+		Ollama:   d.Ollama,
+		Clock:    d.Clock,
+		Paths:    d.Paths,
+		Env:      d.Env,
+		Platform: d.Platform,
+		Assets:   d.Assets,
+	}
+}
+
+// writablePorts is what Apply gets (install, uninstall): the writable FS, a
+// Runner that allows mutating commands, and the full DB/Ollama probers. With
+// dryRun the FS and Runner are the read-only adapters, a second layer
+// beneath the engine never reaching Apply (Design 20). ClaudeCLI, Jobs and
+// Progress are nil in 2a; the renderer sets Progress.
+func writablePorts(d setupDeps, dryRun bool) setup.WritePorts {
+	var fsys setup.FS = newWritableFS()
+	var runner setup.Runner = execRunner{}
+	if dryRun {
+		fsys = readOnlyFS{}
+		runner = execRunner{readOnly: true}
+	}
+	rp := readOnlyPorts(d)
+	rp.FS, rp.Runner = fsys, runner
+	return setup.WritePorts{
+		ReadPorts: rp,
+		FS:        fsys,
+		Runner:    runner,
+		DB:        d.DB,
+		Ollama:    d.Ollama,
+	}
+}
+
 // systemClock implements the memory.Clock interface using time.Now().
 type systemClock struct{}
 

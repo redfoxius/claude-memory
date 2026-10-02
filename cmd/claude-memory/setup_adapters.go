@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -59,6 +61,98 @@ func (readOnlyFS) MkdirAll(string, fs.FileMode) error                { return se
 func (readOnlyFS) Remove(string) error                               { return setup.ErrDryRun }
 func (readOnlyFS) Chmod(string, fs.FileMode) error                   { return setup.ErrDryRun }
 func (readOnlyFS) Lock(string) (func() error, error)                 { return nil, setup.ErrDryRun }
+
+// writableFS is the install/uninstall FS: the read half of readOnlyFS plus
+// real writes. WriteFileAtomic is temp file + fsync + rename in the same
+// directory, with exactly the requested mode (AC-9); Lock is a
+// process-scoped flock (AC-9).
+type writableFS struct {
+	readOnlyFS
+	// rename is os.Rename; tests inject a failing one to prove the original
+	// survives an interrupted write.
+	rename func(oldpath, newpath string) error
+}
+
+var _ setup.FS = writableFS{}
+
+func newWritableFS() writableFS { return writableFS{rename: os.Rename} }
+
+func (w writableFS) WriteFileAtomic(p string, b []byte, mode fs.FileMode) (err error) {
+	rename := w.rename
+	if rename == nil {
+		rename = os.Rename
+	}
+	dir := filepath.Dir(p)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(p)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if err != nil {
+			_ = tmp.Close() // no-op error when already closed
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err = tmp.Write(b); err != nil {
+		return err
+	}
+	// Chmod the open file: CreateTemp makes 0600 and the umask must not
+	// narrow the requested mode.
+	if err = tmp.Chmod(mode); err != nil {
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	if err = rename(tmpName, p); err != nil {
+		return err
+	}
+	// Persist the rename itself; a failure here does not undo it.
+	if d, derr := os.Open(dir); derr == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
+}
+
+func (writableFS) MkdirAll(p string, mode fs.FileMode) error { return os.MkdirAll(p, mode) }
+func (writableFS) Remove(p string) error                     { return os.Remove(p) }
+func (writableFS) Chmod(p string, mode fs.FileMode) error    { return os.Chmod(p, mode) }
+
+// Lock takes an exclusive non-blocking flock on p (created 0600, its
+// directory 0700 when missing). The kernel drops it on process exit, so a
+// crash never leaves a stale lock (no PID file).
+func (writableFS) Lock(p string) (func() error, error) {
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("another install is running (lock %s held): %w", p, err)
+		}
+		return nil, err
+	}
+	var once sync.Once
+	return func() error {
+		var uerr error
+		once.Do(func() {
+			uerr = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+			if cerr := f.Close(); uerr == nil {
+				uerr = cerr
+			}
+		})
+		return uerr
+	}, nil
+}
 
 // ---- Runner ---------------------------------------------------------------
 

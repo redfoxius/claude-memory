@@ -171,7 +171,7 @@ func (l ManifestLoad) Present() bool { return l.Manifest != nil }
 // LoadManifest reads Paths.Manifest() read-only. Only an I/O error other
 // than "not found" is returned as an error; a corrupt file is reported in
 // the result (AC-49: treated as absent, and reported).
-func LoadManifest(fsys FS, p Paths) (ManifestLoad, error) {
+func LoadManifest(fsys ReadFS, p Paths) (ManifestLoad, error) {
 	l := ManifestLoad{Path: p.Manifest()}
 	b, err := fsys.ReadFile(l.Path)
 	if errors.Is(err, fs.ErrNotExist) {
