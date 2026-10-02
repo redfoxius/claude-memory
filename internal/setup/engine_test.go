@@ -1057,3 +1057,31 @@ func TestEngineCtrlCAtConfirmExits130(t *testing.T) { // LOW-7
 		t.Fatalf("applied/wrote after Ctrl-C: %v %v", h.log.Calls(), h.nonLockWrites())
 	}
 }
+
+func TestEngineTooManyAttemptsSkipsStepNotRun(t *testing.T) { // AC-10
+	t.Parallel()
+	for _, where := range []string{"select", "configure"} {
+		t.Run(where, func(t *testing.T) {
+			t.Parallel()
+			h := newEH(t, true)
+			h.world = NewFakeWorld(map[string]State{"d/x": StateAbsent, "o/x": StateAbsent})
+			d := h.step("database", nil, "d/x")
+			o := h.step("other", nil, "o/x")
+			if where == "select" {
+				h.ui.ExpectSelectErr("database", ErrTooManyAttempts).ExpectSelect("other", -1)
+			} else {
+				d.ConfigureF = func(Prompter, *RunState) error { return ErrTooManyAttempts }
+				h.ui.ExpectSelect("database", -1).ExpectSelect("other", -1)
+			}
+			h.ui.ExpectConfirm("Apply", true)
+			r := h.run(Inputs{}, d, o)
+			wantExit(t, r, ExitOK)
+			if got := outcome(t, r, "database"); got.Outcome != OutcomeSkipped {
+				t.Fatalf("%+v", got)
+			}
+			if outcome(t, r, "other").Outcome != OutcomeApplied || h.log.Count("Apply database") != 0 {
+				t.Fatalf("calls %v", h.log.Calls())
+			}
+		})
+	}
+}

@@ -1,0 +1,6 @@
+# claude-memory env
+MEMORY_PG_DSN=postgresql://claude_memory:old@db.example:5432/claude_memory?sslmode=prefer
+
+# my own settings
+MEMORY_HOOK_TIMEOUT=3s
+MEMORY_OLLAMA_URL=http://127.0.0.1:11434

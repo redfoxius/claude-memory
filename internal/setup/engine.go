@@ -511,18 +511,28 @@ func (s *session) askChoices() error {
 		// the TTY Prompter must redact questions (see Prompter).
 		q := fmt.Sprintf("%s [%s]: %s", r.step.Title(), r.det.State, r.det.Detail)
 		i, err := s.ui().Select(q, []string{string(ChoiceApply), string(ChoiceKeep), string(ChoiceSkip)}, defIdx)
+		if errors.Is(err, ErrTooManyAttempts) {
+			s.skipStep(r) // AC-10: three invalid answers skip this step
+			continue
+		}
 		if err := s.askErr(err); err != nil {
 			return err
 		}
 		ch := Choices{}
+		tooMany := false
 		switch i {
 		case 0:
+		arts:
 			for _, a := range r.det.Artifacts {
 				switch a.State {
 				case StateAbsent, StateOutdated:
 					ch[a.ID] = ChoiceApply
 				case StateModified:
 					ok, err := s.ui().Confirm(fmt.Sprintf("overwrite your modified %s? a backup is kept", a.ID), false)
+					if errors.Is(err, ErrTooManyAttempts) {
+						tooMany = true
+						break arts
+					}
 					if err := s.askErr(err); err != nil {
 						return err
 					}
@@ -545,9 +555,20 @@ func (s *session) askChoices() error {
 			}
 			r.userSkip, r.skipWhy = true, "skipped by you"
 		}
+		if tooMany {
+			s.skipStep(r)
+			continue
+		}
 		r.choices = ch
 	}
 	return nil
+}
+
+// skipStep aborts one step as skipped by the user (AC-10: a prompt that got
+// three invalid answers). Its choices become skip; the run goes on.
+func (s *session) skipStep(r *stepRun) {
+	r.userSkip, r.skipWhy = true, "skipped by you"
+	r.choices = s.defaultChoices(r)
 }
 
 // ---- Configure and rule A -------------------------------------------------
@@ -613,6 +634,10 @@ func (s *session) configurePhase() error {
 			continue
 		}
 		if err := cf.Configure(s.ctx, s.e.Read, s.ui(), s.st); err != nil {
+			if errors.Is(err, ErrTooManyAttempts) {
+				s.skipStep(r)
+				continue
+			}
 			if errors.Is(err, ErrInterrupted) || s.ctx.Err() != nil {
 				return &abort{ExitInterrupted, ErrInterrupted}
 			}
@@ -633,6 +658,10 @@ func (s *session) blockedPrompt(r *stepRun) error {
 	for {
 		s.report().Notes([]Note{{NoteWarn, fmt.Sprintf("%s: blocked: %s · fix: %s", r.step.Title(), r.det.Detail, r.det.Remedy)}})
 		i, err := s.ui().Select(fmt.Sprintf("%s is blocked", r.step.Title()), []string{"re-check", "skip", "quit"}, 1)
+		if errors.Is(err, ErrTooManyAttempts) {
+			s.skipStep(r)
+			return nil
+		}
 		if err := s.askErr(err); err != nil {
 			return err
 		}

@@ -1,0 +1,8 @@
+# keep me
+FOO=bar
+
+FOO=dup
+no equals line
+export EXPORTED_UNKNOWN=1
+QUOTED_UNKNOWN="x y"
+MEMORY_HOOK_TIMEOUT=3s
