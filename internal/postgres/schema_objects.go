@@ -8,8 +8,7 @@ package postgres
 // missing from its entry.
 //
 // Keep this list in step with migrationSQL in store.go: a new migration file
-// needs both a //go:embed line there and an entry here. (The events table,
-// migration 0003 in the backlog, is not in this repository yet.)
+// needs both a //go:embed line there and an entry here.
 
 // schemaObjectKind is what kind of catalog object a schemaObject names.
 type schemaObjectKind int
@@ -98,11 +97,27 @@ var schemaMigrations = []migrationObjects{
 			index("records", "idx_records_namespace_status"),
 		},
 	},
+	{
+		ID:   "0003",
+		File: "0003_events.sql",
+		Objects: concat(
+			[]schemaObject{table("events")},
+			columns("events",
+				"id", "at", "namespace", "type", "record_id", "related_id", "source",
+				"status", "outcome", "via", "similarity", "stale", "stale_commits",
+				"session_id"),
+			[]schemaObject{
+				index("events", "idx_events_at"),
+				index("events", "idx_events_type_at"),
+				index("events", "idx_events_record"),
+			},
+		),
+	},
 }
 
 // ourTables are the tables whose columns and indexes the probe inventories
 // to report objects no embedded migration creates (DBStatus.Unknown).
-var ourTables = []string{"records", "schema_migrations"}
+var ourTables = []string{"records", "schema_migrations", "events"}
 
 // MigrationIDs returns the IDs of the embedded migrations, in order.
 func MigrationIDs() []string {

@@ -35,6 +35,11 @@ type hookDeps struct {
 	// History returns the git adapter for a session (wrapped in that
 	// session's verdict cache). nil disables staleness checking.
 	History func(sessionID string) memory.CodeHistory
+
+	// Events receives one card_injected event per card, after the output is
+	// written. It must be a local, append-only sink (the spool): the hook
+	// never writes events to Postgres. nil disables events.
+	Events memory.EventSink
 }
 
 // hookOutput is the top-level envelope Claude Code's UserPromptSubmit hook
@@ -57,6 +62,9 @@ type card struct {
 	ID    string `json:"id"`
 	// Stale is set when the record's files changed since it was recorded.
 	Stale *memory.StaleHint `json:"-"`
+	// Event inputs (never rendered).
+	Similarity   float64 `json:"-"`
+	StaleChecked bool    `json:"-"`
 }
 
 // staleSuffix is the fixed text appended to a stale card (AC-5).
@@ -158,6 +166,9 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, deps 
 				Repo:  rec.Repo,
 				ID:    rec.ID,
 				Stale: rec.Stale,
+
+				Similarity:   rec.Similarity,
+				StaleChecked: rec.StaleChecked,
 			})
 		}
 	}
@@ -186,5 +197,43 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, deps 
 		return nil
 	}
 
+	// After the output: a failed or slow spool write can never delay or
+	// change what Claude Code receives (AC-22, AC-23).
+	if deps.Events != nil {
+		evs := cardEvents(cards, svc.Namespace(), input.SessionID, time.Now())
+		if err := deps.Events.Append(ctx, evs...); err != nil {
+			slog.DebugContext(ctx, "failed to spool card events", "error", err)
+		}
+	}
+
 	return nil
+}
+
+// cardEvents builds one card_injected event per card: ids, similarity and the
+// stale tri-state (nil = unchecked, commits nil = unknown), never any text.
+func cardEvents(cards []card, namespace, sessionID string, now time.Time) []memory.Event {
+	if !sessionIDRe.MatchString(sessionID) {
+		sessionID = ""
+	}
+	evs := make([]memory.Event, 0, len(cards))
+	for _, c := range cards {
+		e := memory.NewEvent(now, namespace, memory.EventCardInjected)
+		e.RecordID = c.ID
+		sim := c.Similarity
+		e.Similarity = &sim
+		e.SessionID = sessionID
+		if c.Stale != nil {
+			t := true
+			e.Stale = &t
+			if c.Stale.Commits > 0 {
+				n := c.Stale.Commits
+				e.StaleCommits = &n
+			}
+		} else if c.StaleChecked {
+			f := false
+			e.Stale = &f
+		}
+		evs = append(evs, e)
+	}
+	return evs
 }

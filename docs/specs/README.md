@@ -4,7 +4,7 @@
 |---|---|---|
 | [memory-mvp](memory-mvp/01-spec.md) | SPEC-2026-10-01-memory-mvp | implemented and verified (`memory-mvp/07-verification.md`); operational ACs (AC-30/48/49/50/51/53) still need runs on the real setup |
 | [namespaces](namespaces/01-spec.md) | namespaces | implemented; integration suite passes on a local Postgres+pgvector; review follow-ups open (see item 1) |
-| [staleness-metrics](staleness-metrics/01-spec.md) | SPEC-2026-10-01-staleness-metrics | PR A (staleness) implemented and reviewed; PR B (events + stats) **not started**; manual latency/Azure checks open |
+| [staleness-metrics](staleness-metrics/01-spec.md) | SPEC-2026-10-01-staleness-metrics | PR A (staleness) implemented and reviewed; PR B (events + stats) implemented (unit + integration tests, not yet reviewed); manual latency/Azure checks open (WI-0/WI-14) |
 | [install-doctor](install-doctor/01-spec.md) | SPEC-2026-10-01-install-doctor | v0.2; slice 1 (`doctor` + plumbing) implemented; its Fable review is FAIL (1 high, 5 medium — see item 8), fixes pending; slice 2 (`install`/`uninstall`) not started; slice 3 (Docker) deferred |
 
 ## Backlog (next, in order)
@@ -48,14 +48,15 @@ Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
 - Rough size: ~1 day incl. tests; full SDD flow (next spec version → plan → plan
   review ×2 → implementation).
 
-### 2. staleness check + usage metrics — PART A DONE, PART B NOT STARTED
+### 2. staleness check + usage metrics — PART A DONE, PART B IMPLEMENTED (review pending)
 
 **Done (PR A):** staleness hint on cards/search/get (tree-compare detector,
 cached, deadline-bounded), commit-baseline stamping, PR merge-commit
 baseline, extraction repo from checkout, docs; spec v0.2, plan, reviews
-`staleness-metrics/03`, `04`. **Not done:** PR B — `events` table
-(migration 0003), hook spool file, service events, `stats`, cleanup pruning
-(plan WI-7..12); optional WI-15 (PR changed paths). **Manual/open:** hook
+`staleness-metrics/03`, `04`. **Done (PR B, not yet reviewed):** `events`
+table (migration 0003), hook spool file + drains, service events, `stats`,
+cleanup pruning, docs (plan WI-7..12, 13b). **Not done:** optional WI-15 (PR
+changed paths). **Manual/open:** hook
 latency baseline and re-measure (WI-0/WI-14); `merge-base --is-ancestor`
 check of the Azure DevOps merge commit on a real squash PR (AC-11); known gap:
 write-path UPDATE with no `files` never re-baselines.

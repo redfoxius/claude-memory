@@ -25,9 +25,12 @@ var migrationInitSQL string
 //go:embed migrations/0002_namespaces.sql
 var migrationNamespacesSQL string
 
+//go:embed migrations/0003_events.sql
+var migrationEventsSQL string
+
 // migrationSQL is every migration, applied in order. Each statement is
 // idempotent, so re-running on an already-migrated database is a no-op.
-var migrationSQL = migrationInitSQL + ";\n" + migrationNamespacesSQL
+var migrationSQL = migrationInitSQL + ";\n" + migrationNamespacesSQL + ";\n" + migrationEventsSQL
 
 // Store is the Postgres adapter implementing memory.Store.
 type Store struct {
@@ -486,16 +489,24 @@ func (s *Store) WithTx(ctx context.Context, fn func(tx memory.TxStore) error) er
 
 // DeleteCandidatesByTTL hard-deletes candidate records untouched for longer than ttlDays,
 // preserving active and deprecated records regardless of age.
-// Returns the number of records deleted.
+// Returns the number of records deleted. Each deleted row also gets a
+// record_deleted event, written by the same statement (the CTE), so the
+// returned count equals the events written.
 func (s *Store) DeleteCandidatesByTTL(ctx context.Context, ttlDays int) (int, error) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -ttlDays)
 
 	query := `
-		DELETE FROM records
-		WHERE status = 'candidate'
-			AND GREATEST(COALESCE(created_at, '1970-01-01'),
-			             COALESCE(updated_at, '1970-01-01'),
-			             COALESCE(last_used_at, '1970-01-01')) < $1
+		WITH d AS (
+			DELETE FROM records
+			WHERE status = 'candidate'
+				AND GREATEST(COALESCE(created_at, '1970-01-01'),
+				             COALESCE(updated_at, '1970-01-01'),
+				             COALESCE(last_used_at, '1970-01-01')) < $1
+			RETURNING id, namespace
+		)
+		INSERT INTO events (id, at, namespace, type, record_id, source, via)
+		SELECT gen_random_uuid(), now(), d.namespace, 'record_deleted', d.id, 'cleanup', 'ttl'
+		FROM d
 	`
 
 	result, err := s.pool.Exec(ctx, query, cutoff)

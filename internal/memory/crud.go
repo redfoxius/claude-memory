@@ -143,6 +143,20 @@ func (s *Service) UpdateRecord(ctx context.Context, req *UpdateRequest) (*record
 		return nil, fmt.Errorf("update record: %w", err)
 	}
 
+	// memory_update is always an inline-source update; a status change adds
+	// promoted / deprecated only for the transitions that count (spec 6.4):
+	// any other status change (e.g. un-deprecate) is just the update.
+	upd := s.event(existing.Namespace, EventRecordUpdated, rec.ID)
+	upd.Source = EventSourceInline
+	evs := []Event{upd}
+	if existing.Status == record.StatusCandidate && rec.Status == record.StatusActive {
+		evs = append(evs, s.transitionEvent(existing.Namespace, EventRecordPromoted, rec.ID, ViaTool))
+	}
+	if existing.Status != record.StatusDeprecated && rec.Status == record.StatusDeprecated {
+		evs = append(evs, s.transitionEvent(existing.Namespace, EventRecordDeprecated, rec.ID, ViaTool))
+	}
+	s.appendEvents(ctx, evs...)
+
 	return rec, nil
 }
 
@@ -162,7 +176,8 @@ func (s *Service) DeprecateRecord(ctx context.Context, req *DeprecateRequest) (*
 		return nil, fmt.Errorf("reason is required for deprecation")
 	}
 
-	if _, err := s.getAccessible(ctx, req.ID); err != nil {
+	before, err := s.getAccessible(ctx, req.ID)
+	if err != nil {
 		return nil, fmt.Errorf("deprecate record: %w", err)
 	}
 
@@ -178,6 +193,10 @@ func (s *Service) DeprecateRecord(ctx context.Context, req *DeprecateRequest) (*
 	rec, err := s.store.Update(ctx, req.ID, updates)
 	if err != nil {
 		return nil, fmt.Errorf("deprecate record: %w", err)
+	}
+
+	if before.Status != record.StatusDeprecated {
+		s.appendEvents(ctx, s.transitionEvent(before.Namespace, EventRecordDeprecated, rec.ID, ViaTool))
 	}
 
 	return rec, nil

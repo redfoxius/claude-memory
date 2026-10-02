@@ -62,6 +62,14 @@ func (s *Service) Feedback(ctx context.Context, req *FeedbackRequest) (*Feedback
 			return nil, fmt.Errorf("update record after feedback: %w", updateErr)
 		}
 
+		fb := s.event(s.namespace, EventFeedback, rec.ID)
+		fb.Outcome = req.Outcome
+		evs := []Event{fb}
+		if rec.Status == record.StatusCandidate {
+			evs = append(evs, s.transitionEvent(rec.Namespace, EventRecordPromoted, rec.ID, ViaFeedback))
+		}
+		s.appendEvents(ctx, evs...)
+
 		return &FeedbackResponse{
 			ID:        updatedRec.ID,
 			NewStatus: updatedRec.Status,
@@ -83,6 +91,14 @@ func (s *Service) Feedback(ctx context.Context, req *FeedbackRequest) (*Feedback
 
 		slog.InfoContext(ctx, "deprecated record via feedback",
 			"id", rec.ID, "outcome", req.Outcome, "reason", reason)
+
+		fb := s.event(s.namespace, EventFeedback, rec.ID)
+		fb.Outcome = req.Outcome
+		evs := []Event{fb}
+		if rec.Status != record.StatusDeprecated {
+			evs = append(evs, s.transitionEvent(rec.Namespace, EventRecordDeprecated, rec.ID, ViaFeedback))
+		}
+		s.appendEvents(ctx, evs...)
 
 		return &FeedbackResponse{
 			ID:        updatedRec.ID,
@@ -110,4 +126,11 @@ func formatDeprecationReason(outcome FeedbackOutcome, note *string) string {
 	default:
 		return "Deprecated via feedback"
 	}
+}
+
+// transitionEvent builds a record_promoted / record_deprecated event.
+func (s *Service) transitionEvent(ns string, t EventType, id string, via EventVia) Event {
+	ev := s.event(ns, t, id)
+	ev.Via = via
+	return ev
 }

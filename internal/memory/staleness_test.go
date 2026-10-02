@@ -290,3 +290,29 @@ func TestPinnedEmptyHeadIsNotReRead(t *testing.T) {
 		t.Errorf("head=%d changed=%d stale=%v", f.headCalls.Load(), f.changedCalls.Load(), r.Stale)
 	}
 }
+
+// StaleChecked is the tri-state's "checked" half: true for a verdict (fresh or
+// stale), false for an error or a record that was never checked.
+func TestAnnotateStale_StaleCheckedTriState(t *testing.T) {
+	h := &fakeHistory{head: goodSHA, changedFn: func(_ context.Context, sha string, _ []string) (bool, int, error) {
+		switch sha {
+		case "aaaaaaa1":
+			return true, 2, nil
+		case "bbbbbbb1":
+			return false, 0, nil
+		}
+		return false, 0, errors.New("git failed")
+	}}
+	recs := []*SearchRecord{
+		rec("repo", "aaaaaaa1", "a.go"), rec("repo", "bbbbbbb1", "a.go"),
+		rec("repo", "ccccccc1", "a.go"), rec("other", "aaaaaaa1", "a.go"),
+	}
+	staleSvc(h, time.Second).annotateStale(context.Background(), recs, 0)
+	got := []bool{recs[0].StaleChecked, recs[1].StaleChecked, recs[2].StaleChecked, recs[3].StaleChecked}
+	if want := []bool{true, true, false, false}; !reflect.DeepEqual(got, want) {
+		t.Errorf("StaleChecked = %v, want %v", got, want)
+	}
+	if recs[0].Stale == nil || recs[1].Stale != nil {
+		t.Errorf("Stale = %v / %v", recs[0].Stale, recs[1].Stale)
+	}
+}

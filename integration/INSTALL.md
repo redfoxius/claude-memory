@@ -296,3 +296,15 @@ the repo you are standing in and any of those files differ at the current
   `~/.config/claude-memory/env`. The hook also stops at its own latency
   budget. Per-session verdicts are cached under
   `~/.local/state/claude-memory/stale-cache/`.
+
+## Usage events and `stats`
+
+The hook appends one `card_injected` event per card to
+`~/.local/state/claude-memory/events/spool.jsonl` (a single local write, never a
+database call; capped at 10 MB). `serve`, `extract --run`, `ingest-pr` and
+`cleanup` drain it into the `events` table (migration 0003); a file the
+database rejected is kept as `spool.*.failed`. Until the new schema is applied
+(run `claude-memory cleanup` or `claude-memory migrate` once after upgrading)
+the events simply wait in the spool. `claude-memory stats` reports on them
+(`integration/USAGE.md`, "Usage stats"); events older than 365 days are
+removed by `cleanup`.
