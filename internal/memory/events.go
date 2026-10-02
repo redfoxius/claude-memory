@@ -181,8 +181,10 @@ type EventCounts struct {
 	UsefulAny          int                       `json:"useful_any"`          // distinct injected records, useful at/after injection
 	Feedback           map[string]int            `json:"feedback"`            // by outcome
 	CreatedBySource    map[string]int            `json:"created_by_source"`   // record_created by source
-	CandidatesCreated  int                       `json:"candidates_created"`  // record_created with status candidate
+	CandidatesCreated  int                       `json:"candidates_created"`  // record_created with status candidate, source other than import
 	CandidatesPromoted int                       `json:"candidates_promoted"` // of those, with a later record_promoted
+	ImportCreated      int                       `json:"import_created"`      // the same pair for source import
+	ImportPromoted     int                       `json:"import_promoted"`
 	Superseded         int                       `json:"superseded"`
 	DeprecatedByVia    map[string]int            `json:"deprecated_by_via"`
 	TTLDeleted         int                       `json:"ttl_deleted"`

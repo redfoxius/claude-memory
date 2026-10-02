@@ -188,8 +188,13 @@ func stateDir() string {
 func scopeSessionService(ctx context.Context, svc *memory.Service, history memory.CodeHistory, cfg *config.Config, cwd string) (*memory.Service, string) {
 	ns := resolveNamespace(cwd)
 	warnIfFallback(cwd, ns)
-	svc = svc.WithNamespace(ns)
+	return scopeCheckout(ctx, svc.WithNamespace(ns), history, cfg, cwd)
+}
 
+// scopeCheckout is the checkout half of scopeSessionService: it leaves the
+// namespace alone (the management CLI resolves that itself, without the
+// fallback warning).
+func scopeCheckout(ctx context.Context, svc *memory.Service, history memory.CodeHistory, cfg *config.Config, cwd string) (*memory.Service, string) {
 	rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	co, _, ok, err := history.Resolve(rctx, cwd)

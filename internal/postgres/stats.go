@@ -84,16 +84,23 @@ func (s *Store) StatsCounts(ctx context.Context, since time.Time, namespace stri
 		return c, fmt.Errorf("stats created: %w", err)
 	}
 
-	// Promotion: candidates created in the window with a later promotion event.
+	// Promotion: candidates created in the window with a later promotion
+	// event, imports counted apart so a bulk import reviewed in one pass does
+	// not distort the rate.
 	err = s.pool.QueryRow(ctx, `
-		SELECT count(*),
-		       count(*) FILTER (WHERE EXISTS (
-		           SELECT 1 FROM events p
-		           WHERE p.type = 'record_promoted' AND p.record_id = e.record_id AND p.at >= e.at))
-		FROM events e
-		WHERE e.type = 'record_created' AND e.status = 'candidate'
-		  AND e.at >= $1 AND ($2 = '' OR e.namespace = $2)`,
-		since, namespace).Scan(&c.CandidatesCreated, &c.CandidatesPromoted)
+		SELECT count(*) FILTER (WHERE c.source IS DISTINCT FROM 'import'),
+		       count(*) FILTER (WHERE c.source IS DISTINCT FROM 'import' AND c.promoted),
+		       count(*) FILTER (WHERE c.source = 'import'),
+		       count(*) FILTER (WHERE c.source = 'import' AND c.promoted)
+		FROM (
+			SELECT e.source,
+			       EXISTS (SELECT 1 FROM events p
+			               WHERE p.type = 'record_promoted' AND p.record_id = e.record_id AND p.at >= e.at) AS promoted
+			FROM events e
+			WHERE e.type = 'record_created' AND e.status = 'candidate'
+			  AND e.at >= $1 AND ($2 = '' OR e.namespace = $2)
+		) c`,
+		since, namespace).Scan(&c.CandidatesCreated, &c.CandidatesPromoted, &c.ImportCreated, &c.ImportPromoted)
 	if err != nil {
 		return c, fmt.Errorf("stats promotion: %w", err)
 	}
