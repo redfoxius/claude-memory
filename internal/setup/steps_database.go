@@ -112,6 +112,9 @@ func (s DatabaseStep) Seed(_ context.Context, rc ReadPorts, st *RunState) ([]Not
 	}
 	if ok {
 		t.Mode = DBModeExisting
+		if in.PGSSLMode != "" {
+			t.SSLMode = in.PGSSLMode
+		}
 		s.register(string(t.password))
 		st.DB.Set(t, SourceFlag)
 		return nil, nil
@@ -135,6 +138,9 @@ func (s DatabaseStep) Seed(_ context.Context, rc ReadPorts, st *RunState) ([]Not
 		t = t.WithPassword(in.PGPassword)
 	}
 	t.Mode, t.Source = DBModeExisting, seed.Source
+	if in.PGSSLMode != "" {
+		t.SSLMode = in.PGSSLMode
+	}
 	s.register(string(t.password))
 	st.DB.Set(t, seed.Source)
 	return seed.Notes, nil

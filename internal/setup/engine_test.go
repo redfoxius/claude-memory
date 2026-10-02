@@ -458,6 +458,23 @@ func TestEngineAwaitQuitExits130AndKeepsAppliedArtifacts(t *testing.T) {
 	}
 }
 
+// Three invalid answers at the Await "waiting for you" prompt end the run
+// with exit 2 (a usage error), keeping what the first Apply already did.
+func TestEngineAwaitTooManyAttemptsExits2(t *testing.T) {
+	t.Parallel()
+	h := newEH(t, true)
+	db := awaitStep(h, false)
+	h.ui.ExpectSelect("database", -1).ExpectConfirm("Apply", true).ExpectSelectErr("waiting", ErrTooManyAttempts)
+	r := h.run(Inputs{}, db)
+	wantExit(t, r, ExitUsage)
+	if !errors.Is(r.Err, ErrTooManyAttempts) {
+		t.Fatalf("err = %v, want ErrTooManyAttempts", r.Err)
+	}
+	if m := h.manifest(); len(m.Artifacts) != 1 {
+		t.Fatalf("manifest = %+v", m.Artifacts)
+	}
+}
+
 func TestEngineAwaitUnderYesBlocksDependentsExit1(t *testing.T) {
 	t.Parallel()
 	h := newEH(t, false)

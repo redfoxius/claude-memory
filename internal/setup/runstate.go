@@ -109,6 +109,7 @@ type Inputs struct {
 	Skip           []string // step ids (AC-53)
 	Topology       string
 	PGDSN          string
+	PGSSLMode      string // --pg-sslmode: overrides the sslmode of a flag or env-file DSN
 	PGPassword     string // read from stdin before Detect (AC-31)
 	OllamaURL      string
 	OllamaModel    string
