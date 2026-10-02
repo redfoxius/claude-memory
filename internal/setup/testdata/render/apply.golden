@@ -1,0 +1,14 @@
+… database — waiting for you
+    Run:
+      psql -f ~/.config/claude-memory/bootstrap.sql
+    then choose re-check.
+✓ Binary — unchanged
+✓ Env file — wrote 1 key
+    warn: drift: hooks.settings/Stop kept as is
+✗ Database — connect postgresql://claude_memory:***@db:5432/x: refused · fix: check the host and port
+✗ Ollama — blocked: ollama not found · fix: brew install ollama
+– Scheduled jobs — blocked: needs database
+– Skills — skipped by --skip
+– CLAUDE.md — not run
+
+Finished with problems: 1 applied · 1 unchanged · 1 skipped · 2 blocked · 1 failed · 1 not run

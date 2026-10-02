@@ -1,0 +1,31 @@
+Plan
+
+Env file
+  write   ~/.config/claude-memory/env — add MEMORY_PG_DSN
+  chmod   ~/.config/claude-memory/env — 0600
+  diff ~/.config/claude-memory/env
+    --- a/env
+    +++ b/env
+    @@ -1 +1,2 @@
+     MEMORY_OLLAMA_URL=http://localhost:11434
+    +MEMORY_PG_DSN=postgresql://claude_memory:***@db:5432/claude_memory
+  info: the password is kept in the env file only
+
+Hooks (settings)
+  write   ~/.claude/settings.json
+  diff ~/.claude/settings.json
+    --- a/settings.json
+    +++ b/settings.json
+    @@ -1,3 +1,4 @@
+     {
+    -  "a": 1
+    +  "a": 1,
+    +  "hooks": {}
+     }
+
+Scheduled jobs (after binary)
+  load    io.github.claude-memory.digest — launchd, daily
+  warn: job PATH has no psql
+
+info: 1 step skipped: ollama
+
