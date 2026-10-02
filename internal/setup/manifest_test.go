@@ -125,3 +125,38 @@ func TestManifestRefusesSecrets(t *testing.T) {
 		t.Errorf("writes = %v", fsys.Writes())
 	}
 }
+
+func TestManifestUpsertDropTrimAndRetained(t *testing.T) {
+	t.Parallel()
+	m := &Manifest{}
+	a := Artifact{Step: "hooks.scripts", Kind: KindFile, Path: "/h/a.sh", Version: "v1"}
+	if !m.Upsert(a) || m.Upsert(a) {
+		t.Fatal("Upsert must report a change once")
+	}
+	a2 := a
+	a2.SHA256 = "abc"
+	if !m.Upsert(a2) || len(m.Artifacts) != 1 || m.Artifacts[0].SHA256 != "abc" {
+		t.Fatalf("hash change not recorded: %+v", m.Artifacts)
+	}
+	m.Upsert(Artifact{Step: "envfile", Kind: KindEnvKey, Path: "/e", Identity: "K"})
+	if !m.Trim([]ArtifactKey{a.Key(), {Kind: KindFile, Path: "/nope"}}) || len(m.Artifacts) != 1 {
+		t.Fatalf("Trim: %+v", m.Artifacts)
+	}
+	p := Paths{ClaudeDir: "/home/u/.claude"}
+	for _, c := range []struct {
+		a    Artifact
+		want bool
+	}{
+		{Artifact{Kind: KindEnvKey}, true},
+		{Artifact{Kind: KindDir, Path: "/home/u/.config/claude-memory"}, true},
+		{Artifact{Kind: KindDir, Path: "/home/u/.local/bin"}, true},
+		{Artifact{Kind: KindDir, Path: "/home/u/.claude/hooks/claude-memory"}, false},
+		{Artifact{Kind: KindDir, Path: "/home/u/.claude/skills/remember"}, false},
+		{Artifact{Kind: KindDir, Path: "/home/u/.claudex/skills"}, true},
+		{Artifact{Kind: KindFile, Path: "/home/u/.claude/x"}, false},
+	} {
+		if got := ArtifactRetained(c.a, p); got != c.want {
+			t.Errorf("ArtifactRetained(%+v) = %v, want %v", c.a, got, c.want)
+		}
+	}
+}
