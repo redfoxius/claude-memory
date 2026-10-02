@@ -554,12 +554,13 @@ func cmdImport(args []string) error {
 	ctx := context.Background()
 	cwd, _ := os.Getwd()
 	history := gitlog.Exec{}
+	nsCfg := loadNamespaces() // once: every directory lookup reuses it
 	d := importDeps{
 		Env: importer.Env{
 			FS: readOnlyFS{},
 			// namespaces.yaml only: MEMORY_NAMESPACE must not decide where a
 			// foreign home dir's knowledge goes.
-			NamespaceOf: func(dir string) string { return loadNamespaces().Resolve(dir) },
+			NamespaceOf: func(dir string) string { return nsCfg.Resolve(dir) },
 			Toplevel: func(dir string) (string, bool) {
 				co, _, ok, err := history.Resolve(ctx, dir)
 				return co.Dir, err == nil && ok
@@ -568,18 +569,18 @@ func cmdImport(args []string) error {
 		},
 		Cwd:         cwd,
 		Home:        os.Getenv("HOME"),
-		NamespaceOf: func(dir string) (string, string) { return loadNamespaces().Explain(dir) },
+		NamespaceOf: func(dir string) (string, string) { return nsCfg.Explain(dir) },
 		Scrub:       scrub.New().Scrub,
-		Open: func(ns string) (importService, func(), error) {
+		Open: func(ns string) (importService, time.Duration, func(), error) {
 			cfg, err := loadConfig()
 			if err != nil {
-				return nil, nil, err
+				return nil, 0, nil, err
 			}
 			svc, _, cleanup, err := buildServiceWithEvents(ctx, cfg)
 			if err != nil {
-				return nil, nil, fmt.Errorf("build service: %w", err)
+				return nil, 0, nil, fmt.Errorf("build service: %w", err)
 			}
-			return svc.WithNamespace(ns), cleanup, nil
+			return svc.WithNamespace(ns), cfg.CandidateTTL, cleanup, nil
 		},
 		Out: os.Stdout,
 		Err: os.Stderr,

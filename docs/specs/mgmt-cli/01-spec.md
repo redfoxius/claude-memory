@@ -19,7 +19,7 @@ namespace from `namespaces.yaml` only (AC-22); `--namespace` applied last
 AC-34); imports excluded from the promotion rate (new AC-40, D1); `SKIP`
 never accepted as a decision (AC-26); EOF = abort/N (AC-8, AC-17); file
 refs confined to the toplevel (AC-35); `$EDITOR` via `sh -c` (AC-10); id
-prefix limits (AC-3); dry-run early dispatch (D7). **Withdrawn:** AC-36
+prefix limits (AC-3); dry-run early dispatch (D7). Post-implementation review: AC-28 reminder prints the configured candidate TTL instead of a fixed 30 days; migrations run under an advisory lock; INSIGHTS paths are symlink-resolved before keys are built. **Withdrawn:** AC-36
 (commit-by-date), AC-39 (decoder move). §9 answered: proposed defaults.
 
 ## 1. Problem
@@ -222,7 +222,9 @@ for staleness).
   with a reason. Only a DB or embedding error stops import (exit 1; a
   re-run continues where it stopped, by AC-24). After a run that added
   N > 0 records it shall print
-  "N candidates await `claude-memory review` within 30 days".
+  "N candidates await `claude-memory review`; unreviewed candidates are
+  deleted after <TTL> days (MEMORY_CANDIDATE_TTL)", with <TTL> from
+  `cfg.CandidateTTL` (default 180 days), not a fixed number.
 
 ### 5.8 Import — auto-memory
 - **AC-29** Import shall read `<projects-dir>/*/memory/*.md` (default
@@ -323,10 +325,13 @@ for staleness).
   created-by-source.
 
 ## 8. Risks
-- **TTL cleanup** deletes unreviewed imported candidates after 30 days, and
-  a later re-import re-creates them (the key went with the row). Review
-  soon after importing; import prints the 30-day reminder (AC-28);
-  documented in DEPLOY.md.
+- **TTL cleanup** deletes unreviewed imported candidates after the candidate
+  TTL (`MEMORY_CANDIDATE_TTL`, default 180 days), and a later re-import
+  re-creates them (the key went with the row). Review soon after importing;
+  import prints the configured TTL (AC-28); documented in DEPLOY.md.
+- **Imported candidates are live immediately.** Candidates are searchable and
+  injected into sessions (flagged unverified) before review, so run
+  `--dry-run` first and review soon; the database is shared.
 - **Similarity skip** (≥ 0.85) can hide an import that adds a nuance to an
   existing record; the skip line names the record so the owner can edit it.
 - **Personal preferences** in auto-memory `feedback` files may not be team
@@ -344,4 +349,4 @@ for staleness).
 2. INSIGHTS `Open Questions` / `Session Notes` are skipped.
 3. `rm --hard` asks y/N; `--yes` bypasses; EOF or an empty answer = N (a non-TTY stdin that is at EOF therefore means N; piped `y` is honored).
 4. `created_at` = import time (the store sets it anyway).
-5. TTL re-import is documented; import prints the 30-day reminder.
+5. TTL re-import is documented; import prints the configured TTL reminder.

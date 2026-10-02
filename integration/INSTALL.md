@@ -307,7 +307,8 @@ the next session start (`serve`, `extract --run`, `ingest-pr`); you do not run
 `migrate` for it. Rolling back means reinstalling the old binary, which ignores
 the new column and index. Unreviewed imported candidates are deleted by the
 cleanup TTL and a later import re-creates them, so run `claude-memory review`
-within 30 days.
+within the candidate TTL (`MEMORY_CANDIDATE_TTL`, default 180 days; the
+import prints it).
 
 ## Usage events and `stats`
 

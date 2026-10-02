@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -141,5 +142,19 @@ func TestStoreValidation_WrapsErrInvalidRequest(t *testing.T) {
 				t.Errorf("err = %v, want ErrInvalidRequest", err)
 			}
 		})
+	}
+}
+
+func TestStoreImport_UniqueViolationRaceIsSkip(t *testing.T) {
+	st := &mockStore{CreateFunc: func(context.Context, *record.Record) (*record.Record, error) {
+		return nil, fmt.Errorf("insert record: %w", ErrImportKeyExists)
+	}}
+	sink := &recSink{}
+	resp, err := eventSvc(st, sink).Store(context.Background(), importReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Decision != ActionSkip || resp.SkipReason != "already imported" || len(sink.evs) != 0 {
+		t.Errorf("resp = %+v, events %v", resp, sink.types())
 	}
 }

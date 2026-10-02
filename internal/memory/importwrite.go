@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -68,6 +69,11 @@ func (s *Service) storeImport(ctx context.Context, req *StoreRequest, ns, title,
 		evs = append(evs, s.createdEvent(ns, rec.ID, record.SourceImport, rec.Status))
 		return nil
 	})
+	if errors.Is(err, ErrImportKeyExists) {
+		// A concurrent import won the race for the same key; the transaction
+		// was rolled back and nothing of ours was written.
+		return &StoreResponse{Namespace: ns, Decision: ActionSkip, SkipReason: "already imported"}, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("write transaction failed: %w", err)
 	}

@@ -1,11 +1,13 @@
 package importer
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // maxFileBytes bounds a file the importer will read.
@@ -56,9 +58,12 @@ func DiscoverAutoMem(env Env, projectsDir, target string) ([]Item, []Skip, error
 			continue
 		}
 		memDir := filepath.Join(projectsDir, p.Name(), "memory")
+		if fi, err := env.FS.Lstat(memDir); err != nil || !fi.IsDir() {
+			continue // no memory dir, or a symlink to one: never followed
+		}
 		files, err := env.FS.ReadDir(memDir)
 		if err != nil {
-			continue // no memory dir
+			continue
 		}
 		var names []string
 		for _, f := range files {
@@ -83,6 +88,10 @@ func DiscoverAutoMem(env Env, projectsDir, target string) ([]Item, []Skip, error
 				skips = append(skips, Skip{Origin: origin, Reason: "index file"})
 				continue
 			}
+			if ns != target {
+				skips = append(skips, Skip{Origin: origin, Reason: "other namespace (" + ns + ")"})
+				continue
+			}
 			full := filepath.Join(memDir, name)
 			data, reason := readRegular(env.FS, full)
 			if reason != "" {
@@ -92,10 +101,6 @@ func DiscoverAutoMem(env Env, projectsDir, target string) ([]Item, []Skip, error
 			item, skip := ParseAutoMemory(name, data)
 			if skip != nil {
 				skips = append(skips, Skip{Origin: origin, Reason: skip.Reason})
-				continue
-			}
-			if ns != target {
-				skips = append(skips, Skip{Origin: origin, Reason: "other namespace (" + ns + ")"})
 				continue
 			}
 			item.Origin, item.Home, item.Repo = origin, home, repo
@@ -123,6 +128,12 @@ func readRegular(fsys FS, path string) (data []byte, reason string) {
 	if err != nil {
 		return nil, "unreadable"
 	}
+	if bytes.IndexByte(data, 0) >= 0 {
+		return nil, "contains NUL"
+	}
+	if !utf8.Valid(data) {
+		return nil, "not UTF-8"
+	}
 	return data, ""
 }
 
@@ -133,6 +144,11 @@ func DiscoverInsights(env Env, paths []string, target string) ([]Item, []Skip, e
 	var files []string
 	var skips []Skip
 	for _, p := range paths {
+		// Resolve symlinks first so the locator, key and provenance are
+		// toplevel-relative whatever spelling the path came in.
+		if real, err := env.FS.EvalSymlinks(p); err == nil {
+			p = real
+		}
 		fi, err := env.FS.Lstat(p)
 		if err != nil {
 			return nil, nil, fmt.Errorf("stat %s: %w", p, err)

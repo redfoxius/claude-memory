@@ -284,6 +284,11 @@ var ErrNotFound = errors.New("record not found")
 // (import) can tell a bad item from an infrastructure failure.
 var ErrInvalidRequest = errors.New("invalid request")
 
+// ErrImportKeyExists is returned by Create when another writer inserted the
+// same (namespace, import key) first (unique violation). The write path maps
+// it to a SKIP.
+var ErrImportKeyExists = errors.New("import key already exists")
+
 // ErrNoEmbedding is returned by Similar for a record that has no stored
 // embedding.
 var ErrNoEmbedding = errors.New("record has no embedding")

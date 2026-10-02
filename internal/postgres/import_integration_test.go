@@ -5,11 +5,16 @@ package postgres
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/url"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"claude-memory/internal/memory"
 	"claude-memory/internal/record"
@@ -188,5 +193,77 @@ func TestCreateWithoutKeyWorksOnPre0004Schema(t *testing.T) {
 	})
 	if err != nil {
 		t.Errorf("tx Create without key on old schema: %v", err)
+	}
+}
+
+// D1: several processes starting at once must all migrate without error (the
+// migration lock serializes them), in several rounds on fresh databases.
+func TestConcurrentNewOnFreshDatabase(t *testing.T) {
+	ctx := context.Background()
+	dsn, cleanup := startPostgresContainer(t, ctx)
+	defer cleanup()
+	admin, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for round := 0; round < 4; round++ {
+		name := fmt.Sprintf("race_%d", round)
+		if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err != nil {
+			t.Fatal(err)
+		}
+		u.Path = "/" + name
+		// The extension needs a superuser, and tests connect as the owner of
+		// a throwaway container, which is one.
+		var wg sync.WaitGroup
+		errs := make([]error, 4)
+		for i := range errs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s, err := New(ctx, u.String())
+				if err == nil {
+					s.Close()
+				}
+				errs[i] = err
+			}()
+		}
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Errorf("round %d starter %d: %v", round, i, err)
+			}
+		}
+	}
+}
+
+// D2: a unique violation on the import key index maps to ErrImportKeyExists
+// from both Create paths (a concurrent import won the race).
+func TestCreateDuplicateImportKeyMapsToSentinel(t *testing.T) {
+	ctx := context.Background()
+	dsn, cleanup := startPostgresContainer(t, ctx)
+	defer cleanup()
+	s, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	key := "automem:dup"
+	if _, err := s.Create(ctx, importRecord("ns-a", "first", &key)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(ctx, importRecord("ns-a", "second", &key)); !errors.Is(err, memory.ErrImportKeyExists) {
+		t.Errorf("Store.Create err = %v", err)
+	}
+	err = s.WithTx(ctx, func(tx memory.TxStore) error {
+		_, err := tx.Create(ctx, importRecord("ns-a", "third", &key))
+		return err
+	})
+	if !errors.Is(err, memory.ErrImportKeyExists) {
+		t.Errorf("tx Create err = %v", err)
 	}
 }

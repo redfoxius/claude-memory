@@ -174,7 +174,14 @@ claude-memory import insights [PATH...] [--dry-run] [--namespace NS]
 - **TTL.** Imported candidates are ordinary candidates: `cleanup` deletes the
   unreviewed ones after the candidate TTL, and a later import re-creates them
   (the key is deleted with the row). The run ends with `N candidates await
-  `claude-memory review` within 30 days`: review them soon after importing.
+  `claude-memory review`; unreviewed candidates are deleted after <TTL> days
+  (MEMORY_CANDIDATE_TTL)` (default 180): review them soon after importing.
+- **Live before review.** Imported candidates are searchable and are injected
+  into sessions (marked unverified) immediately, before you review them, and
+  the database is shared. Run `--dry-run` first and review soon.
+- Files that are not valid UTF-8 or contain NUL bytes, symlinked `memory`
+  directories and undated or malformed INSIGHTS bullets are skipped with a
+  reason.
 
 ## Seeding and correcting records
 

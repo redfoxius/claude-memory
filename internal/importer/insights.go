@@ -76,6 +76,11 @@ func ParseInsights(data []byte) ([]Entry, []Skip) {
 			m := entryRe.FindStringSubmatch(line)
 			cur = &Entry{Section: section, Date: m[1], Line: i + 1}
 			body = []string{m[2]}
+		case strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* "):
+			// A top-level bullet that is not a plain dated entry (undated,
+			// bold date, other shape).
+			flush()
+			skips = append(skips, Skip{Origin: lineOrigin(i + 1), Reason: "unrecognized entry"})
 		case cur != nil && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")) && strings.TrimSpace(line) != "":
 			body = append(body, strings.TrimSpace(line))
 		default:

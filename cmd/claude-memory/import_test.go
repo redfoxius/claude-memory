@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-memory/internal/importer"
 	"claude-memory/internal/memory"
@@ -75,9 +76,9 @@ func newImportFixture(t *testing.T) *importFixture {
 		Home:        root,
 		NamespaceOf: func(string) (string, string) { return f.cwdNS, f.cwdWhy },
 		Scrub:       scrub.New().Scrub,
-		Open: func(ns string) (importService, func(), error) {
+		Open: func(ns string) (importService, time.Duration, func(), error) {
 			f.opened++
-			return f.svc, func() {}, nil
+			return f.svc, 90 * 24 * time.Hour, func() {}, nil
 		},
 		Out: &f.out,
 		Err: &f.out,
@@ -117,7 +118,7 @@ func TestImportRealRunSummaryAndReminder(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := f.out.String()
-	for _, want := range []string{"added 3f2a91c0", "skipped (already imported)", "added 1, skipped 1", "1 candidates await `claude-memory review` within 30 days"} {
+	for _, want := range []string{"added 3f2a91c0", "skipped (already imported)", "added 1, skipped 1", "1 candidates await `claude-memory review`; unreviewed candidates are deleted after 90 days (MEMORY_CANDIDATE_TTL)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -283,5 +284,11 @@ func TestImportDispatchRealRunLoadsConfig(t *testing.T) {
 	out, code := runChild(t, []string{"HOME=" + home}, "import", "automem", "--namespace", "testns")
 	if code != 1 || !strings.Contains(out, dsnRequired) || strings.Contains(out, "unknown subcommand") {
 		t.Errorf("exit %d:\n%s", code, out)
+	}
+}
+
+func TestPrintableEscapesControlChars(t *testing.T) {
+	if got := printable("a\x1b[31mb\nc"); strings.ContainsAny(got, "\x1b\n") {
+		t.Errorf("printable = %q", got)
 	}
 }

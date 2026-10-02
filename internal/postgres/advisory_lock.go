@@ -169,7 +169,7 @@ func (t *txStoreImpl) Create(ctx context.Context, r *record.Record) (*record.Rec
 	err := t.tx.QueryRow(ctx, query, args...).Scan(&r.ID)
 
 	if err != nil {
-		return nil, fmt.Errorf("insert record: %w", err)
+		return nil, insertError(err)
 	}
 
 	return r, nil

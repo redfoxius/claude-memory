@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -53,7 +54,7 @@ func TestImportEndToEnd(t *testing.T) {
 		WithNamespace("acme").WithEvents(store)
 
 	f := newImportFixture(t)
-	f.deps.Open = func(string) (importService, func(), error) { return svc, func() {}, nil }
+	f.deps.Open = func(string) (importService, time.Duration, func(), error) { return svc, 24 * time.Hour, func() {}, nil }
 	args := []string{"automem", "--projects-dir", f.projDir}
 
 	if err := runImport(ctx, f.deps, args); err != nil {

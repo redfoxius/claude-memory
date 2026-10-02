@@ -358,8 +358,8 @@ func TestStatsCounts(t *testing.T) {
 }
 
 // AC-40: imported candidates are counted apart from the promotion rate. The
-// 'import' event source only exists after the import migration, so this test
-// lifts the source CHECK to insert such events.
+// 'import' event source is accepted since migration 0004, so this test inserts
+// such events directly.
 func TestStatsCountsSeparateImports(t *testing.T) {
 	ctx := context.Background()
 	dsn, cleanup := startPostgresContainer(t, ctx)
@@ -369,9 +369,6 @@ func TestStatsCountsSeparateImports(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if _, err := s.pool.Exec(ctx, `ALTER TABLE events DROP CONSTRAINT IF EXISTS events_source_check`); err != nil {
-		t.Fatal(err)
-	}
 
 	inl, imp1, imp2 := uuid.New().String(), uuid.New().String(), uuid.New().String()
 	created := func(rec string, src memory.EventSource) memory.Event {

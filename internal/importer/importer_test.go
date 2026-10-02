@@ -149,7 +149,7 @@ func TestParseInsights(t *testing.T) {
 	for _, s := range skips {
 		reasons = append(reasons, s.Reason)
 	}
-	if !slices.Equal(reasons, []string{"section Open Questions", "section Session Notes"}) {
+	if !slices.Equal(reasons, []string{"section Open Questions", "section Session Notes", "unrecognized entry"}) {
 		t.Errorf("skip reasons = %v", reasons)
 	}
 }
@@ -294,5 +294,82 @@ func TestDiscoverInsights(t *testing.T) {
 	items, skips, _ = DiscoverInsights(envOther, []string{top}, "acme")
 	if len(items) != 0 || len(skips) != 1 || skips[0].Reason != "other namespace (pet)" {
 		t.Errorf("other ns: %+v %+v", items, skips)
+	}
+}
+
+func TestDiscoverRejectsNonUTF8AndNUL(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects")
+	mem := filepath.Join(projects, "-enc", "memory")
+	write(t, filepath.Join(mem, "nul.md"), "---\ndescription: D\ntype: feedback\n---\nb\x00c")
+	write(t, filepath.Join(mem, "bad.md"), "---\ndescription: D\ntype: feedback\n---\nb\xff\xfe")
+	env := fixedEnv(map[string]string{root: "ns"}, func(string) (string, bool) { return "", false }, map[string]string{"-enc": root})
+	items, skips, err := DiscoverAutoMem(env, projects, "ns")
+	if err != nil || len(items) != 0 {
+		t.Fatalf("items %+v err %v", items, err)
+	}
+	got := map[string]string{}
+	for _, s := range skips {
+		got[s.Origin] = s.Reason
+	}
+	if got["-enc/nul.md"] != "contains NUL" || got["-enc/bad.md"] != "not UTF-8" {
+		t.Errorf("skips = %v", got)
+	}
+
+	ins := filepath.Join(root, "INSIGHTS.md")
+	write(t, ins, "## What Works\n- 2026-01-01 \u2014 ok\xff\n")
+	_, skips, _ = DiscoverInsights(env, []string{ins}, "ns")
+	if len(skips) != 1 || skips[0].Reason != "not UTF-8" {
+		t.Errorf("insights skips = %+v", skips)
+	}
+}
+
+func TestDiscoverAutoMemDoesNotFollowSymlinkedMemoryDir(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects")
+	real := filepath.Join(root, "elsewhere")
+	write(t, filepath.Join(real, "a.md"), "---\ndescription: D\ntype: feedback\n---\nb")
+	if err := os.MkdirAll(filepath.Join(projects, "-enc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(projects, "-enc", "memory")); err != nil {
+		t.Fatal(err)
+	}
+	env := fixedEnv(map[string]string{root: "ns"}, func(string) (string, bool) { return "", false }, map[string]string{"-enc": root})
+	items, skips, _ := DiscoverAutoMem(env, projects, "ns")
+	if len(items) != 0 || len(skips) != 0 {
+		t.Errorf("followed a symlinked memory dir: %+v %+v", items, skips)
+	}
+}
+
+func TestDiscoverInsightsKeyStableAcrossPathSpelling(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	top := filepath.Join(root, "repo")
+	write(t, filepath.Join(top, "INSIGHTS.md"), "## What Works\n- 2026-01-02 \u2014 Same entry.\n")
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(top, link); err != nil {
+		t.Fatal(err)
+	}
+	env := fixedEnv(map[string]string{top: "ns"}, func(dir string) (string, bool) {
+		real, _ := filepath.EvalSymlinks(dir)
+		return top, strings.HasPrefix(real, top)
+	}, nil)
+	a, _, err := DiscoverInsights(env, []string{top}, "ns")
+	if err != nil || len(a) != 1 {
+		t.Fatalf("%v %+v", err, a)
+	}
+	b, _, err := DiscoverInsights(env, []string{link}, "ns")
+	if err != nil || len(b) != 1 {
+		t.Fatalf("%v %+v", err, b)
+	}
+	if a[0].Key != b[0].Key || a[0].Content != b[0].Content {
+		t.Errorf("key/content differ across spellings: %q vs %q", a[0].Key, b[0].Key)
+	}
+}
+
+func TestParseInsightsUnrecognizedBullets(t *testing.T) {
+	_, skips := ParseInsights([]byte("## What Works\n- **2026-01-02** \u2014 bold\n- plain\n"))
+	if len(skips) != 2 || skips[0].Reason != "unrecognized entry" {
+		t.Errorf("skips = %+v", skips)
 	}
 }

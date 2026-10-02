@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
+	"time"
+	"unicode"
 
 	"claude-memory/internal/importer"
 	"claude-memory/internal/memory"
@@ -43,13 +46,14 @@ type importDeps struct {
 	Scrub func(string) *scrub.RedactionResult
 	// Open builds the service scoped to the target namespace. It is called
 	// only for a real run, so --dry-run needs no config, DSN or Ollama.
-	Open func(ns string) (importService, func(), error)
+	Open func(ns string) (svc importService, candidateTTL time.Duration, cleanup func(), err error)
 	Out  io.Writer
 	Err  io.Writer
 }
 
-// reviewReminder is printed after a run that added candidates.
-const reviewReminder = "%d candidates await `claude-memory review` within 30 days\n"
+// reviewReminder is printed after a run that added candidates; the TTL is the
+// configured candidate lifetime (MEMORY_CANDIDATE_TTL).
+const reviewReminder = "%d candidates await `claude-memory review`; unreviewed candidates are deleted after %d days (MEMORY_CANDIDATE_TTL)\n"
 
 // runImport implements `import automem|insights`.
 func runImport(ctx context.Context, d importDeps, args []string) error {
@@ -153,7 +157,7 @@ func (d importDeps) printPlan(target string, items []importer.Item, skips []impo
 			redact = "yes"
 		}
 		fmt.Fprintf(d.Out, "would import  %-10s repo=%s files=%d key=%s would redact: %s  %s\n",
-			it.Kind, it.Repo, len(it.Files), keyPrefix(it.Key), redact, title.Text)
+			it.Kind, it.Repo, len(it.Files), keyPrefix(it.Key), redact, printable(title.Text))
 	}
 	for _, s := range skips {
 		fmt.Fprintf(d.Out, "skip          %s: %s\n", s.Origin, s.Reason)
@@ -165,21 +169,21 @@ func (d importDeps) printPlan(target string, items []importer.Item, skips []impo
 // embed, dedup, advisory lock, events). A validation error skips the item; a
 // DB or embedding error stops the run (a re-run continues where it stopped).
 func (d importDeps) store(ctx context.Context, target string, items []importer.Item, skips []importer.Skip) error {
-	for _, s := range skips {
-		fmt.Fprintf(d.Out, "%s: skipped (%s)\n", s.Origin, s.Reason)
-	}
-	skipped := len(skips)
-	svc, cleanup, err := d.Open(target)
+	svc, ttl, cleanup, err := d.Open(target)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+	for _, s := range skips {
+		fmt.Fprintf(d.Out, "%s: skipped (%s)\n", s.Origin, s.Reason)
+	}
+	skipped := len(skips)
 
 	added := 0
 	summary := func() {
 		fmt.Fprintf(d.Out, "added %d, skipped %d\n", added, skipped)
 		if added > 0 {
-			fmt.Fprintf(d.Out, reviewReminder, added)
+			fmt.Fprintf(d.Out, reviewReminder, added, int(ttl.Hours()/24))
 		}
 	}
 	for _, it := range items {
@@ -211,4 +215,14 @@ func (d importDeps) store(ctx context.Context, target string, items []importer.I
 	}
 	summary()
 	return nil
+}
+
+// printable escapes control characters so a title cannot drive the terminal.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '\uFFFD'
+		}
+		return r
+	}, s)
 }
