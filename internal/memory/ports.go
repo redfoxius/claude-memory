@@ -69,6 +69,9 @@ type TxStore interface {
 	Get(ctx context.Context, id string) (*record.Record, error)
 	Create(ctx context.Context, r *record.Record) (*record.Record, error)
 	Update(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error)
+	// ImportKeyExists reports whether a record of the namespace (any status)
+	// already carries the import key.
+	ImportKeyExists(ctx context.Context, namespace, key string) (bool, error)
 }
 
 // EmbeddingProvider is the port for semantic embedding generation.
@@ -185,6 +188,9 @@ type StoreRequest struct {
 	Source             record.Source
 	Confidence         *float64            // If nil, defaults are applied per source (AC-29).
 	ExtractionDecision *ExtractionDecision // Optional; honored only for session/pr sources.
+	// ImportKey is the dedup key of an imported item. Required for
+	// Source=import and rejected for every other source.
+	ImportKey string
 }
 
 // ExtractionDecision is the action chosen by the haiku extraction for session/PR paths,
@@ -203,6 +209,8 @@ const (
 	ActionUpdate    WriteAction = "UPDATE"    // Enriches an existing record.
 	ActionSupersede WriteAction = "SUPERSEDE" // New fact replaces old one; old becomes deprecated.
 	ActionNoop      WriteAction = "NOOP"      // Existing record seen again; increment seen_count.
+	// ActionSkip is an outcome of an import (nothing written), never an input.
+	ActionSkip WriteAction = "SKIP"
 )
 
 // StoreResponse is the output of Store, corresponding to the memory_store MCP tool.
@@ -212,6 +220,9 @@ type StoreResponse struct {
 	ID                   string
 	Decision             WriteAction
 	CandidatesConsidered []*Candidate
+	// SkipReason says why an import wrote nothing ("already imported" or
+	// "duplicate of <id>"); empty otherwise.
+	SkipReason string
 }
 
 // UpdateRequest is the input to Update, corresponding to the memory_update MCP tool.
@@ -268,6 +279,10 @@ type FeedbackResponse struct {
 
 // ErrNotFound is returned when a requested record does not exist.
 var ErrNotFound = errors.New("record not found")
+
+// ErrInvalidRequest wraps every Store request validation error, so a caller
+// (import) can tell a bad item from an infrastructure failure.
+var ErrInvalidRequest = errors.New("invalid request")
 
 // ErrNoEmbedding is returned by Similar for a record that has no stored
 // embedding.

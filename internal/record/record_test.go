@@ -186,3 +186,9 @@ func TestValidate_MultipleIssues(t *testing.T) {
 		t.Errorf("Expected multiple validation issues, got %d", len(err.Issues))
 	}
 }
+
+func TestSourceImportIsValid(t *testing.T) {
+	if !SourceImport.IsValid() || Source("bogus").IsValid() {
+		t.Error("import must be a valid source and bogus must not")
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"claude-memory/internal/eventspool"
 	"claude-memory/internal/extraction"
 	"claude-memory/internal/gitlog"
+	"claude-memory/internal/importer"
 	"claude-memory/internal/memory"
 	"claude-memory/internal/ollama"
 	"claude-memory/internal/postgres"
@@ -72,6 +73,19 @@ func exitCode(err error) int {
 	return 1
 }
 
+// loadConfig loads the env file if it exists, then the environment.
+func loadConfig() (*config.Config, error) {
+	configPath := filepath.Join(os.Getenv("HOME"), ".config", "claude-memory", "env")
+	if err := config.LoadFromFile(configPath); err != nil {
+		return nil, fmt.Errorf("load config file: %w", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	return cfg, nil
+}
+
 func run() error {
 	// Early dispatch: these subcommands need no database, Ollama or DSN, and
 	// must work with no env file, a 0644 one, or no MEMORY_PG_DSN (AC-1).
@@ -82,6 +96,10 @@ func run() error {
 			return cmdNamespaces(os.Args[2:])
 		case "version":
 			return cmdVersion(os.Args[2:])
+		case "import":
+			// Before config load: --dry-run needs no env file, DSN, Postgres or
+			// Ollama; a real run loads the config itself, lazily.
+			return cmdImport(os.Args[2:])
 		case "install":
 			// Before config load: no env file or DSN is needed (AC-1).
 			return cmdInstall(os.Args[2:])
@@ -99,15 +117,9 @@ func run() error {
 		}
 	}
 
-	// Load config from file first if it exists, then from environment.
-	configPath := filepath.Join(os.Getenv("HOME"), ".config", "claude-memory", "env")
-	if err := config.LoadFromFile(configPath); err != nil {
-		return fmt.Errorf("load config file: %w", err)
-	}
-
-	cfg, err := config.Load()
+	cfg, err := loadConfig()
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return err
 	}
 
 	// Parse subcommand.
@@ -115,7 +127,7 @@ func run() error {
 	args := flag.Args()
 
 	if len(args) == 0 {
-		return fmt.Errorf("no subcommand specified; available: serve, hook, extract, ingest-pr, cleanup, stats, ls, show, rm, edit, promote, review, seed, eval-retrieval, migrate, namespaces, install, doctor, version")
+		return fmt.Errorf("no subcommand specified; available: serve, hook, extract, ingest-pr, cleanup, stats, ls, show, rm, edit, promote, review, import, seed, eval-retrieval, migrate, namespaces, install, doctor, version")
 	}
 
 	subcommand := args[0]
@@ -533,4 +545,44 @@ func buildCodeHistory(cfg *config.Config) func(sessionID string) memory.CodeHist
 		}
 		return gitlog.Cached(gitlog.Exec{}, store, cfg.StaleTimeoutHook)
 	}
+}
+
+// cmdImport is the composition root of `import`. It runs before the config is
+// loaded; the service (and with it the DSN and Ollama) is built by Open only
+// for a real run.
+func cmdImport(args []string) error {
+	ctx := context.Background()
+	cwd, _ := os.Getwd()
+	history := gitlog.Exec{}
+	d := importDeps{
+		Env: importer.Env{
+			FS: readOnlyFS{},
+			// namespaces.yaml only: MEMORY_NAMESPACE must not decide where a
+			// foreign home dir's knowledge goes.
+			NamespaceOf: func(dir string) string { return loadNamespaces().Resolve(dir) },
+			Toplevel: func(dir string) (string, bool) {
+				co, _, ok, err := history.Resolve(ctx, dir)
+				return co.Dir, err == nil && ok
+			},
+			Decode: func(name string) (string, bool) { return setup.DecodeProjectName(readOnlyFS{}, "/", name) },
+		},
+		Cwd:         cwd,
+		Home:        os.Getenv("HOME"),
+		NamespaceOf: func(dir string) (string, string) { return loadNamespaces().Explain(dir) },
+		Scrub:       scrub.New().Scrub,
+		Open: func(ns string) (importService, func(), error) {
+			cfg, err := loadConfig()
+			if err != nil {
+				return nil, nil, err
+			}
+			svc, _, cleanup, err := buildServiceWithEvents(ctx, cfg)
+			if err != nil {
+				return nil, nil, fmt.Errorf("build service: %w", err)
+			}
+			return svc.WithNamespace(ns), cleanup, nil
+		},
+		Out: os.Stdout,
+		Err: os.Stderr,
+	}
+	return runImport(ctx, d, args)
 }

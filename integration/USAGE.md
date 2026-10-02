@@ -131,6 +131,51 @@ claude-memory review                           # weekly pass over candidates
   EOF at the reason or y/N prompt aborts that action. It prints a summary of
   the counts at the end. It reads plain lines, so it can be scripted.
 
+## Importing existing knowledge
+
+One-off import of Claude Code auto-memory files and `INSIGHTS.md` logs as
+`candidate` records (source `import`, tags `imported` plus `auto-memory` or
+`insights`). Run `--dry-run` first: it needs no database, Ollama or env file
+and prints, per item, the kind, repo, the scrubbed title, the file count, an
+import-key prefix and `would redact: yes|no`, plus every skip with its reason
+(never file content). It does not evaluate dedup against existing records.
+
+```bash
+claude-memory import automem --dry-run [--projects-dir DIR] [--namespace NS]
+claude-memory import automem            # real run: needs Postgres and Ollama
+claude-memory import insights [PATH...] [--dry-run] [--namespace NS]
+```
+
+- **Namespace.** Imports go to `--namespace`, else the current directory's
+  namespace from `namespaces.yaml` (`MEMORY_NAMESPACE` is ignored). With no
+  mapping for the directory and no `--namespace` the command refuses (exit 2);
+  `global` only with an explicit `--namespace global`. An item whose own
+  directory maps to another namespace is skipped (`other namespace (X)`).
+- **automem** reads `<projects-dir>/*/memory/*.md` (default
+  `~/.claude/projects`), regular files only. `MEMORY.md`, `CLAUDE.md`, files
+  without frontmatter or `description`, and `type: user` are skipped; `feedback`
+  becomes `convention`, `project` `decision`, `reference` `pattern`. The repo is
+  the git toplevel's name of the decoded project directory, else `*`.
+- **insights** reads dated bullets (`- YYYY-MM-DD — text`) under `What Works`,
+  `Codebase Patterns` (`pattern`) and `What Doesn't Work`, `Recurring Errors &
+  Fixes`, `Tool & Library Notes` (`gotcha`); other sections (including `Open
+  Questions`, `Session Notes`) are skipped. A PATH is a file or a directory
+  (default: the git toplevel of the current directory), walked without
+  following symlinks. Backticked file references that name an existing file
+  inside the checkout become the record's `files` (no commit baseline).
+- **Re-runs are no-ops.** Each item has an import key (a hash of its location
+  and text) stored on the record, so a second run prints `skipped (already
+  imported)` even after you edited or deprecated the imported record. A new
+  item whose similarity to an existing record is 0.85 or more is skipped as
+  `duplicate of <id>`; all writes go through the normal path (scrubbing,
+  embedding, events). A bad item (for example oversized) is skipped with a
+  reason; a database or Ollama error stops the run, and running it again
+  continues where it stopped.
+- **TTL.** Imported candidates are ordinary candidates: `cleanup` deletes the
+  unreviewed ones after the candidate TTL, and a later import re-creates them
+  (the key is deleted with the row). The run ends with `N candidates await
+  `claude-memory review` within 30 days`: review them soon after importing.
+
 ## Seeding and correcting records
 
 ```bash

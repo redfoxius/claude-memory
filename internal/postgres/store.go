@@ -29,9 +29,12 @@ var migrationNamespacesSQL string
 //go:embed migrations/0003_events.sql
 var migrationEventsSQL string
 
+//go:embed migrations/0004_mgmt_import.sql
+var migrationMgmtImportSQL string
+
 // migrationSQL is every migration, applied in order. Each statement is
 // idempotent, so re-running on an already-migrated database is a no-op.
-var migrationSQL = migrationInitSQL + ";\n" + migrationNamespacesSQL + ";\n" + migrationEventsSQL
+var migrationSQL = migrationInitSQL + ";\n" + migrationNamespacesSQL + ";\n" + migrationEventsSQL + ";\n" + migrationMgmtImportSQL
 
 // Store is the Postgres adapter implementing memory.Store.
 type Store struct {
@@ -129,25 +132,8 @@ func (s *Store) Create(ctx context.Context, r *record.Record) (*record.Record, e
 	const tsvecArgStart = 21
 	tsvec := tsvectorExpr(tsvecArgStart)
 
-	query := `
-		INSERT INTO records (
-			id, kind, title, content, repo, files, commit_sha, ticket, tags,
-			status, deprecation_reason, superseded_by, source, confidence,
-			seen_count, used_count, created_at, updated_at, last_used_at, embedding, tsvector_content, namespace
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9,
-			$10, $11, $12, $13, $14,
-			$15, $16, $17, $18, $19, $20,
-			` + tsvec + `, $24
-		) RETURNING id
-	`
-
-	err := s.pool.QueryRow(ctx, query,
-		r.ID, string(r.Kind), r.Title, r.Content, r.Repo, r.Files, r.CommitSHA, r.Ticket, r.Tags,
-		string(r.Status), r.DeprecationReason, r.SupersededBy, string(r.Source), r.Confidence,
-		r.SeenCount, r.UsedCount, r.CreatedAt, r.UpdatedAt, r.LastUsedAt, embeddingVec,
-		r.Title, tagsStr, r.Content, r.Namespace,
-	).Scan(&r.ID)
+	query, args := buildInsert(r, embeddingVec, tagsStr, tsvec)
+	err := s.pool.QueryRow(ctx, query, args...).Scan(&r.ID)
 
 	if err != nil {
 		return nil, fmt.Errorf("insert record: %w", err)
@@ -562,4 +548,35 @@ func (s *Store) DeleteCandidatesByTTL(ctx context.Context, ttlDays int) (int, er
 	}
 
 	return int(result.RowsAffected()), nil
+}
+
+// buildInsert builds the records INSERT shared by Store.Create and the
+// transaction store's Create. import_key joins the column list only when the
+// record carries one, so every non-import write still works on a database
+// that has not applied migration 0004 (old schema, or the hook path).
+func buildInsert(r *record.Record, embeddingVec pgvector.Vector, tagsStr, tsvec string) (string, []any) {
+	args := []any{
+		r.ID, string(r.Kind), r.Title, r.Content, r.Repo, r.Files, r.CommitSHA, r.Ticket, r.Tags,
+		string(r.Status), r.DeprecationReason, r.SupersededBy, string(r.Source), r.Confidence,
+		r.SeenCount, r.UsedCount, r.CreatedAt, r.UpdatedAt, r.LastUsedAt, embeddingVec,
+		r.Title, tagsStr, r.Content, r.Namespace,
+	}
+	extraCol, extraArg := "", ""
+	if r.ImportKey != nil {
+		args = append(args, *r.ImportKey)
+		extraCol, extraArg = ", import_key", fmt.Sprintf(", $%d", len(args))
+	}
+	query := `
+		INSERT INTO records (
+			id, kind, title, content, repo, files, commit_sha, ticket, tags,
+			status, deprecation_reason, superseded_by, source, confidence,
+			seen_count, used_count, created_at, updated_at, last_used_at, embedding, tsvector_content, namespace` + extraCol + `
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9,
+			$10, $11, $12, $13, $14,
+			$15, $16, $17, $18, $19, $20,
+			` + tsvec + `, $24` + extraArg + `
+		) RETURNING id
+	`
+	return query, args
 }

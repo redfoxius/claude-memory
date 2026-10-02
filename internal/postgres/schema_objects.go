@@ -113,6 +113,14 @@ var schemaMigrations = []migrationObjects{
 			},
 		),
 	},
+	{
+		ID:   "0004",
+		File: "0004_mgmt_import.sql",
+		Objects: []schemaObject{
+			column("records", "import_key"),
+			index("records", "idx_records_import_key"),
+		},
+	},
 }
 
 // ourTables are the tables whose columns and indexes the probe inventories

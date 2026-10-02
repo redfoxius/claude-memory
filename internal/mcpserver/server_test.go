@@ -476,3 +476,19 @@ func TestMemoryStore_NamespaceInAndOut(t *testing.T) {
 		t.Errorf("namespace in=%q out=%q", gotNS, out.Namespace)
 	}
 }
+
+func TestMemoryStore_RejectsSourceImport(t *testing.T) {
+	svc := &fakeService{
+		storeFn: func(context.Context, *memory.StoreRequest) (*memory.StoreResponse, error) {
+			t.Fatal("Store must not be called for source=import")
+			return nil, nil
+		},
+	}
+	cs := newTestClient(t, svc)
+	msg := callToolExpectError(t, cs, "memory_store", map[string]any{
+		"kind": "gotcha", "title": "t", "content": "c", "source": "import",
+	})
+	if !strings.Contains(msg, "import") {
+		t.Errorf("error = %q", msg)
+	}
+}
