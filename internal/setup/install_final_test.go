@@ -104,6 +104,8 @@ type fullRig struct {
 	// tamper, when set, runs as a step placed right before hooks.settings
 	// (after migrate): a change made after the user confirmed the plan.
 	tamper func()
+	// ui scripts an interactive session; nil = non-interactive (--yes).
+	ui *FakePrompter
 }
 
 func newFullRig(t *testing.T) *fullRig {
@@ -160,7 +162,11 @@ func (r *fullRig) run(in Inputs) RunResult {
 		steps = slices.Insert(steps, i, Step(tamperStep{r.tamper}))
 	}
 	wp := WritePorts{ReadPorts: rp, FS: r.fs, Runner: r.runner, DB: r.db, Ollama: r.oll, ClaudeCLI: r.claude, Progress: rend.Progress}
-	e := &Engine{Steps: steps, Read: rp, Write: wp, UI: NewFakePrompter(r.t, false), Reporter: rend,
+	ui := r.ui
+	if ui == nil {
+		ui = NewFakePrompter(r.t, false)
+	}
+	e := &Engine{Steps: steps, Read: rp, Write: wp, UI: ui, Reporter: rend,
 		Version: "v1.2.0", KnownIDs: AllStepIDs}
 	res := e.Run(context.Background(), in)
 	rend.Summary(res)
@@ -289,7 +295,7 @@ func TestNoOpRerun(t *testing.T) {
 		t.Errorf("re-run made %d claude calls, want 0 (an ok registration needs none, AC-40)", n-claudeCalls)
 	}
 	for _, id := range []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces",
-		"hooks.scripts", "hooks.settings", "mcp"} {
+		"hooks.scripts", "hooks.settings", "mcp", "skills", "claude-md"} {
 		if o := outcomeOf(res, id); o != OutcomeUnchanged {
 			t.Errorf("%s: outcome %q on a no-op re-run, want unchanged", id, o)
 		}
@@ -297,8 +303,8 @@ func TestNoOpRerun(t *testing.T) {
 	if !strings.Contains(r.out.String(), "claude-memory doctor") {
 		t.Error("the doctor must run on a no-op re-run")
 	}
-	if !strings.Contains(r.out.String(), "Done: 13 unchanged\n") {
-		t.Errorf("want the summary \"Done: 13 unchanged\" (nothing applied):\n%s", r.out)
+	if !strings.Contains(r.out.String(), "Done: 15 unchanged\n") {
+		t.Errorf("want the summary \"Done: 15 unchanged\" (nothing applied):\n%s", r.out)
 	}
 }
 

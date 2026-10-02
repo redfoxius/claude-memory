@@ -31,6 +31,10 @@ type Paths struct {
 	Cwd             string // for project settings (AC-70) and `namespaces which`
 	Self            string // os.Executable, symlinks resolved ("" when unknown)
 	UID             int
+	// GitCeiling bounds the walk up for ".git" (InGitRepo, AC-42), inclusive,
+	// like GIT_CEILING_DIRECTORIES. Production leaves it empty (walk to the
+	// filesystem root); tests set their temp root so the walk never leaves it.
+	GitCeiling string
 	// EphemeralDirs are the directories a `go run` or `go test` binary lives
 	// in: os.TempDir(), $GOTMPDIR when set, $GOCACHE else UserCacheDir/go-build.
 	// The binary step refuses a Self under any of them (AC-35). Computed in

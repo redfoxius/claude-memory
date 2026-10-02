@@ -82,7 +82,13 @@ func TestParseInstallFlags(t *testing.T) {
 		{"--latency", []string{"--latency"}, "§12.1", nil},
 		{"jobs-backend cron", []string{"--jobs-backend", "cron"}, "§12.1", nil},
 		{"jobs-backend junk", []string{"--jobs-backend", "launchctl"}, "want launchd, systemd or none", nil},
-		{"--claude-md is 2b", []string{"--claude-md", "/x"}, "slice 2b", nil},
+		{"--claude-md empty", []string{"--claude-md="}, "--claude-md needs a path", nil},
+		{"--claude-md blank", []string{"--claude-md", "  "}, "--claude-md needs a path", nil},
+		{"--claude-md path", []string{"--claude-md", "acme/CLAUDE.md"}, "", func(t *testing.T, o installOptions) {
+			if o.Inputs.ClaudeMD != "acme/CLAUDE.md" {
+				t.Errorf("ClaudeMD = %q", o.Inputs.ClaudeMD)
+			}
+		}},
 		{"--pr-repos is 2b", []string{"--pr-repos", "/a"}, "slice 2b", nil},
 		{"--no-jobs is 2b", []string{"--no-jobs"}, "slice 2b", nil},
 		{"pg-sslmode junk", []string{"--pg-sslmode", "verify-full"}, "want prefer, require or disable", nil},

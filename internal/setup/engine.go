@@ -143,6 +143,15 @@ type Adopter interface {
 	Adopt(ctx context.Context, rc ReadPorts, st *RunState) []Artifact
 }
 
+// ModifiedDiffer is optionally implemented by a Step whose modified artifacts
+// get the AC-41 question "show diff / overwrite / keep" instead of the generic
+// overwrite Confirm (AC-6): the engine asks it per modified artifact in the
+// interactive choice phase, and ModifiedDiff returns the unified diff of what
+// an overwrite would change (read-only ports; never a secret).
+type ModifiedDiffer interface {
+	ModifiedDiff(ctx context.Context, rc ReadPorts, st *RunState, artifactID string) (string, error)
+}
+
 // FinalView is what the engine tells a Finalizer about the run it follows.
 type FinalView struct {
 	// NotInstalled maps a step id to the step name to print in "not
@@ -202,6 +211,7 @@ type Engine struct {
 func (e *Engine) Run(ctx context.Context, in Inputs) RunResult {
 	s := &session{e: e, ctx: ctx, in: in, st: NewRunState(in), idx: map[string]*stepRun{}}
 	s.auto = in.Yes || in.Upgrade || (in.DryRun && !s.interactive())
+	s.st.Auto = s.auto
 	res := RunResult{State: s.st, DryRun: in.DryRun}
 	code, err := s.run(&res)
 	res.ExitCode, res.Err = code, err
@@ -226,6 +236,7 @@ type stepRun struct {
 
 	userSkip bool   // --skip, an interactive skip, or a skipped Await
 	skipWhy  string // "skipped by you" / "skipped by --skip"
+	autoSkip bool   // userSkip comes from Detection.SkipReason (re-Detect may lift it)
 	afterDep string // planned only once this prerequisite is applied
 
 	resolved bool // a blocked step whose re-check passed
@@ -456,6 +467,14 @@ func (s *session) setup() error {
 // after the step.
 func (s *session) detect(r *stepRun) {
 	r.det = r.step.Detect(s.ctx, s.e.Read, s.st)
+	switch {
+	case r.det.SkipReason != "":
+		if !r.userSkip {
+			r.userSkip, r.autoSkip, r.skipWhy = true, true, "skipped: "+r.det.SkipReason
+		}
+	case r.autoSkip:
+		r.userSkip, r.autoSkip, r.skipWhy = false, false, ""
+	}
 	if len(r.det.Artifacts) == 0 && r.det.State != StateBlocked {
 		r.det.Artifacts = []ArtifactState{{ID: r.step.ID(), State: r.det.State, Detail: r.det.Detail}}
 	}
@@ -586,7 +605,7 @@ func (s *session) askChoices() error {
 				case StateAbsent, StateOutdated:
 					ch[a.ID] = ChoiceApply
 				case StateModified:
-					ok, err := s.ui().Confirm(fmt.Sprintf("overwrite your modified %s? a backup is kept", a.ID), false)
+					ok, err := s.askOverwrite(r, a)
 					if errors.Is(err, ErrTooManyAttempts) {
 						tooMany = true
 						break arts
@@ -620,6 +639,36 @@ func (s *session) askChoices() error {
 		r.choices = ch
 	}
 	return nil
+}
+
+// askOverwrite is the AC-6 overwrite question for one modified artifact. A
+// step that implements ModifiedDiffer gets the AC-41 form: a Select of
+// keep / overwrite (backup kept) / show diff, repeated after each diff. The
+// explicit "overwrite" answer is the second, never auto-answered consent.
+func (s *session) askOverwrite(r *stepRun, a ArtifactState) (bool, error) {
+	md, ok := r.step.(ModifiedDiffer)
+	if !ok {
+		return s.ui().Confirm(fmt.Sprintf("overwrite your modified %s? a backup is kept", a.ID), false)
+	}
+	opts := []string{"keep", "overwrite (a backup is kept)", "show diff"}
+	for {
+		i, err := s.ui().Select(fmt.Sprintf("%s was modified by you", a.ID), opts, 0)
+		if err != nil {
+			return false, err
+		}
+		switch i {
+		case 1:
+			return true, nil
+		case 2:
+			d, derr := md.ModifiedDiff(s.ctx, s.e.Read, s.st, a.ID)
+			if derr != nil {
+				d = "cannot show the diff: " + derr.Error()
+			}
+			s.report().Notes([]Note{{NoteInfo, strings.TrimRight(d, "\n")}})
+		default:
+			return false, nil
+		}
+	}
 }
 
 // skipStep aborts one step as skipped by the user (AC-10: a prompt that got

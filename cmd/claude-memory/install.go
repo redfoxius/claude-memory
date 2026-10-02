@@ -48,9 +48,8 @@ var deferredInstallFlags = map[string]string{
 	"latency":   "--latency is a doctor flag and is deferred (spec §12.1, AC-61)",
 	// Flags of steps that arrive in slice 2b: accepting them in 2a would
 	// silently ignore them.
-	"claude-md": "--claude-md needs the claude-md step, which is not part of this build (slice 2b)",
-	"pr-repos":  "--pr-repos needs the jobs step, which is not part of this build (slice 2b)",
-	"no-jobs":   "--no-jobs needs the jobs step, which is not part of this build (slice 2b); there is no job to skip",
+	"pr-repos": "--pr-repos needs the jobs step, which is not part of this build (slice 2b)",
+	"no-jobs":  "--no-jobs needs the jobs step, which is not part of this build (slice 2b); there is no job to skip",
 }
 
 // listFlag is a repeatable string flag.
@@ -103,6 +102,7 @@ func parseInstallFlags(args []string, stderr io.Writer) (installOptions, error) 
 	fs.StringVar(&in.PGSSLMode, "pg-sslmode", "", "prefer|require|disable")
 	fs.BoolVar(&o.PasswordStdin, "pg-password-stdin", false, "read the database password from stdin (one line)")
 	fs.Var(listFlag{&in.Namespaces}, "namespace", "NAME=GLOB namespace mapping (repeatable)")
+	fs.StringVar(&in.ClaudeMD, "claude-md", "", "CLAUDE.md file for the memory section (default ~/.claude/CLAUDE.md)")
 	fs.StringVar(&in.JobsBackend, "jobs-backend", "", "launchd|systemd|none")
 	fs.BoolVar(&in.NoDoctor, "no-doctor", false, "do not run doctor at the end")
 	fs.BoolVar(&o.AllowRoot, "allow-root", false, "allow running as root")
@@ -116,6 +116,18 @@ func parseInstallFlags(args []string, stderr io.Writer) (installOptions, error) 
 	}
 	if fs.NArg() > 0 {
 		return installOptions{}, usageError(errors.New("install takes no arguments"))
+	}
+
+	// An empty value would silently mean "the default", which is the opposite
+	// of what a script passing an unset variable intends.
+	claudeMDGiven := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "claude-md" {
+			claudeMDGiven = true
+		}
+	})
+	if claudeMDGiven && strings.TrimSpace(in.ClaudeMD) == "" {
+		return installOptions{}, usageError(errors.New("--claude-md needs a path"))
 	}
 
 	// --upgrade is exactly --yes: one code path (AC-52).

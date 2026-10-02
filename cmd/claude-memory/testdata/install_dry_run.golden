@@ -21,6 +21,10 @@ Hook entries in settings.json  absent    apply   $HOME/.claude/settings.json wil
   - hooks.settings/UserPromptSubmit absent no claude-memory entry
   - hooks.settings/SessionEnd absent no claude-memory entry
 MCP registration               absent    apply   $HOME/.claude.json does not exist
+Skills                         absent    apply   remember/SKILL.md: will be created; memory-digest/SKILL.md: will be created
+  - skills/remember/SKILL.md absent will be created
+  - skills/memory-digest/SKILL.md absent will be created
+CLAUDE.md section              absent    apply   $HOME/.claude/CLAUDE.md: file does not exist
 Final doctor                   ok        keep    not run in --dry-run
 
 Plan
@@ -166,6 +170,158 @@ Hook entries in settings.json
 
 MCP registration
   register — claude mcp add --scope user claude-memory -- $HOME/.local/bin/claude-memory serve
+
+Skills
+  write   $HOME/.claude/skills/remember — create directory (mode 0755)
+  write   $HOME/.claude/skills/remember/SKILL.md — create
+  write   $HOME/.claude/skills/memory-digest — create directory (mode 0755)
+  write   $HOME/.claude/skills/memory-digest/SKILL.md — create
+  diff $HOME/.claude/skills/remember/SKILL.md
+    --- /dev/null
+    +++ $HOME/.claude/skills/remember/SKILL.md
+    @@ -0,0 +1,32 @@
+    +---
+    +name: remember
+    +description: Explicitly capture a durable fact (pattern, decision, gotcha, or convention) into shared semantic memory via memory_store, when the user says "remember this", "store this in memory", or similar — skip this skill for anything the inline-capture exclusions in the memory section of your CLAUDE.md rule out (derivable from code/git history, ephemeral task steps, or already in the current repo's own CLAUDE.md).
+    +---
+    +
+    +# /remember
+    +
+    +Use when the user explicitly asks to remember, save, or store something
+    +for later ("remember this", "note this down for next time", "store this
+    +decision"). This is the user-triggered counterpart to the automatic
+    +inline-capture rule in the memory section of your CLAUDE.md — that rule
+    +covers *Claude's own* judgment calls; this skill covers an explicit ask.
+    +
+    +## Steps
+    +
+    +1. **Check the three exclusions first** (same as the inline-capture rule
+    +   in the memory section of your CLAUDE.md): do not store it if it is (a)
+    +   derivable from the code or git history, (b) an ephemeral task step, or
+    +   (c) already written in this repo's own `CLAUDE.md`. If any apply, tell the user
+    +   why and skip the store — don't store it anyway just because they
+    +   asked.
+    +2. **Classify the fact** into one `kind`: `pattern`, `decision`,
+    +   `gotcha`, or `convention`.
+    +3. **Pick the scope**: a specific `repo` name if it's local to this
+    +   repo, or `"*"` if it applies across all your projects (e.g. a
+    +   cross-cutting convention).
+    +4. **Call `memory_store`** with a short `title`, the full `content` in
+    +   markdown, the chosen `kind`/`repo`, and any relevant `tags`/`files`.
+    +   No confirmation parameter is required or expected by the tool — call
+    +   it directly.
+    +5. Confirm back to the user in one line what was stored and under which
+    +   `repo`/`kind`, so they can correct it if misclassified.
+  diff $HOME/.claude/skills/memory-digest/SKILL.md
+    --- /dev/null
+    +++ $HOME/.claude/skills/memory-digest/SKILL.md
+    @@ -0,0 +1,31 @@
+    +---
+    +name: memory-digest
+    +description: Summarize what shared semantic memory holds for a repo (or across all your projects) via memory_list and memory_search — use when the user asks "what does memory know about X", "show me what we've learned about this repo", or "/memory-digest".
+    +---
+    +
+    +# /memory-digest
+    +
+    +Use when the user wants an overview of what `claude-memory` has
+    +accumulated — for the current repo, a named repo, or everything tagged
+    +`"*"` (cross-repo).
+    +
+    +## Steps
+    +
+    +1. Call `memory_list` filtered by the relevant `repo` (default: the
+    +   current repo plus `"*"`), optionally narrowed by `kind` or `status`
+    +   if the user asked for e.g. "just gotchas" or "just active facts".
+    +2. Group the results by `kind` (`pattern`/`decision`/`gotcha`/
+    +   `convention`), and within each group put `active` records first,
+    +   `candidate` ("unverified") records after, clearly labeled as
+    +   unverified. Omit `deprecated` records unless the user asks to see
+    +   them too.
+    +3. For each record, show `title`, `status`, and (if present) `tags` —
+    +   not the full `content` body; this is a digest, not a dump. If the
+    +   user wants the full text of a specific one, call `memory_get` for
+    +   that id on request.
+    +4. If the user is about to act on a `candidate`/unverified record,
+    +   remind them (per the read-path rule in the memory section of your
+    +   CLAUDE.md) to verify it against the current code before relying on
+    +   it, and to call `memory_feedback` afterward.
+    +5. If `memory_list` returns nothing for the requested scope, say so
+    +   plainly rather than inventing content.
+
+CLAUDE.md section
+  write   $HOME/.claude/CLAUDE.md — create the file with the claude-memory block
+  diff $HOME/.claude/CLAUDE.md
+    --- /dev/null
+    +++ $HOME/.claude/CLAUDE.md
+    @@ -0,0 +1,68 @@
+    +<!-- BEGIN claude-memory -->
+    +## Shared semantic memory (`claude-memory`)
+    +
+    +Your projects share a semantic memory service (`claude-memory`,
+    +exposed as an MCP server with `memory_store`, `memory_search`,
+    +`memory_get`, `memory_update`, `memory_deprecate`, `memory_list`,
+    +`memory_feedback` tools). It captures durable, repo-spanning facts —
+    +patterns, decisions, gotchas, conventions — so they survive past a single
+    +session.
+    +
+    +### When to call `memory_store` (inline capture)
+    +
+    +Call `memory_store` yourself, without asking for confirmation, when a
+    +session surfaces one of: a non-obvious bug root cause, a user correction,
+    +a decision among alternatives together with its reason, an infra/CI/
+    +third-party gotcha, or a reusable snippet.
+    +
+    +**Never call `memory_store` for:**
+    +1. Content derivable from the code or git history itself (if `git log`
+    +   or reading the file would tell the same story, it does not belong in
+    +   memory).
+    +2. Ephemeral task steps (a TODO list, a one-off debugging step, anything
+    +   true only for the current task).
+    +3. Content already present in that repo's own `CLAUDE.md` (do not
+    +   duplicate a rule that is already written down locally).
+    +
+    +### Before relying on memory (read path)
+    +
+    +1. Call `memory_search` before designing a solution — check whether this
+    +   repo (or a cross-repo `*` record) already has relevant prior art.
+    +2. Verify any retrieved record against the current code before relying
+    +   on it — a stored record can go stale; the code is always the source
+    +   of truth.
+    +3. Call `memory_feedback` after using a record: `useful` if it held up,
+    +   `outdated` or `wrong` if it did not. Feedback is how records graduate
+    +   from `candidate` to `active`, or get deprecated.
+    +
+    +### Candidates, "unverified" records, and hook cards
+    +
+    +- A record flagged `"unverified"` is a `candidate`-status record: seen
+    +  only once or twice, not yet confirmed by feedback. Treat it as a lead
+    +  to verify, not as settled fact.
+    +- A card injected automatically by the `UserPromptSubmit` hook contains
+    +  only `title`, `repo`, and `id` — never the record's full content. Treat
+    +  an injected card as a pointer to look up via `memory_get`/
+    +  `memory_search`, not as verified ground truth to act on directly.
+    +
+    +### Namespaces
+    +
+    +Memory is partitioned by namespace, resolved automatically from the project
+    +directory (`claude-memory namespaces which` shows it). `memory_search` covers
+    +the current namespace plus `global`; you normally do nothing special.
+    +
+    +Only pass `namespace: "global"` to `memory_store` for a stack-generic fact
+    +that is useful in every project (a Go, Docker or Postgres gotcha) and
+    +contains nothing specific to this project. Omit it otherwise. Records found in `global` are shared by every project: do not enrich them with project-specific details.
+    +
+    +### Stale records
+    +
+    +A card or result marked `⚠ code changed since this was recorded` (or
+    +`stale_hint: true`) points at files that changed after the record was
+    +written: read the current code before trusting it. If the record still holds,
+    +call `memory_update` with its `commit_sha` set to the current `HEAD` (or edit
+    +its content); if not, `memory_feedback` it `outdated`/`wrong`. When you call
+    +`memory_store` and know the relevant `files` (and `commit_sha`), pass them, so
+    +the record can be checked later. After committing work that a record
+    +describes, `memory_update` it so it gets a clean baseline.
+    +<!-- END claude-memory -->
 
 warn: $HOME/.local/bin is not on PATH: add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile
 warn: Ollama at http://ollama.example.com:11434 is not on this machine: prompts are sent over the network for embedding. The prompt hook gives up after MEMORY_HOOK_TIMEOUT (800 ms by default), and a slow remote Ollama - e.g. on CPU, where DEPLOY.md measured 0.23 s for 15 tokens and 2.3 s for 150 - makes the hook time out and inject nothing at all; memory_search via MCP still works. Doctor's ollama.embed warning (> 500 ms) is the watchdog.

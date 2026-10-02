@@ -38,6 +38,7 @@ func testPaths(t testing.TB) Paths {
 		Cwd:             filepath.Join(root, "work"),
 		Self:            filepath.Join(home, ".local", "bin", "claude-memory"),
 		UID:             501,
+		GitCeiling:      root,
 	}
 }
 
