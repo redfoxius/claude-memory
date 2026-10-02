@@ -100,3 +100,19 @@ func (rw *redactWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// Withheld replaces error text that cannot be redacted because a step has no
+// Redactor: failing closed beats printing a password.
+const Withheld = "[details withheld: no Redactor]"
+
+// redactOrWithhold redacts s through r, or, when r is nil, withholds s whole
+// (a step without a Redactor must not print an unredacted cause).
+func redactOrWithhold(r *Redactor, s string) string {
+	if s == "" {
+		return ""
+	}
+	if r == nil {
+		return Withheld
+	}
+	return r.Redact(s)
+}

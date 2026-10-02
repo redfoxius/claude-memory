@@ -43,7 +43,7 @@ func TestBuildDSNTable(t *testing.T) {
 			t.Errorf("%s: ParseDBTarget: %v", c.name, err)
 			continue
 		}
-		if tg.User != c.user || tg.password != c.pw || tg.Name != c.db || tg.Port != c.port || tg.SSLMode != c.ssl {
+		if tg.User != c.user || string(tg.password) != c.pw || tg.Name != c.db || tg.Port != c.port || tg.SSLMode != c.ssl {
 			t.Errorf("%s: parsed %+v", c.name, tg)
 		}
 		if tg.DSN() != got {
@@ -127,7 +127,7 @@ func TestParseDBTargetDefaultsAndForms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tg.Host != "::1" || tg.Port != "5432" || tg.Name != "my db" || tg.password != "p/w" || tg.SSLMode != "" {
+	if tg.Host != "::1" || tg.Port != "5432" || tg.Name != "my db" || string(tg.password) != "p/w" || tg.SSLMode != "" {
 		t.Errorf("%+v", tg)
 	}
 	// An env DSN without sslmode is the same connection as prefer.
@@ -164,8 +164,8 @@ func TestDSNPasswordsRoundTripWithZeroFindings(t *testing.T) {
 			t.Errorf("%q: findings %+v value %q", pw, ef.Findings, ef.Values["MEMORY_PG_DSN"])
 		}
 		tg, err := ParseDBTarget(dsn)
-		if err != nil || tg.password != pw {
-			t.Errorf("%q: ParseDBTarget %v %q", pw, err, tg.password)
+		if err != nil || string(tg.password) != pw {
+			t.Errorf("%q: ParseDBTarget %v %q", pw, err, string(tg.password))
 		}
 	}
 }
@@ -196,7 +196,7 @@ func TestPGDSNFlagWithPasswordIsRefused(t *testing.T) { // AC-31
 	}
 	// The stdin password completes the flag DSN (the Seed-side hook).
 	tg, ok, err := DBTargetFromFlags(Inputs{PGDSN: "postgresql://u@h:5432/d", PGPassword: "pw-from-stdin"})
-	if err != nil || !ok || tg.password != "pw-from-stdin" || tg.Source != SourceFlag {
+	if err != nil || !ok || string(tg.password) != "pw-from-stdin" || tg.Source != SourceFlag {
 		t.Errorf("%+v %v %v", tg, ok, err)
 	}
 	if _, ok, err := DBTargetFromFlags(Inputs{PGPassword: "x"}); ok || err != nil {
@@ -214,7 +214,7 @@ func TestRecoverDSN(t *testing.T) {
 	}
 	for _, c := range good {
 		tg, ok := RecoverDSN(c.raw)
-		if !ok || tg.password != c.pw {
+		if !ok || string(tg.password) != c.pw {
 			t.Errorf("%q: %v %+v", c.raw, ok, tg)
 			continue
 		}

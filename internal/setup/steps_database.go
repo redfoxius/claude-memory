@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"regexp"
 	"strings"
 
 	"claude-memory/deploy"
@@ -40,8 +41,9 @@ type DatabaseStep struct {
 	// Rand is the entropy source of generated passwords (AC-22); nil means
 	// crypto/rand. A port so tests are deterministic.
 	Rand io.Reader
-	// Redactor, when set, learns every password this step sees or generates
-	// (AC-30). The composition root passes the run's Redactor.
+	// Redactor learns every password this step sees or generates (AC-30). The
+	// composition root passes the run's Redactor; without one the step fails
+	// closed and withholds error text instead of printing it unredacted.
 	Redactor *Redactor
 	// AppRolePSQL is the body of bootstrap.sql; nil means the embedded
 	// deploy/initdb/app-role.psql.
@@ -72,10 +74,7 @@ func (s DatabaseStep) register(pw string) {
 }
 
 func (s DatabaseStep) redact(v string) string {
-	if s.Redactor == nil {
-		return v
-	}
-	return s.Redactor.Redact(v)
+	return redactOrWithhold(s.Redactor, v)
 }
 
 func (s DatabaseStep) body() ([]byte, error) {
@@ -113,7 +112,7 @@ func (s DatabaseStep) Seed(_ context.Context, rc ReadPorts, st *RunState) ([]Not
 	}
 	if ok {
 		t.Mode = DBModeExisting
-		s.register(t.password)
+		s.register(string(t.password))
 		st.DB.Set(t, SourceFlag)
 		return nil, nil
 	}
@@ -121,7 +120,9 @@ func (s DatabaseStep) Seed(_ context.Context, rc ReadPorts, st *RunState) ([]Not
 	if !seed.Found {
 		return seed.Notes, nil
 	}
-	t, _, ok = parseEnvDSN(seed.Value, false)
+	// An unparseable line (AC-27) is recovered (AC-28), not skipped, and the
+	// shell's value never stands in for it.
+	t, _, ok = parseEnvDSN(seed.Value, seed.Unparseable)
 	if !ok {
 		where := "the env file"
 		if seed.Source == SourceEnv {
@@ -134,7 +135,7 @@ func (s DatabaseStep) Seed(_ context.Context, rc ReadPorts, st *RunState) ([]Not
 		t = t.WithPassword(in.PGPassword)
 	}
 	t.Mode, t.Source = DBModeExisting, seed.Source
-	s.register(t.password)
+	s.register(string(t.password))
 	st.DB.Set(t, seed.Source)
 	return seed.Notes, nil
 }
@@ -242,7 +243,41 @@ func (s DatabaseStep) assess(ctx context.Context, rc ReadPorts, st *RunState) db
 		return s.needBootstrap(rc, st, a, "role "+t.User+" does not exist yet, or has another password")
 	}
 	a.kind, a.class, a.detail = dbFail, status.ErrorClass, classMessage(rc, status.ErrorClass, t, cause)
+	a.remedy = failRemedy(status.ErrorClass)
 	return a
+}
+
+// failRemedy is the classifier's remedy for a failed connection that
+// bootstrap.sql cannot fix (LOW-7: reported as blocked, not as a default
+// apply that Plan would refuse).
+func failRemedy(class DBErrorClass) string {
+	return "fix the cause above, then re-run install" + failHint(class) + " (install --reconfigure asks for the database settings again)"
+}
+
+// bootstrapPasswordRe reads the password line of a rendered bootstrap.sql.
+var bootstrapPasswordRe = regexp.MustCompile(`(?m)^\\set app_pw '([^']*)'\r?$`)
+
+// bootstrapMatches reports whether the bootstrap.sql on disk was rendered for
+// t (same role, database and password). A file for other values (a
+// --reconfigure on the create path chose a new password) would create the
+// role with the old one, so the step must re-render it, not wait for it.
+func bootstrapMatches(rc ReadPorts, t DBTarget) bool {
+	b, err := rc.FS.ReadFile(rc.Paths.Bootstrap())
+	if err != nil {
+		return false
+	}
+	text := string(b)
+	get := func(name string) (string, bool) {
+		m := regexp.MustCompile(`(?m)^\\set ` + name + ` '([^']*)'\r?$`).FindStringSubmatch(text)
+		if m == nil {
+			return "", false
+		}
+		return m[1], true
+	}
+	user, ok1 := get("app_user")
+	db, ok2 := get("app_db")
+	pw := bootstrapPasswordRe.FindStringSubmatch(text)
+	return ok1 && ok2 && pw != nil && user == t.User && db == t.Name && pw[1] == string(t.password)
 }
 
 // needBootstrap classifies a database that bootstrap.sql would have to
@@ -251,7 +286,7 @@ func (s DatabaseStep) assess(ctx context.Context, rc ReadPorts, st *RunState) db
 func (s DatabaseStep) needBootstrap(rc ReadPorts, st *RunState, a dbAssessment, reason string) dbAssessment {
 	t := st.DB.Get()
 	switch {
-	case a.file:
+	case a.file && bootstrapMatches(rc, t):
 		a.kind = dbPending
 		a.detail = "awaiting user action: " + reason + "; run the command install printed, then re-check " +
 			"(if it ran but this still fails, the role already existed with another password: enter that password " +
@@ -266,7 +301,7 @@ func (s DatabaseStep) needBootstrap(rc ReadPorts, st *RunState, a dbAssessment, 
 	for _, err := range []error{
 		ValidateBootstrapName("role name", t.User),
 		ValidateBootstrapName("database name", t.Name),
-		ValidateBootstrapPassword(t.password),
+		ValidateBootstrapPassword(string(t.password)),
 	} {
 		if err != nil {
 			a.kind, a.detail, a.remedy = dbUnsafe, err.Error(), manualBootstrapRemedy
@@ -282,6 +317,7 @@ func bootstrapInstructions(goos, path string) []string {
 	return []string{
 		"install wrote " + path + " (mode 0600; it holds the database password). Run this command yourself; install never runs sudo or psql:",
 		"  " + BootstrapCommand(goos, path),
+		"It revokes the PUBLIC privileges on the database and on its public schema (CREATE), so only the app role has access.",
 		"Then re-check. If the database still reports an authentication failure, the role already existed with another password: " +
 			"enter that password (install --reconfigure), or change it yourself with ALTER ROLE.",
 	}
@@ -333,9 +369,9 @@ func (s DatabaseStep) Detect(ctx context.Context, rc ReadPorts, st *RunState) De
 			file.State, file.Detail = StateOutdated, "remove "+rc.Paths.Bootstrap()+" (it holds a password)"
 			detail += "; " + BootstrapFileName + " can be removed"
 		}
-	case dbNoInput, dbNeedBootstrap, dbFail:
+	case dbNoInput, dbNeedBootstrap:
 		db.State = StateAbsent
-	default: // pending, unsafe, blocked
+	default: // pending, fail, unsafe, blocked
 		db.State = StateBlocked
 	}
 	if a.file && file.State == StateOK {
@@ -383,7 +419,7 @@ func (s DatabaseStep) Apply(ctx context.Context, wc WritePorts, st *RunState, p 
 				return res, err
 			}
 			t := st.DB.Get()
-			out, err := RenderBootstrap(body, t.User, t.Name, t.password)
+			out, err := RenderBootstrap(body, t.User, t.Name, string(t.password))
 			if err != nil {
 				return res, err
 			}
@@ -398,6 +434,10 @@ func (s DatabaseStep) Apply(ctx context.Context, wc WritePorts, st *RunState, p 
 			}
 			if created {
 				res.Artifacts = append(res.Artifacts, Artifact{Step: DatabaseStepID, Kind: KindDir, Path: dir, Version: s.Version})
+			} else if n, changed, err := tightenDir(wc.FS, dir); err != nil {
+				return res, err
+			} else if changed {
+				res.Notes = append(res.Notes, n)
 			}
 			res.Await = &Await{Instructions: bootstrapInstructions(wc.Platform.OS, path), Artifacts: []string{DatabaseArtifact}}
 		case BootstrapFileArtifact:
@@ -505,7 +545,7 @@ func (s DatabaseStep) configureAsk(ctx context.Context, rc ReadPorts, ui Prompte
 		a := s.assess(ctx, rc, st)
 		switch {
 		case a.kind == dbFail && a.class == DBErrAuth && rc.DB != nil:
-			t, err := s.connectLoop(ctx, rc, ui, cur, local)
+			t, err := s.connectLoop(ctx, rc, ui, cur, local, true)
 			if err != nil {
 				return err
 			}
@@ -545,7 +585,7 @@ func (s DatabaseStep) configureAsk(ctx context.Context, rc ReadPorts, ui Prompte
 		return err
 	}
 	if rc.DB != nil {
-		if t, err = s.connectLoop(ctx, rc, ui, t, local); err != nil {
+		if t, err = s.connectLoop(ctx, rc, ui, t, local, false); err != nil {
 			return err
 		}
 	}
@@ -566,7 +606,7 @@ func (s DatabaseStep) finish(ui Prompter, st *RunState, t DBTarget) error {
 		}
 	}
 	t.Source = SourcePrompt
-	s.register(t.password)
+	s.register(string(t.password))
 	st.DB.Set(t, SourcePrompt)
 	return nil
 }
@@ -637,11 +677,18 @@ func (s DatabaseStep) askExisting(ui Prompter, st *RunState, cur DBTarget, set, 
 }
 
 // connectLoop probes t (read-only, the adapter's 5 s timeout) and classifies a
-// failure (AC-20). An auth failure asks for the password again, three
-// attempts in all, then ErrTooManyAttempts (the engine skips the step, AC-10).
+// failure (AC-20). An auth failure asks for the password again: the user gets
+// three typed attempts (a seeded password is probed first and is not one),
+// then ErrTooManyAttempts (the engine skips the step, AC-10).
 // A missing database or vector extension on this machine is fine: Detect then
 // takes the bootstrap.sql path with this password.
-func (s DatabaseStep) connectLoop(ctx context.Context, rc ReadPorts, ui Prompter, t DBTarget, local bool) (DBTarget, error) {
+func (s DatabaseStep) connectLoop(ctx context.Context, rc ReadPorts, ui Prompter, t DBTarget, local, seeded bool) (DBTarget, error) {
+	// A seeded password was not typed at this question, so it does not use up
+	// one of the user's attempts: they get MaxPromptAttempts typed ones.
+	limit := MaxPromptAttempts
+	if seeded {
+		limit++
+	}
 	for attempt := 1; ; attempt++ {
 		status, err := rc.DB.Probe(ctx, t.DSN())
 		cause := ""
@@ -655,7 +702,7 @@ func (s DatabaseStep) connectLoop(ctx context.Context, rc ReadPorts, ui Prompter
 		case status.ErrorClass == DBErrNoDB && local && HostIsLocal(t.Host):
 			return t, nil
 		case status.ErrorClass == DBErrAuth:
-			if attempt >= MaxPromptAttempts {
+			if attempt >= limit {
 				return t, fmt.Errorf("%w: %s (if the role does not exist yet, re-run and choose create)", ErrTooManyAttempts, msg)
 			}
 			pw, err := ui.Secret(msg + ". Password for role " + t.User)

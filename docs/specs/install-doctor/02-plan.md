@@ -1420,6 +1420,9 @@ Satisfies AC-1 (install), AC-4 (install), AC-13, AC-34 (S2), AC-52.
 - Restart line per WI-S1-0 (gate; default: print it).
 - Cross-cutting suites, extended by each 2b WI:
   - AC-30 sentinel over a full `--yes --topology remote` run with fakes.
+    Written files are scanned for the sentinel except the env file,
+    `bootstrap.sql` and the env backup `env.bak.claude-memory.<ts>` (0600,
+    holds the previous password by design; spec AC-30).
   - AC-50 no-op re-run: 0 writes, 0 mutating commands, manifest
     untouched.
   - AC-12/AC-52: `--yes` never overwrites `modified`; `--upgrade` and
@@ -1668,6 +1671,7 @@ v0.5 resolutions themselves:
 | The engine plans and applies only steps with an `apply` choice | Design 15; every step WI | A step must put its notes about kept artifacts (e.g. a kept modified file) into `Detection.Notes`, or they are never shown. |
 | AC-9 "write the manifest only on change" | Design 8; WI-S2-1c | A header-only manifest write happens when something was applied and only the header (version, topology, platform) differs. A run that applies nothing never writes the manifest. |
 | The first Apply's artifacts of an `Await` step are not recorded when the follow-up Apply or the success rule fails | Design 19; WI-S2-1c | Deliberate: a failed step records nothing. The next run's Detect re-converges from the disk. |
+| A role created by `bootstrap.sql` stores its password as given in `CREATE ROLE ... PASSWORD '<literal>'`; the server hashes it, but `log_statement` or an `ALTER ROLE` history may show the plaintext, and the SCRAM verifier route (`psql` computing the verifier so the literal never travels) needs a spec change (review LOW-9, not done) | Design 5; WI-S2-4b; spec AC-21, AC-22 | Keep `bootstrap.sql` 0600 and short-lived; mention the server-side logging caveat in DEPLOY.md if a spec change is ever scheduled. |
 
 ## Rollout
 1. **Slice 1 merged → owner runs `claude-memory doctor`** on the current

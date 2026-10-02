@@ -90,7 +90,7 @@ func (EnvFileStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch Choice
 		if !an.exists {
 			old = ""
 		}
-		p.Diffs = append(p.Diffs, Diff{Artifact: "envfile", Path: an.path, Unified: UnifiedDiff(old, an.path, an.before, res.after)})
+		p.Diffs = append(p.Diffs, Diff{Artifact: "envfile", Path: an.path, Unified: UnifiedDiff(old, an.path, maskUnparseableDSN(an.before), maskUnparseableDSN(res.after))})
 	}
 	return p, nil
 }
@@ -120,6 +120,16 @@ func (e EnvFileStep) Apply(_ context.Context, wc WritePorts, st *RunState, p Pla
 		if r.mkdir {
 			res.Artifacts = append(res.Artifacts, Artifact{Step: EnvFileStepID, Kind: KindDir, Path: an.envDir(), Version: e.Version})
 		}
+		if !an.dirMissing {
+			// An existing directory keeps the mode it has: tighten it.
+			n, changed, err := tightenDir(wc.FS, an.envDir())
+			if err != nil {
+				return res, err
+			}
+			if changed {
+				res.Notes = append(res.Notes, n)
+			}
+		}
 	}
 	if r.contentChg {
 		if r.modified && an.exists {
@@ -136,7 +146,7 @@ func (e EnvFileStep) Apply(_ context.Context, wc WritePorts, st *RunState, p Pla
 		if !an.exists {
 			old = ""
 		}
-		res.Diffs = append(res.Diffs, Diff{Artifact: "envfile", Path: an.path, Unified: UnifiedDiff(old, an.path, an.before, r.after)})
+		res.Diffs = append(res.Diffs, Diff{Artifact: "envfile", Path: an.path, Unified: UnifiedDiff(old, an.path, maskUnparseableDSN(an.before), maskUnparseableDSN(r.after))})
 	} else if r.chmod {
 		if err := wc.FS.Chmod(an.path, 0o600); err != nil {
 			return res, fmt.Errorf("chmod %s: %w", an.path, err)

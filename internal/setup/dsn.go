@@ -148,7 +148,7 @@ func (t DBTarget) Validate() error {
 // sslmode are validated; an empty user omits the userinfo, an empty password
 // omits ":password", and an empty sslmode omits the query.
 func BuildDSN(user, password, host, port, db, sslmode string) (string, error) {
-	t := DBTarget{Host: host, Port: port, Name: db, User: user, SSLMode: sslmode, password: password}
+	t := DBTarget{Host: host, Port: port, Name: db, User: user, SSLMode: sslmode, password: secret(password)}
 	if err := t.Validate(); err != nil {
 		return "", err
 	}
@@ -175,7 +175,7 @@ func BuildDSN(user, password, host, port, db, sslmode string) (string, error) {
 // DSN returns the target's DSN, or "" when Validate fails (nothing invalid
 // is ever written).
 func (t DBTarget) DSN() string {
-	d, err := BuildDSN(t.User, t.password, t.Host, t.Port, t.Name, t.SSLMode)
+	d, err := BuildDSN(t.User, string(t.password), t.Host, t.Port, t.Name, t.SSLMode)
 	if err != nil {
 		return ""
 	}
@@ -184,7 +184,7 @@ func (t DBTarget) DSN() string {
 
 // WithPassword returns a copy of t holding pw.
 func (t DBTarget) WithPassword(pw string) DBTarget {
-	t.password = pw
+	t.password = secret(pw)
 	return t
 }
 
@@ -236,7 +236,8 @@ func ParseDBTarget(dsn string) (DBTarget, error) {
 		return DBTarget{}, errors.New("DSN: unexpected fragment")
 	}
 	t := DBTarget{User: u.User.Username(), Port: u.Port(), SSLMode: u.Query().Get("sslmode")}
-	t.password, _ = u.User.Password()
+	pw, _ := u.User.Password()
+	t.password = secret(pw)
 	for k := range u.Query() {
 		if k != "sslmode" {
 			return DBTarget{}, fmt.Errorf("DSN option %q is not supported by install (only sslmode)", k)
@@ -302,7 +303,7 @@ func RecoverDSN(raw string) (DBTarget, bool) {
 	if err != nil {
 		return DBTarget{}, false
 	}
-	t.User, t.password = user, pw
+	t.User, t.password = user, secret(pw)
 	return t, true
 }
 

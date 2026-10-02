@@ -226,6 +226,18 @@ func writeBootstrap(t *testing.T, h *s23, content string) {
 	h.write(h.p.Bootstrap(), content, 0o600)
 }
 
+// writeBootstrapFor writes the bootstrap.sql install would have rendered for
+// the target with this password.
+func writeBootstrapFor(t *testing.T, h *s23, pw string) {
+	t.Helper()
+	tg := localTarget(pw, DBModeCreate)
+	out, err := RenderBootstrap([]byte("-- body\n"), tg.User, tg.Name, pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeBootstrap(t, h, string(out))
+}
+
 // ---- Seed ------------------------------------------------------------------
 
 func TestDatabaseSeed(t *testing.T) {
@@ -314,10 +326,10 @@ func TestDatabaseSeed(t *testing.T) {
 		s, _ := newStep()
 		st := NewRunState(Inputs{})
 		st.Prior.EnvDoc = []byte("MEMORY_PG_DSN=$(pass show db)\n")
-		// A line the plain format cannot hold is not a usable value: the
-		// envfile step reports it, and the DB stays unset (the step asks).
+		// A line the plain format cannot hold and AC-28 cannot recover is not a
+		// usable value: the DB stays unset (the step asks), with a note.
 		notes, err := s.Seed(ctx, h.rp(), st)
-		if err != nil || len(notes) != 0 || st.DB.IsSet() {
+		if err != nil || len(notes) != 1 || st.DB.IsSet() {
 			t.Errorf("%v %v set=%v", notes, err, st.DB.IsSet())
 		}
 		st = NewRunState(Inputs{})
@@ -375,16 +387,16 @@ func TestDatabaseDetect(t *testing.T) {
 			wantDetail: "awaiting user action", wantRemedy: "sudo -u postgres psql"},
 		{name: "nodb with the file is pending", status: noDBErr, file: true, wantState: StateBlocked, wantDB: StateBlocked, wantFile: StateOK, wantDetail: "awaiting user action"},
 		{name: "no vector with the file is pending", status: noVec, file: true, wantState: StateBlocked, wantDB: StateBlocked, wantFile: StateOK, wantDetail: "awaiting user action"},
-		{name: "auth, existing mode, no file fails", status: authErr, wantState: StateAbsent, wantDB: StateAbsent, wantFile: StateOK, wantDetail: "authentication failed for role claude_memory"},
+		{name: "auth, existing mode, no file fails", status: authErr, wantState: StateBlocked, wantDB: StateBlocked, wantFile: StateOK, wantDetail: "authentication failed for role claude_memory"},
 		{name: "auth, create mode, no file needs bootstrap", status: authErr, mode: DBModeCreate, wantState: StateAbsent, wantDB: StateAbsent, wantFile: StateOK, wantDetail: "install writes bootstrap.sql"},
 		{name: "nodb needs bootstrap", status: noDBErr, wantState: StateAbsent, wantDB: StateAbsent, wantFile: StateOK, wantDetail: "does not exist"},
 		{name: "no vector needs bootstrap", status: noVec, wantState: StateAbsent, wantDB: StateAbsent, wantFile: StateOK, wantDetail: "vector extension is not installed"},
-		{name: "remote topology cannot be bootstrapped", status: noDBErr, topology: TopologyRemote, wantState: StateAbsent, wantDB: StateAbsent, wantFile: StateOK, wantDetail: "create it on the server"},
-		{name: "remote host cannot be bootstrapped", status: noVec, host: "db.example", wantState: StateAbsent, wantDB: StateAbsent, wantFile: StateOK, wantDetail: "create it on the server"},
+		{name: "remote topology cannot be bootstrapped", status: noDBErr, topology: TopologyRemote, wantState: StateBlocked, wantDB: StateBlocked, wantFile: StateOK, wantDetail: "create it on the server"},
+		{name: "remote host cannot be bootstrapped", status: noVec, host: "db.example", wantState: StateBlocked, wantDB: StateBlocked, wantFile: StateOK, wantDetail: "create it on the server"},
 		{name: "unsafe password is blocked, not rendered", status: noDBErr, pw: "pa$$word word", wantState: StateBlocked, wantDB: StateBlocked, wantFile: StateOK,
 			wantDetail: "cannot be written into bootstrap.sql safely", wantRemedy: "app-role.psql"},
-		{name: "unreachable fails", status: DBStatus{ErrorClass: DBErrUnreachable}, wantState: StateAbsent, wantDB: StateAbsent, wantFile: StateOK, wantDetail: "cannot reach localhost:5432"},
-		{name: "hba fails", status: DBStatus{ErrorClass: DBErrHBA}, wantState: StateAbsent, wantDB: StateAbsent, wantFile: StateOK, wantDetail: "pg_hba.conf"},
+		{name: "unreachable fails", status: DBStatus{ErrorClass: DBErrUnreachable}, wantState: StateBlocked, wantDB: StateBlocked, wantFile: StateOK, wantDetail: "cannot reach localhost:5432"},
+		{name: "hba fails", status: DBStatus{ErrorClass: DBErrHBA}, wantState: StateBlocked, wantDB: StateBlocked, wantFile: StateOK, wantDetail: "pg_hba.conf"},
 		{name: "unreadable catalog is blocked", status: DBStatus{Connected: true}, wantState: StateOK},
 	}
 	for _, c := range cases {
@@ -400,7 +412,7 @@ func TestDatabaseDetect(t *testing.T) {
 				st.Topology.Set(c.topology, SourceFlag)
 			}
 			if c.file {
-				writeBootstrap(t, h, "x")
+				writeBootstrapFor(t, h, firstNonEmpty(c.pw, pw))
 			}
 			var perr error
 			if c.name == "unreadable catalog is blocked" {
@@ -435,7 +447,7 @@ func TestDatabaseDetect(t *testing.T) {
 	t.Run("macOS remedy is the plain psql command", func(t *testing.T) {
 		h := newS23(t)
 		h.plat.OS = OSDarwin
-		writeBootstrap(t, h, "x")
+		writeBootstrapFor(t, h, pw)
 		st := dbSt(Inputs{})
 		st.DB.Set(localTarget(pw, DBModeExisting), SourceEnvFile)
 		det := (DatabaseStep{}).Detect(ctx, h.dbRP(fixedDB(authErr, nil)), st)
@@ -637,13 +649,13 @@ func TestDatabaseConfigureYes(t *testing.T) {
 			d.Mode != DBModeCreate || d.Source != SourceGenerated || st.DB.Source() != SourceGenerated {
 			t.Errorf("%#v %v", d, st.DB)
 		}
-		if err := ValidateBootstrapPassword(d.password); err != nil || len(d.password) != 43 {
-			t.Errorf("generated password %q: %v", d.password, err)
+		if err := ValidateBootstrapPassword(string(d.password)); err != nil || len(string(d.password)) != 43 {
+			t.Errorf("generated password %q: %v", string(d.password), err)
 		}
-		if s.Redactor.Redact(d.password) == d.password {
+		if s.Redactor.Redact(string(d.password)) == string(d.password) {
 			t.Error("the generated password was not registered with the Redactor")
 		}
-		if strings.Contains(d.String(), d.password) || strings.Contains(fmt.Sprintf("%v %+v %#v", d, d, d), d.password) {
+		if strings.Contains(d.String(), string(d.password)) || strings.Contains(fmt.Sprintf("%v %+v %#v", d, d, d), string(d.password)) {
 			t.Error("DBTarget formatting leaks the password")
 		}
 	})
@@ -663,7 +675,7 @@ func TestDatabaseConfigureYes(t *testing.T) {
 		if err := step().Configure(ctx, h.dbRP(fixedDB(authErr, nil)), autoPrompter{}, st); err != nil {
 			t.Fatal(err)
 		}
-		if d := st.DB.Get(); d.password != "Given-pw-0001" || st.DB.Source() != SourceFlag {
+		if d := st.DB.Get(); string(d.password) != "Given-pw-0001" || st.DB.Source() != SourceFlag {
 			t.Errorf("%v", st.DB)
 		}
 	})
@@ -717,7 +729,7 @@ func TestDatabaseConfigureInteractive(t *testing.T) {
 		st := remote()
 		red := NewRedactor()
 		db := &scriptDB{fn: func(d DBTarget) (DBStatus, error) {
-			if d.password == "Right-pw-1234" {
+			if string(d.password) == "Right-pw-1234" {
 				return healthy, nil
 			}
 			return authErr, errors.New("auth")
@@ -731,7 +743,7 @@ func TestDatabaseConfigureInteractive(t *testing.T) {
 		}
 		d := st.DB.Get()
 		if d.Host != "db.tail.ts.net" || d.Port != "5432" || d.Name != "mem" || d.User != "memuser" || d.SSLMode != "require" ||
-			d.password != "Right-pw-1234" || d.Mode != DBModeExisting || st.DB.Source() != SourcePrompt {
+			string(d.password) != "Right-pw-1234" || d.Mode != DBModeExisting || st.DB.Source() != SourcePrompt {
 			t.Errorf("%#v %v", d, st.DB)
 		}
 		if red.Redact("Wrong-pw-0000 Right-pw-1234") != "*** ***" {
@@ -778,7 +790,7 @@ func TestDatabaseConfigureInteractive(t *testing.T) {
 			t.Fatal(err)
 		}
 		d := st.DB.Get()
-		if d.Name != "memdb" || d.User != "claude_memory" || d.Mode != DBModeCreate || d.SSLMode != "disable" || st.DB.Source() != SourcePrompt || len(d.password) != 43 {
+		if d.Name != "memdb" || d.User != "claude_memory" || d.Mode != DBModeCreate || d.SSLMode != "disable" || st.DB.Source() != SourcePrompt || len(string(d.password)) != 43 {
 			t.Errorf("%#v %v", d, st.DB)
 		}
 	})
@@ -853,13 +865,13 @@ func TestDatabaseConfigureInteractive(t *testing.T) {
 		st := remote()
 		st.DB.Set(localTarget("Wrong-pw-1234", DBModeExisting), SourceEnvFile)
 		db := &scriptDB{fn: func(d DBTarget) (DBStatus, error) {
-			if d.password == "Right-pw-1234" {
+			if string(d.password) == "Right-pw-1234" {
 				return healthy, nil
 			}
 			return authErr, nil
 		}}
 		ui := newPW(t, true).secret("authentication failed", "Right-pw-1234")
-		if err := (DatabaseStep{}).Configure(ctx, h.dbRP(db), ui, st); err != nil || st.DB.Get().password != "Right-pw-1234" {
+		if err := (DatabaseStep{}).Configure(ctx, h.dbRP(db), ui, st); err != nil || string(st.DB.Get().password) != "Right-pw-1234" {
 			t.Errorf("%v", err)
 		}
 	})

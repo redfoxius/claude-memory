@@ -80,7 +80,7 @@ type DBTarget struct {
 	SSLMode                string
 	Mode                   DBMode
 	Source                 Source
-	password               string
+	password               secret
 }
 
 // OllamaTarget is the embedder endpoint (Design 16).
@@ -118,6 +118,21 @@ type Inputs struct {
 	BinDirExplicit bool
 	Env            Env
 }
+
+// String prints the inputs without the stdin password and without Env values
+// (a shell DSN may hold a password): %v of a RunState must be safe to log.
+func (in Inputs) String() string {
+	type plain Inputs // no methods, so no recursion
+	if in.PGPassword != "" {
+		in.PGPassword = Mask
+	}
+	n := len(in.Env)
+	in.Env = nil
+	return fmt.Sprintf("%+v (env: %d vars)", plain(in), n)
+}
+
+// GoString is String, so %#v is as safe as %v.
+func (in Inputs) GoString() string { return in.String() }
 
 // Prior is what a previous install left behind, loaded by preflight.
 type Prior struct {
@@ -284,3 +299,21 @@ func (f Field[T]) String() string {
 	}
 	return fmt.Sprintf("set(%s)", f.src)
 }
+
+// GoString keeps %#v of a Field from reflecting into the unexported value
+// (a DBTarget's password): it prints the same as String.
+func (f Field[T]) GoString() string { return f.String() }
+
+// secret is a password held in memory. Every fmt verb prints Mask, so a
+// stray %v, %+v or %#v of the value (or of a pointer to it) cannot leak it.
+// Use string(s) where the password is genuinely needed.
+type secret string
+
+// String implements fmt.Stringer.
+func (secret) String() string { return Mask }
+
+// GoString implements fmt.GoStringer.
+func (secret) GoString() string { return `"` + Mask + `"` }
+
+// Format implements fmt.Formatter for every verb.
+func (secret) Format(f fmt.State, _ rune) { _, _ = f.Write([]byte(Mask)) }

@@ -785,9 +785,11 @@ already runs `deploy/` from a clone.
 
   Verify: unit tests for the min-length rule and pattern; a sentinel test
   runs doctor (S1) and every step (S2) with password `S3ntinel-pw-$@:/x`
-  and greps all captured output, written files other than the env file
-  and `bootstrap.sql`, and the Runner argv for the sentinel and its
-  percent-encoded form.
+  and greps all captured output, written files other than the env file,
+  `bootstrap.sql` and the env-file backup `env.bak.claude-memory.<ts>`
+  (a 0600 copy of the previous env file that install keeps when it
+  overwrites a hand-edited one; it holds the old password by design), and
+  the Runner argv for the sentinel and its percent-encoded form.
 - AC-31 [S2] (Ubiquitous): `--pg-dsn` containing a password shall be
   rejected (exit 2: `pass the password via the prompt or
   --pg-password-stdin, not argv`). `MEMORY_PG_DSN` in `Env` is accepted

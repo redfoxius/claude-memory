@@ -169,6 +169,14 @@ func analyzeEnv(fsys ReadFS, p Paths, st *RunState) (*envAnalysis, error) {
 		}
 	}
 
+	// An `export` line shadowed by a plain assignment of the same key is never
+	// converted (the binary reads the plain line): report it as a duplicate.
+	for _, se := range doc.ShadowedExports() {
+		an.notes = append(an.notes, Note{NoteWarn, fmt.Sprintf(
+			"%s line %d (%s): an `export` line the binary ignores, and the key has a plain assignment too; left untouched, remove it by hand",
+			an.path, se.Line, se.Key)})
+	}
+
 	// A line that is not a managed key and the plain format cannot hold: report.
 	for _, f := range doc.Findings() {
 		if f.Kind == config.FindingUnparseableValue && !handled[f.Key] && f.Key != "" {
@@ -206,6 +214,19 @@ func keyState(doc *config.EnvDoc, w envWant) (State, string, *Note) {
 			"%s line %d: the value cannot be written in the plain format; left untouched, fix it by hand", w.Key, e.Line)}
 	}
 
+	// The binary reads KEY=VALUE only: an `export` prefix makes it skip the
+	// line and whole-value quotes become part of the value. Right value, wrong
+	// spelling: outdated, so the write replaces the line.
+	notRead := func() (State, string, bool) {
+		switch {
+		case e.Export:
+			return StateOutdated, fmt.Sprintf("%s line %d is not read by the binary (`export` prefix)", w.Key, e.Line), true
+		case e.Quoted:
+			return StateOutdated, fmt.Sprintf("%s line %d is not read as intended by the binary (the quotes become part of the value)", w.Key, e.Line), true
+		}
+		return "", "", false
+	}
+
 	if w.Target != nil { // the DSN: compare by connection
 		needsRecover := e.Unparseable || !e.Plain
 		cur, recovered, ok := parseEnvDSN(e.Value, needsRecover)
@@ -218,6 +239,9 @@ func keyState(doc *config.EnvDoc, w envWant) (State, string, *Note) {
 		if !cur.SameConnection(*w.Target) {
 			return differs()
 		}
+		if s, d, ok := notRead(); ok {
+			return s, d, nil
+		}
 		if recovered {
 			return StateOutdated, w.Key + ": the password is not URL-encoded; re-encode it", nil
 		}
@@ -228,6 +252,9 @@ func keyState(doc *config.EnvDoc, w envWant) (State, string, *Note) {
 	}
 	if e.Value != w.Value {
 		return differs()
+	}
+	if s, d, ok := notRead(); ok {
+		return s, d, nil
 	}
 	return StateOK, w.Key + " is set", nil
 }
@@ -298,17 +325,22 @@ type EnvSeed struct {
 	Value  string
 	Source Source
 	Found  bool
-	Notes  []Note
+	// Unparseable is set when the file's line holds text the plain format
+	// cannot represent (AC-27); Value is then the raw text as written, for the
+	// owner to try to recover (AC-28), and it is never replaced by Env.
+	Unparseable bool
+	Notes       []Note
 }
 
 // SeedEnvValue implements the Seed order of Design 16 (v0.5, N10) for one
 // env-backed key: flag, then the env file's value, then Env (only when the
-// file has no usable value). The owner applies its documented default when
-// Found is false. A shell value that differs from the file's is a drift note
-// and never a source, so a stale `export` cannot rewrite the file on a no-op
-// run. same (may be nil) compares two values semantically, e.g. two DSNs;
-// the default is string equality. The value is as the file holds it, without
-// `export` and whole-value quotes; an unparseable line is not usable.
+// file has no value for the key). The owner applies its documented default
+// when Found is false. A shell value that differs from the file's is a drift
+// note and never a source, so a stale `export` cannot rewrite the file on a
+// no-op run. same (may be nil) compares two values semantically, e.g. two
+// DSNs; the default is string equality. The value is as the file holds it,
+// without `export` and whole-value quotes; an unparseable line is returned
+// raw with Unparseable set (never silently replaced by the shell's value).
 func SeedEnvValue(st *RunState, env Env, key, flag string, same func(a, b string) bool) EnvSeed {
 	if same == nil {
 		same = func(a, b string) bool { return a == b }
@@ -318,9 +350,9 @@ func SeedEnvValue(st *RunState, env Env, key, flag string, same func(a, b string
 		return EnvSeed{Value: flag, Source: SourceFlag, Found: true}
 	}
 	if st.Prior.EnvDoc != nil {
-		if v, ok := config.ParseEnvDoc(st.Prior.EnvDoc).Get(key); ok && v != "" {
-			s := EnvSeed{Value: v, Source: SourceEnvFile, Found: true}
-			if shell != "" && !same(shell, v) {
+		if e, ok := config.ParseEnvDoc(st.Prior.EnvDoc).Entry(key); ok && e.Value != "" {
+			s := EnvSeed{Value: e.Value, Source: SourceEnvFile, Found: true, Unparseable: e.Unparseable}
+			if shell != "" && !same(shell, e.Value) {
 				s.Notes = append(s.Notes, Note{NoteWarn, fmt.Sprintf(
 					"your shell's %s differs from the env file; hooks, MCP and jobs use the file", key)})
 			}
@@ -331,4 +363,58 @@ func SeedEnvValue(st *RunState, env Env, key, flag string, same func(a, b string
 		return EnvSeed{Value: shell, Source: SourceEnv, Found: true}
 	}
 	return EnvSeed{}
+}
+
+// tightenDir chmods an existing directory that holds secrets to 0700 when it
+// is group- or world-accessible (MkdirAll leaves an existing directory's mode
+// alone). It returns a note describing the change, or false when nothing was
+// needed.
+func tightenDir(fsys FS, dir string) (Note, bool, error) {
+	info, err := fsys.Stat(dir)
+	if err != nil {
+		return Note{}, false, fmt.Errorf("cannot inspect %s: %w", dir, err)
+	}
+	mode := info.Mode().Perm()
+	if !info.IsDir() || mode&0o077 == 0 {
+		return Note{}, false, nil
+	}
+	if err := fsys.Chmod(dir, 0o700); err != nil {
+		return Note{}, false, fmt.Errorf("chmod %s: %w", dir, err)
+	}
+	return Note{NoteInfo, fmt.Sprintf("%s had mode %#o and holds secrets; tightened to 0700", dir, mode)}, true, nil
+}
+
+// maskUnparseableDSN returns env-file text for a diff with the value of every
+// MEMORY_PG_DSN line that is not a DSN install can parse replaced by Mask. A
+// parseable URL is left to the Redactor (it masks the password by pattern and
+// as a registered literal), but a keyword/value DSN (`host=... password=...`)
+// or any other free text could carry a password in a form no Redactor
+// pattern knows (AC-30 names the dry-run diff).
+func maskUnparseableDSN(b []byte) []byte {
+	if len(b) == 0 {
+		return b
+	}
+	lines := strings.SplitAfter(string(b), "\n")
+	for i, l := range lines {
+		body := strings.TrimRight(l, "\r\n")
+		eol := l[len(body):]
+		t := strings.TrimSpace(body)
+		t = strings.TrimSpace(strings.TrimPrefix(t, "export "))
+		k, v, ok := strings.Cut(t, "=")
+		if !ok || strings.TrimSpace(k) != EnvKeyDSN {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+			v = v[1 : len(v)-1]
+		}
+		if v == "" {
+			continue
+		}
+		if _, _, ok := parseEnvDSN(v, false); ok {
+			continue
+		}
+		lines[i] = EnvKeyDSN + "=" + Mask + eol
+	}
+	return []byte(strings.Join(lines, ""))
 }
