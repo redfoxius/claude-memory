@@ -64,6 +64,7 @@ type mockStore struct {
 	WithTxFunc                func(ctx context.Context, fn func(tx TxStore) error) error
 	AcquireLockFunc           func(ctx context.Context, repo string, titleHash string) error
 	DeleteCandidatesByTTLFunc func(ctx context.Context, ttlDays int) (int, error)
+	DeleteFunc                func(ctx context.Context, id string) error
 
 	// Recorded by the mocks so namespace tests can assert scoping.
 	lockNamespace       string
@@ -130,6 +131,13 @@ func (m *mockStore) WithTx(ctx context.Context, fn func(tx TxStore) error) error
 func (m *mockStore) AcquireLock(ctx context.Context, namespace, repo string, titleHash string) error {
 	if m.AcquireLockFunc != nil {
 		return m.AcquireLockFunc(ctx, repo, titleHash)
+	}
+	return nil
+}
+
+func (m *mockStore) Delete(ctx context.Context, id string) error {
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, id)
 	}
 	return nil
 }

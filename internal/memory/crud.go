@@ -216,3 +216,45 @@ func (s *Service) ListRecords(ctx context.Context, filters ListFilters) ([]*reco
 
 	return recs, nil
 }
+
+// DeleteRecord hard-deletes a record and emits record_deleted (via=tool). It
+// returns *ErrReferenced when another record's superseded_by points at it.
+func (s *Service) DeleteRecord(ctx context.Context, id string) error {
+	if id == "" {
+		return fmt.Errorf("id is required")
+	}
+	rec, err := s.getAccessible(ctx, id)
+	if err != nil {
+		return fmt.Errorf("delete record: %w", err)
+	}
+	if err := s.store.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete record: %w", err)
+	}
+	s.appendEvents(ctx, s.transitionEvent(rec.Namespace, EventRecordDeleted, id, ViaTool))
+	return nil
+}
+
+// Similar returns up to limit records nearest to the record's stored embedding
+// (same namespace and repo, or repo "*"), the record itself excluded. It does
+// not call the embedding provider. A record without an embedding returns
+// ErrNoEmbedding.
+func (s *Service) Similar(ctx context.Context, id string, limit int) ([]*Candidate, error) {
+	rec, err := s.getAccessible(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("similar: %w", err)
+	}
+	if len(rec.Embedding) == 0 {
+		return nil, ErrNoEmbedding
+	}
+	cands, err := s.store.FindCandidates(ctx, rec.Embedding, rec.Namespace, rec.Repo, limit+1)
+	if err != nil {
+		return nil, fmt.Errorf("similar: %w", err)
+	}
+	out := make([]*Candidate, 0, len(cands))
+	for _, c := range cands {
+		if c.ID != rec.ID && len(out) < limit {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}

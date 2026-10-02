@@ -83,11 +83,55 @@ One block for all namespaces and one per namespace: cards injected and
 distinct records, the precision proxy (records marked `useful` within 2 h of a
 card / distinct records injected) next to the same ratio without the 2 h limit,
 feedback by outcome, records created by source and the current inventory,
-candidate-to-active promotion rate, stale-flag rate and check coverage (cards
+candidate-to-active promotion rate (imported candidates are left out and shown
+on their own `import promotion` line), stale-flag rate and check coverage (cards
 whose staleness could be checked), superseded/deprecated/TTL-deleted counts.
 A ratio with no data prints `n/a`. The last line, `N events still in the
 spool`, tells you the report may lag. The proxy depends on Claude calling
 `memory_feedback(useful)`; compare trends, not absolute numbers.
+
+## Managing records from the terminal
+
+Look at and fix memory without a Claude session. Every command works on one
+namespace: the current directory's, or `--namespace NAME` (which always wins).
+Writes go through the same path as the MCP tools (scrubbing, re-embedding,
+events), so `edit` needs Ollama; `ls`, `show`, `rm` and `promote` do not.
+
+```bash
+claude-memory ls [--status S] [--kind K] [--repo R] [--limit N] [--json]
+claude-memory show ID [--json]
+claude-memory rm ID [--reason TEXT]            # deprecates (reversible)
+claude-memory rm ID --hard [--yes]             # deletes the row; asks y/N first
+claude-memory edit ID                          # opens $VISUAL, else $EDITOR, else vi
+claude-memory promote ID                       # candidate -> active
+claude-memory review                           # weekly pass over candidates
+```
+
+- **ids** are the full UUID or the 8-hex short id that `ls` prints. A short id
+  is matched only inside the namespace; a `global` record needs its full UUID.
+  `rm`, `edit`, `promote` and `review` refuse a record of another namespace
+  (including `global`): pass `--namespace global` for those.
+- `ls` shows `candidate` and `active` records, newest first (50 by default,
+  `--limit 0` = all); `--status deprecated` shows the retired ones.
+  `ls --json` and `show --json` print a stable JSON shape (snake_case keys,
+  RFC 3339 UTC times, no embedding) for tooling.
+- `show` prints every field, the content and a stale line: `stale: N commits`,
+  `stale`, `fresh` or `unchecked` (unchecked unless the record's repo is the
+  current directory's git checkout and it has a baseline commit and files).
+- `rm --hard` asks `delete <id> "<title>" permanently? [y/N]`; EOF and an empty
+  answer mean no, `--yes` skips the question. It refuses a record that another
+  record's `superseded_by` points at; deprecate it instead.
+- `edit` shows `title:`, `tags:`, `files:` (comma-separated), a `---` line and the
+  content. Nothing changed means nothing written; an empty `tags:`/`files:` line
+  cannot clear them. If the editor fails or the file does not parse, nothing is
+  written and the temp file is kept (its path is printed).
+- `review` walks candidates newest first. Per record it shows age, counts, the
+  stale line, tags, files, the first 15 content lines and up to 3 similar
+  records, then asks `[a]pprove [e]dit [d]eprecate [x]delete [s]kip [v]iew
+  [q]uit`: `a` promotes, `d` asks a reason (Enter = `rejected in review`), `x`
+  asks y/N, `s` or Enter skips, `v` prints the whole content, `q` or EOF stops.
+  EOF at the reason or y/N prompt aborts that action. It prints a summary of
+  the counts at the end. It reads plain lines, so it can be scripted.
 
 ## Seeding and correcting records
 

@@ -6,6 +6,8 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"claude-memory/internal/record"
@@ -44,6 +46,11 @@ type Store interface {
 	// rollback otherwise. The write path (dedup/merge/SUPERSEDE) runs entirely
 	// inside it, so the advisory lock and all writes are atomic (AC-16, AC-17).
 	WithTx(ctx context.Context, fn func(tx TxStore) error) error
+
+	// Delete hard-deletes a record. It returns ErrReferenced (deleting
+	// nothing) when another record's superseded_by points at it, and
+	// ErrNotFound when the record does not exist.
+	Delete(ctx context.Context, id string) error
 
 	// DeleteCandidatesByTTL hard-deletes candidate records untouched for longer than ttlDays,
 	// preserving active and deprecated records regardless of age.
@@ -261,3 +268,17 @@ type FeedbackResponse struct {
 
 // ErrNotFound is returned when a requested record does not exist.
 var ErrNotFound = errors.New("record not found")
+
+// ErrNoEmbedding is returned by Similar for a record that has no stored
+// embedding.
+var ErrNoEmbedding = errors.New("record has no embedding")
+
+// ErrReferenced is returned by Delete when other records point at the record
+// through superseded_by; deleting it would orphan them.
+type ErrReferenced struct {
+	IDs []string
+}
+
+func (e *ErrReferenced) Error() string {
+	return fmt.Sprintf("record is referenced by superseded_by of %d record(s): %s", len(e.IDs), strings.Join(e.IDs, ", "))
+}

@@ -63,6 +63,7 @@ func TestStatsBlockRatios(t *testing.T) {
 	b := newStatsBlock("x", memory.EventCounts{
 		Cards: 40, CardRecords: 20, CardsChecked: 10, CardsStale: 4,
 		UsefulWithin: 5, UsefulAny: 8, CandidatesCreated: 10, CandidatesPromoted: 3,
+		ImportCreated: 20, ImportPromoted: 5,
 	})
 	for name, tc := range map[string]struct {
 		got  ratio
@@ -71,6 +72,7 @@ func TestStatsBlockRatios(t *testing.T) {
 		"precision":  {b.PrecisionProxy, "25.0% (5/20)"},
 		"useful any": {b.UsefulAny, "40.0% (8/20)"},
 		"promotion":  {b.PromotionRate, "30.0% (3/10)"},
+		"import":     {b.ImportPromotion, "25.0% (5/20)"},
 		"stale":      {b.StaleFlagRate, "40.0% (4/10)"},
 		"coverage":   {b.CheckCoverage, "25.0% (10/40)"},
 	} {
@@ -91,7 +93,7 @@ func TestRunStatsEmptyPrintsZerosAndNA(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"== all namespaces ==", "cards injected:      0 (0 distinct records)",
-		"useful (2 h):        n/a", "promotion rate:      n/a", "stale-flag rate:     n/a", "check coverage:      n/a",
+		"useful (2 h):        n/a", "promotion rate:      n/a", "import promotion:    n/a", "stale-flag rate:     n/a", "check coverage:      n/a",
 		"feedback:            useful=0 outdated=0 wrong=0", "records created:     inline=0 session=0 pr=0",
 		"0 events still in the spool",
 	} {
@@ -117,7 +119,9 @@ func TestRunStatsTextBlocksAndSpoolLine(t *testing.T) {
 				Inventory:          map[string]map[string]int{"pr": {"active": 5}},
 				DeprecatedByVia:    map[string]int{"feedback": 1},
 				CandidatesCreated:  4,
-				CandidatesPromoted: 1},
+				CandidatesPromoted: 1,
+				ImportCreated:      6,
+				ImportPromoted:     3},
 			"acme": {Cards: 3, CardRecords: 2},
 		},
 	}
@@ -130,7 +134,7 @@ func TestRunStatsTextBlocksAndSpoolLine(t *testing.T) {
 		"== all namespaces ==", "== namespace acme ==", "== namespace global ==",
 		"cards injected:      3 (2 distinct records)", "feedback:            useful=1 outdated=0 wrong=0",
 		"records created:     inline=0 session=0 pr=2", "pr[candidate=0 active=5 deprecated=0]",
-		"promotion rate:      25.0% (1/4)", "deprecated(tool=0 feedback=1)",
+		"promotion rate:      25.0% (1/4)", "import promotion:    50.0% (3/6)", "pr=2 import=0", "deprecated(tool=0 feedback=1)",
 		"2 events still in the spool",
 	} {
 		if !strings.Contains(got, want) {

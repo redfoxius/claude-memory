@@ -78,7 +78,7 @@ write-path UPDATE with no `files` never re-baselines.
   stale-flag rate. No content in events — ids and enums only.
 - Rough size: S each.
 
-### 3. management CLI (`review`) + import of existing knowledge — NOT STARTED
+### 3. management CLI (`review`) + import of existing knowledge — spec/plan `mgmt-cli/`; PR 1 (ls/show/rm/edit/promote/review, stats import line) implemented, PR 2 (import, migration 0004) not started
 
 - **CLI:** `claude-memory ls|show|rm|edit|promote` and an interactive
   `claude-memory review` that walks `candidate` records (newest first, with

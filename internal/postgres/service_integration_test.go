@@ -421,3 +421,59 @@ func TestLongPromptIdentifierRecall(t *testing.T) {
 		t.Fatal("no long_prompt_identifier cases found")
 	}
 }
+
+// DeleteRecord: a record referenced through superseded_by is refused (nothing
+// deleted, no event); an unreferenced one is removed and record_deleted
+// (via=tool) is written.
+func TestServiceDeleteRecord(t *testing.T) {
+	store, done := newServiceStore(t)
+	defer done()
+	ctx := context.Background()
+	svc := newTestService(t, store, &fixedEmbedder{}).WithEvents(store)
+
+	mk := func(title string) *record.Record {
+		r, err := store.Create(ctx, &record.Record{
+			ID: uuid.New().String(), Kind: record.KindGotcha, Title: title, Content: "c", Repo: "svc-repo",
+			Namespace: testNS, Status: record.StatusActive, Source: record.SourceInline, Confidence: 0.5,
+			Embedding: unitVec(1, 1),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	newer, older, plain := mk("newer"), mk("older"), mk("plain")
+	if _, err := store.Update(ctx, older.ID, map[string]interface{}{
+		"status": record.StatusDeprecated, "deprecation_reason": "r", "superseded_by": newer.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var ref *memory.ErrReferenced
+	if err := svc.DeleteRecord(ctx, newer.ID); !errors.As(err, &ref) || len(ref.IDs) != 1 || ref.IDs[0] != older.ID {
+		t.Fatalf("delete referenced: err = %v", err)
+	}
+	if _, err := store.Get(ctx, newer.ID); err != nil {
+		t.Errorf("referenced record gone: %v", err)
+	}
+	if n := countRows(t, ctx, store, `SELECT count(*) FROM events WHERE type = 'record_deleted'`); n != 0 {
+		t.Errorf("record_deleted events = %d after refusal", n)
+	}
+
+	if err := svc.DeleteRecord(ctx, plain.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(ctx, plain.ID); !errors.Is(err, memory.ErrNotFound) {
+		t.Errorf("plain record still there: %v", err)
+	}
+	if n := countRows(t, ctx, store, `SELECT count(*) FROM events WHERE type = 'record_deleted' AND via = 'tool' AND record_id = $1`, plain.ID); n != 1 {
+		t.Errorf("record_deleted events = %d, want 1", n)
+	}
+	// Deleting the referencing record frees the target.
+	if err := svc.DeleteRecord(ctx, older.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteRecord(ctx, newer.ID); err != nil {
+		t.Errorf("delete after reference removed: %v", err)
+	}
+}

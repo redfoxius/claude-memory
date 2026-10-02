@@ -356,3 +356,43 @@ func TestStatsCounts(t *testing.T) {
 		t.Errorf("narrow = %+v", narrow)
 	}
 }
+
+// AC-40: imported candidates are counted apart from the promotion rate. The
+// 'import' event source only exists after the import migration, so this test
+// lifts the source CHECK to insert such events.
+func TestStatsCountsSeparateImports(t *testing.T) {
+	ctx := context.Background()
+	dsn, cleanup := startPostgresContainer(t, ctx)
+	defer cleanup()
+	s, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.pool.Exec(ctx, `ALTER TABLE events DROP CONSTRAINT events_source_check`); err != nil {
+		t.Fatal(err)
+	}
+
+	inl, imp1, imp2 := uuid.New().String(), uuid.New().String(), uuid.New().String()
+	created := func(rec string, src memory.EventSource) memory.Event {
+		e := ev("ns1", memory.EventRecordCreated, rec, 20*time.Hour)
+		e.Source, e.Status = src, record.StatusCandidate
+		return e
+	}
+	promoted := ev("ns1", memory.EventRecordPromoted, imp1, time.Hour)
+	promoted.Via = memory.ViaTool
+	promoted2 := ev("ns1", memory.EventRecordPromoted, inl, time.Hour)
+	promoted2.Via = memory.ViaTool
+	if err := s.Append(ctx, created(inl, memory.EventSourceInline), created(imp1, "import"), created(imp2, "import"), promoted, promoted2); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := s.StatsCounts(ctx, time.Now().Add(-30*24*time.Hour), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CandidatesCreated != 1 || c.CandidatesPromoted != 1 || c.ImportCreated != 2 || c.ImportPromoted != 1 {
+		t.Errorf("counts = created %d promoted %d, import created %d promoted %d; want 1 1 2 1",
+			c.CandidatesCreated, c.CandidatesPromoted, c.ImportCreated, c.ImportPromoted)
+	}
+}

@@ -487,6 +487,47 @@ func (s *Store) WithTx(ctx context.Context, fn func(tx memory.TxStore) error) er
 	return nil
 }
 
+// Delete hard-deletes a record in one transaction. It returns
+// *memory.ErrReferenced when another record's superseded_by points at it and
+// memory.ErrNotFound when no row matched.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, `SELECT id FROM records WHERE superseded_by = $1 AND id <> $1`, id)
+	if err != nil {
+		return fmt.Errorf("query references: %w", err)
+	}
+	var refs []string
+	for rows.Next() {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan reference: %w", err)
+		}
+		refs = append(refs, ref)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("references rows: %w", err)
+	}
+	if len(refs) > 0 {
+		return &memory.ErrReferenced{IDs: refs}
+	}
+
+	tag, err := tx.Exec(ctx, `DELETE FROM records WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete record: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return memory.ErrNotFound
+	}
+	return tx.Commit(ctx)
+}
+
 // DeleteCandidatesByTTL hard-deletes candidate records untouched for longer than ttlDays,
 // preserving active and deprecated records regardless of age.
 // Returns the number of records deleted. Each deleted row also gets a

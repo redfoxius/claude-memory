@@ -128,22 +128,24 @@ type statsBlock struct {
 	Namespace string `json:"namespace"`
 	memory.EventCounts
 	// Ratios computed from the counts (AC-27).
-	PrecisionProxy ratio `json:"precision_proxy"` // useful within 2 h / distinct injected
-	UsefulAny      ratio `json:"useful_any_ratio"`
-	PromotionRate  ratio `json:"promotion_rate"`
-	StaleFlagRate  ratio `json:"stale_flag_rate"`
-	CheckCoverage  ratio `json:"check_coverage"`
+	PrecisionProxy  ratio `json:"precision_proxy"` // useful within 2 h / distinct injected
+	UsefulAny       ratio `json:"useful_any_ratio"`
+	PromotionRate   ratio `json:"promotion_rate"`
+	ImportPromotion ratio `json:"import_promotion"`
+	StaleFlagRate   ratio `json:"stale_flag_rate"`
+	CheckCoverage   ratio `json:"check_coverage"`
 }
 
 func newStatsBlock(ns string, c memory.EventCounts) statsBlock {
 	return statsBlock{
-		Namespace:      ns,
-		EventCounts:    c,
-		PrecisionProxy: ratio{c.UsefulWithin, c.CardRecords},
-		UsefulAny:      ratio{c.UsefulAny, c.CardRecords},
-		PromotionRate:  ratio{c.CandidatesPromoted, c.CandidatesCreated},
-		StaleFlagRate:  ratio{c.CardsStale, c.CardsChecked},
-		CheckCoverage:  ratio{c.CardsChecked, c.Cards},
+		Namespace:       ns,
+		EventCounts:     c,
+		PrecisionProxy:  ratio{c.UsefulWithin, c.CardRecords},
+		UsefulAny:       ratio{c.UsefulAny, c.CardRecords},
+		PromotionRate:   ratio{c.CandidatesPromoted, c.CandidatesCreated},
+		ImportPromotion: ratio{c.ImportPromoted, c.ImportCreated},
+		StaleFlagRate:   ratio{c.CardsStale, c.CardsChecked},
+		CheckCoverage:   ratio{c.CardsChecked, c.Cards},
 	}
 }
 
@@ -188,7 +190,7 @@ func runStats(ctx context.Context, r statsReader, opts statsOptions, now time.Ti
 }
 
 var (
-	statsSources  = []string{"inline", "session", "pr"}
+	statsSources  = []string{"inline", "session", "pr", "import"}
 	statsStatuses = []string{"candidate", "active", "deprecated"}
 )
 
@@ -209,7 +211,8 @@ func writeStatsBlock(w io.Writer, title string, b statsBlock) {
 	fmt.Fprintf(w, "feedback:            %s\n", joinCounts(b.Feedback, []string{"useful", "outdated", "wrong"}))
 	fmt.Fprintf(w, "records created:     %s\n", joinCounts(b.CreatedBySource, statsSources))
 	fmt.Fprintf(w, "inventory now:       %s\n", inventoryLine(b.Inventory))
-	fmt.Fprintf(w, "promotion rate:      %s  candidates created in the window later promoted\n", b.PromotionRate)
+	fmt.Fprintf(w, "promotion rate:      %s  candidates created in the window later promoted (imports excluded)\n", b.PromotionRate)
+	fmt.Fprintf(w, "import promotion:    %s  imported candidates later promoted\n", b.ImportPromotion)
 	fmt.Fprintf(w, "stale-flag rate:     %s  checked cards flagged stale\n", b.StaleFlagRate)
 	fmt.Fprintf(w, "check coverage:      %s  cards whose staleness could be checked\n", b.CheckCoverage)
 	fmt.Fprintf(w, "lifecycle:           superseded=%d deprecated(%s) ttl-deleted=%d\n",

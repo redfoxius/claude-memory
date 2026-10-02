@@ -44,6 +44,9 @@ func (f *fakeHookStore) List(ctx context.Context, filters memory.ListFilters) ([
 func (f *fakeHookStore) WithTx(ctx context.Context, fn func(tx memory.TxStore) error) error {
 	panic("WithTx should not be called by the hook (read-only path)")
 }
+func (f *fakeHookStore) Delete(ctx context.Context, id string) error {
+	panic("Delete should not be called by the hook (read-only path)")
+}
 func (f *fakeHookStore) DeleteCandidatesByTTL(ctx context.Context, ttlDays int) (int, error) {
 	panic("DeleteCandidatesByTTL should not be called by the hook (read-only path)")
 }
