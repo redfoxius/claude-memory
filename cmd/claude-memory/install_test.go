@@ -49,14 +49,14 @@ func TestParseInstallFlags(t *testing.T) {
 			"--yes", "--dry-run", "--reconfigure", "--topology", "remote", "--skip", "ollama,namespaces", "--skip=binary",
 			"--bin-dir", "/opt/bin", "--ollama-url", "http://h:11434", "--pg-dsn", "postgresql://u@h:5432/db",
 			"--pg-sslmode", "require", "--pg-password-stdin", "--namespace", "work=~/work/**", "--namespace=oss=~/oss/**",
-			"--pr-repos", "/a,/b", "--jobs-backend", "none", "--no-doctor", "--allow-root",
+			"--jobs-backend", "none", "--no-doctor", "--allow-root",
 		}, "", func(t *testing.T, o installOptions) {
 			in := o.Inputs
 			if !in.Yes || !in.DryRun || !in.Reconfigure || in.Upgrade || in.Topology != "remote" ||
 				!slices.Equal(in.Skip, []string{"ollama", "namespaces", "binary"}) || in.BinDir != "/opt/bin" || !in.BinDirExplicit ||
 				in.OllamaURL != "http://h:11434" || in.PGDSN != "postgresql://u@h:5432/db" || in.PGSSLMode != "require" ||
-				!slices.Equal(in.Namespaces, []string{"work=~/work/**", "oss=~/oss/**"}) || in.PRRepos != "/a,/b" ||
-				in.JobsBackend != "none" || !o.PasswordStdin || !o.NoDoctor || !o.AllowRoot {
+				!slices.Equal(in.Namespaces, []string{"work=~/work/**", "oss=~/oss/**"}) ||
+				in.JobsBackend != "none" || !o.PasswordStdin || !in.NoDoctor || !o.AllowRoot {
 				t.Errorf("parsed %+v", o)
 			}
 		}},
@@ -83,12 +83,14 @@ func TestParseInstallFlags(t *testing.T) {
 		{"jobs-backend cron", []string{"--jobs-backend", "cron"}, "§12.1", nil},
 		{"jobs-backend junk", []string{"--jobs-backend", "launchctl"}, "want launchd, systemd or none", nil},
 		{"--claude-md is 2b", []string{"--claude-md", "/x"}, "slice 2b", nil},
+		{"--pr-repos is 2b", []string{"--pr-repos", "/a"}, "slice 2b", nil},
 		{"--no-jobs is 2b", []string{"--no-jobs"}, "slice 2b", nil},
 		{"pg-sslmode junk", []string{"--pg-sslmode", "verify-full"}, "want prefer, require or disable", nil},
 		{"pg-dsn with a password", []string{"--pg-dsn", "postgresql://u:pw@h/db"}, "--pg-dsn", nil},
 		{"ollama-url junk", []string{"--ollama-url", "ftp://h"}, "--ollama-url", nil},
 		{"namespace without glob", []string{"--namespace", "work"}, "--namespace", nil},
-		{"bad bool", []string{"--yes=maybe"}, "invalid boolean", nil},
+		{"bad bool", []string{"--yes=maybe"}, "invalid value for flag --yes", nil},
+		{"deferred flag after -- is positional", []string{"--", "--only"}, "no arguments", nil},
 		{"missing value", []string{"--topology"}, "needs an argument", nil},
 	}
 	for _, tc := range cases {
@@ -151,7 +153,8 @@ func TestResolveInstallPlatform(t *testing.T) {
 			t.Errorf("%s: exit %d (err %v), want 2", tc.name, exitCode(err), err)
 		}
 	}
-	_, err := resolveInstallPlatform(freebsd, "")
+	// The unsupported-OS message wins over a --jobs-backend complaint (C7).
+	_, err := resolveInstallPlatform(freebsd, "launchd")
 	if err == nil || !strings.Contains(err.Error(), "unsupported OS freebsd") {
 		t.Errorf("unsupported OS message: %v", err)
 	}
@@ -170,8 +173,37 @@ func TestInstallExit(t *testing.T) {
 	if err := installExit(setup.RunResult{ExitCode: 130, Err: setup.ErrInterrupted}, red); exitCode(err) != 130 || !errors.Is(err, errQuiet) {
 		t.Errorf("exit 130 must be quiet: %v", err)
 	}
+	if err := installExit(setup.RunResult{ExitCode: 1, Err: errors.New("boom")}, red); exitCode(err) != 1 || errors.Is(err, errQuiet) {
+		t.Errorf("exit 1 with an error must print it: %v", err)
+	}
 	err := installExit(setup.RunResult{ExitCode: 2, Err: fmt.Errorf("bad value S3ntinel-secret: %w", setup.ErrTooManyAttempts)}, red)
 	if exitCode(err) != 2 || strings.Contains(err.Error(), "S3ntinel-secret") {
 		t.Errorf("exit 2 must print a redacted message: %v", err)
+	}
+}
+
+// TestParseInstallFlagsNeverEchoInput (S4): the error text holds neither a
+// typed value nor a positional argument, and a bad --pg-password-stdin value
+// gets a fixed message.
+func TestParseInstallFlagsNeverEchoInput(t *testing.T) {
+	t.Parallel()
+	const secret = "Hunter2-secret"
+	for _, args := range [][]string{
+		{"--pg-password-stdin=" + secret},
+		{"--yes=" + secret},
+		{secret},
+		{"--pg-dsn", "postgresql://u:" + secret + "@h/db"},
+		{"--ollama-url", "http://u:" + secret + "@h"},
+		{"--", secret},
+	} {
+		var stderr bytes.Buffer
+		_, err := parseInstallFlags(args, &stderr)
+		if exitCode(err) != 2 {
+			t.Errorf("%q: exit %d (%v), want 2", args, exitCode(err), err)
+			continue
+		}
+		if strings.Contains(err.Error()+stderr.String(), secret) {
+			t.Errorf("%q: the typed value was echoed: %v / %s", args, err, stderr.String())
+		}
 	}
 }

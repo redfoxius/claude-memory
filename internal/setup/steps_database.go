@@ -137,13 +137,26 @@ func (s DatabaseStep) Seed(_ context.Context, rc ReadPorts, st *RunState) ([]Not
 	if in.PGPassword != "" {
 		t = t.WithPassword(in.PGPassword)
 	}
-	t.Mode, t.Source = DBModeExisting, seed.Source
-	if in.PGSSLMode != "" {
-		t.SSLMode = in.PGSSLMode
+	src := seed.Source
+	if in.PGSSLMode != "" && effectiveSSLMode(t.SSLMode) != in.PGSSLMode {
+		// The flag changes the connection, so the value is flag-sourced: the
+		// env file's DSN is then outdated (rewritten with the new sslmode),
+		// not a hand edit to keep.
+		t.SSLMode, src = in.PGSSLMode, SourceFlag
 	}
+	t.Mode, t.Source = DBModeExisting, src
 	s.register(string(t.password))
-	st.DB.Set(t, seed.Source)
+	st.DB.Set(t, src)
 	return seed.Notes, nil
+}
+
+// effectiveSSLMode is the sslmode a connection uses: an empty one is the
+// driver default, prefer.
+func effectiveSSLMode(m string) string {
+	if m == "" {
+		return DefaultSSLMode
+	}
+	return m
 }
 
 // MissingInput implements MissingInputter.
@@ -487,7 +500,7 @@ func (s DatabaseStep) configureAuto(ctx context.Context, rc ReadPorts, st *RunSt
 			return errors.New("no database is configured: pass --pg-dsn (and --pg-password-stdin) or set " + EnvKeyDSN +
 				"; with --topology local and no DSN, install creates the database for you")
 		}
-		t, src, err := s.createTarget(DefaultPGDB, DefaultPGUser, st.Inputs.PGPassword)
+		t, src, err := s.createTarget(DefaultPGDB, DefaultPGUser, st.Inputs.PGPassword, st.Inputs.PGSSLMode)
 		if err != nil {
 			return err
 		}
@@ -507,7 +520,7 @@ func (s DatabaseStep) configureAuto(ctx context.Context, rc ReadPorts, st *RunSt
 // createTarget is the create-path target: localhost:5432, sslmode disable on
 // loopback, the given role and database, and the typed password if one was
 // passed on stdin, else a generated one (AC-21, AC-22).
-func (s DatabaseStep) createTarget(name, user, given string) (DBTarget, Source, error) {
+func (s DatabaseStep) createTarget(name, user, given, ssl string) (DBTarget, Source, error) {
 	pw, src := given, SourceFlag
 	if pw == "" {
 		var err error
@@ -517,7 +530,10 @@ func (s DatabaseStep) createTarget(name, user, given string) (DBTarget, Source, 
 		src = SourceGenerated
 	}
 	s.register(pw)
-	t := DBTarget{Host: "localhost", Port: DefaultPGPort, Name: name, User: user, SSLMode: "disable", Mode: DBModeCreate, Source: src}
+	if ssl == "" {
+		ssl = "disable"
+	}
+	t := DBTarget{Host: "localhost", Port: DefaultPGPort, Name: name, User: user, SSLMode: ssl, Mode: DBModeCreate, Source: src}
 	return t.WithPassword(pw), src, nil
 }
 
@@ -628,7 +644,7 @@ func (s DatabaseStep) askCreate(ui Prompter, st *RunState) error {
 	if err != nil {
 		return err
 	}
-	t, _, err := s.createTarget(name, user, st.Inputs.PGPassword)
+	t, _, err := s.createTarget(name, user, st.Inputs.PGPassword, st.Inputs.PGSSLMode)
 	if err != nil {
 		return err
 	}
@@ -646,6 +662,13 @@ func (s DatabaseStep) askExisting(ui Prompter, st *RunState, cur DBTarget, set, 
 		defHost, defPort, defName, defUser = cur.Host, cur.Port, cur.Name, cur.User
 		for i, v := range sslValues {
 			if v == cur.SSLMode {
+				defSSL = i
+			}
+		}
+	}
+	if m := st.Inputs.PGSSLMode; m != "" { // --pg-sslmode is the prompt's default
+		for i, v := range sslValues {
+			if v == m {
 				defSSL = i
 			}
 		}

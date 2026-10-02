@@ -149,6 +149,10 @@ type Engine struct {
 	UI       Prompter
 	Reporter Reporter
 	Version  string // running binary version ("dev"/"" never warns on downgrade)
+	// KnownIDs are step ids that --skip accepts although this build does not
+	// register them (the 2b ids in 2a): skipping one is a no-op. Any other
+	// unknown id is a usage error.
+	KnownIDs []string
 }
 
 // Run executes phases 0-6 for in.
@@ -386,6 +390,9 @@ func (s *session) setup() error {
 	for _, id := range s.in.Skip {
 		r, ok := s.idx[id]
 		if !ok {
+			if slices.Contains(s.e.KnownIDs, id) {
+				continue
+			}
 			return fmt.Errorf("--skip: unknown step %q", id)
 		}
 		r.userSkip, r.skipWhy = true, "skipped by --skip"
@@ -1067,6 +1074,11 @@ func (s *session) awaitFlow(r *stepRun, first StepResult, chosen []string) error
 	for {
 		s.report().Await(r.step.ID(), aw.Instructions)
 		i, err := s.ui().Select(r.step.Title()+": waiting for you", []string{"re-check", "skip", "quit"}, 0)
+		if errors.Is(err, ErrTooManyAttempts) {
+			// AC-10: three invalid answers skip the step, like the other prompts.
+			r.userSkip, r.skipWhy = true, "skipped by you"
+			return record()
+		}
 		if err := s.askErr(err); err != nil {
 			_ = record()
 			return err

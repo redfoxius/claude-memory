@@ -11,8 +11,9 @@ package setup
 // version is the running binary's version; red is the run's Redactor, which
 // the steps that handle passwords or error text from the network need.
 //
-// WI-S2-14b hook point: the final doctor step (AC-62) is registered here
-// after namespaces. It is deliberately not part of 2a.
+// WI-S2-14b hook point: the final `doctor` Step (AC-62) is registered here,
+// last, after namespaces; Inputs.NoDoctor makes it skip. It is deliberately
+// not part of 2a, and cmd runs nothing after the engine except the summary.
 func InstallSteps(version string, red *Redactor) []Step {
 	return []Step{
 		PlatformStep{},
@@ -25,4 +26,12 @@ func InstallSteps(version string, red *Redactor) []Step {
 		OllamaStep{Redactor: red},
 		NamespacesStep{Version: version},
 	}
+}
+
+// AllStepIDs are the ids of the whole AC-7 pipeline, in order. `--skip`
+// accepts every one of them, also those 2a does not register (a no-op), so a
+// script written for the full install keeps working.
+var AllStepIDs = []string{
+	"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces",
+	"hooks.scripts", "hooks.settings", "mcp", "skills", "claude-md", "jobs", "doctor",
 }

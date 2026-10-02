@@ -241,8 +241,10 @@ func buildSetupValues(ctx context.Context, binDir string) (setupValues, error) {
 
 // buildSetupDeps builds the values and the read-only adapters doctor runs
 // with (AC-57, AC-68); install builds on it too (writablePorts swaps in the
-// writable FS and Runner). This is the only place internal/setup's adapters
-// are constructed. binDir is the --bin-dir flag ("" = default).
+// writable FS and Runner). The setup adapters are chosen in this file
+// (buildSetupDeps, readOnlyPorts, writablePorts, cmdInstall for the
+// prompter); their implementations live in setup_adapters.go. binDir is the
+// --bin-dir flag ("" = default).
 func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
 	v, err := buildSetupValues(ctx, binDir)
 	if err != nil {
@@ -286,15 +288,18 @@ func readOnlyPorts(d setupDeps) setup.ReadPorts {
 
 // writablePorts is what Apply gets (install, uninstall): the writable FS, a
 // Runner that allows mutating commands, and the full DB/Ollama probers. With
-// dryRun the FS and Runner are the read-only adapters, a second layer
-// beneath the engine never reaching Apply (Design 20). ClaudeCLI, Jobs and
+// dryRun the FS and Runner are the read-only adapters and DB.Migrate and
+// Ollama.Pull are refused: a second layer beneath the engine never reaching
+// Apply (Design 20). ClaudeCLI, Jobs and
 // Progress are nil in 2a; the renderer sets Progress.
 func writablePorts(d setupDeps, dryRun bool) setup.WritePorts {
 	var fsys setup.FS = newWritableFS()
 	var runner setup.Runner = execRunner{}
+	db, oll := d.DB, d.Ollama
 	if dryRun {
 		fsys = readOnlyFS{}
 		runner = execRunner{readOnly: true}
+		db, oll = readOnlyDB{d.DB}, readOnlyOllama{d.Ollama}
 	}
 	rp := readOnlyPorts(d)
 	rp.FS, rp.Runner = fsys, runner
@@ -302,8 +307,8 @@ func writablePorts(d setupDeps, dryRun bool) setup.WritePorts {
 		ReadPorts: rp,
 		FS:        fsys,
 		Runner:    runner,
-		DB:        d.DB,
-		Ollama:    d.Ollama,
+		DB:        db,
+		Ollama:    oll,
 	}
 }
 

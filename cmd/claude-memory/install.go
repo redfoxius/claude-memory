@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -36,10 +37,7 @@ type installOptions struct {
 	Inputs        setup.Inputs // everything the engine reads
 	AllowRoot     bool         // --allow-root (AC-69)
 	PasswordStdin bool         // --pg-password-stdin (AC-31)
-	// NoDoctor is --no-doctor. WI-S2-14b hook point: the final doctor stage
-	// is not part of 2a, so nothing reads it yet.
-	NoDoctor bool
-	Help     bool
+	Help          bool
 }
 
 // deferredInstallFlags exit 2 with a pointer to the spec (AC-4, §12.1).
@@ -51,6 +49,7 @@ var deferredInstallFlags = map[string]string{
 	// Flags of steps that arrive in slice 2b: accepting them in 2a would
 	// silently ignore them.
 	"claude-md": "--claude-md needs the claude-md step, which is not part of this build (slice 2b)",
+	"pr-repos":  "--pr-repos needs the jobs step, which is not part of this build (slice 2b)",
 	"no-jobs":   "--no-jobs needs the jobs step, which is not part of this build (slice 2b); there is no job to skip",
 }
 
@@ -68,6 +67,9 @@ func (l listFlag) Set(v string) error {
 // values, positional arguments.
 func parseInstallFlags(args []string, stderr io.Writer) (installOptions, error) {
 	for _, a := range args {
+		if a == "--" {
+			break // everything after is positional, rejected below
+		}
 		if !strings.HasPrefix(a, "-") {
 			continue
 		}
@@ -86,7 +88,9 @@ func parseInstallFlags(args []string, stderr io.Writer) (installOptions, error) 
 		upgrad bool
 	)
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	// The flag package would echo the offending value (and print it a second
+	// time through main); install prints its own fixed messages instead.
+	fs.SetOutput(io.Discard)
 	fs.BoolVar(&in.Yes, "yes", false, "accept the defaults, ask nothing")
 	fs.BoolVar(&upgrad, "upgrade", false, "alias of --yes")
 	fs.BoolVar(&in.DryRun, "dry-run", false, "show the plan and change nothing")
@@ -99,18 +103,19 @@ func parseInstallFlags(args []string, stderr io.Writer) (installOptions, error) 
 	fs.StringVar(&in.PGSSLMode, "pg-sslmode", "", "prefer|require|disable")
 	fs.BoolVar(&o.PasswordStdin, "pg-password-stdin", false, "read the database password from stdin (one line)")
 	fs.Var(listFlag{&in.Namespaces}, "namespace", "NAME=GLOB namespace mapping (repeatable)")
-	fs.StringVar(&in.PRRepos, "pr-repos", "", "repositories for PR ingest")
 	fs.StringVar(&in.JobsBackend, "jobs-backend", "", "launchd|systemd|none")
-	fs.BoolVar(&o.NoDoctor, "no-doctor", false, "do not run doctor at the end")
+	fs.BoolVar(&in.NoDoctor, "no-doctor", false, "do not run doctor at the end")
 	fs.BoolVar(&o.AllowRoot, "allow-root", false, "allow running as root")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
+			fs.SetOutput(stderr)
+			fs.PrintDefaults()
 			return installOptions{Help: true}, nil
 		}
-		return installOptions{}, usageError(err)
+		return installOptions{}, usageError(sanitizeFlagError(err))
 	}
 	if fs.NArg() > 0 {
-		return installOptions{}, usageError(fmt.Errorf("install takes no arguments, got %q", fs.Args()))
+		return installOptions{}, usageError(errors.New("install takes no arguments"))
 	}
 
 	// --upgrade is exactly --yes: one code path (AC-52).
@@ -130,6 +135,22 @@ func parseInstallFlags(args []string, stderr io.Writer) (installOptions, error) 
 		return installOptions{}, usageError(err)
 	}
 	return o, nil
+}
+
+var flagNameRE = regexp.MustCompile(`for (?:flag )?-{1,2}([A-Za-z0-9-]+)`)
+
+// sanitizeFlagError turns a flag-package error into one that never echoes the
+// user's input: an unknown flag or a missing argument keeps the flag name
+// only; a bad value says which flag, not what was typed.
+func sanitizeFlagError(err error) error {
+	msg := err.Error()
+	if strings.HasPrefix(msg, "flag provided but not defined") || strings.HasPrefix(msg, "flag needs an argument") {
+		return err
+	}
+	if m := flagNameRE.FindStringSubmatch(msg); m != nil {
+		return fmt.Errorf("invalid value for flag --%s", m[1])
+	}
+	return errors.New("invalid flag value")
 }
 
 // validateInstallValues rejects bad and deferred flag values early (exit 2);
@@ -169,11 +190,13 @@ func validateInstallValues(in *setup.Inputs) error {
 // refuses an unsupported OS (AC-16, AC-17). Both are exit 2, before any prompt
 // and before any write.
 func resolveInstallPlatform(p setup.PlatformInfo, override string) (setup.PlatformInfo, error) {
-	p, err := jobsBackendOverride(p, override)
-	if err != nil {
+	// An unsupported OS is refused first: its message (AC-17) wins over a
+	// --jobs-backend complaint.
+	if err := setup.UnsupportedError(p); err != nil {
 		return p, usageError(err)
 	}
-	if err := setup.UnsupportedError(p); err != nil {
+	p, err := jobsBackendOverride(p, override)
+	if err != nil {
 		return p, usageError(err)
 	}
 	return p, nil
@@ -193,7 +216,7 @@ func cmdInstall(args []string) error {
 	if err := rootGuard(os.Geteuid(), opts.AllowRoot); err != nil {
 		return usageError(err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := interruptContext(context.Background(), os.Stderr)
 	defer stop()
 
 	deps, err := buildSetupDeps(ctx, opts.Inputs.BinDir)
@@ -205,9 +228,15 @@ func cmdInstall(args []string) error {
 		return err
 	}
 	if opts.PasswordStdin {
+		if err := refuseTerminalStdin(term.IsTerminal(int(os.Stdin.Fd()))); err != nil {
+			return usageError(err)
+		}
 		// Before Detect (AC-31); the secret is registered with the Redactor.
 		pw, err := readStdinSecret(ctx, os.Stdin, deps.Redactor, stdinSecretTimeout)
 		if err != nil {
+			if ctx.Err() != nil {
+				return quietExit(setup.ExitInterrupted)
+			}
 			return usageError(err)
 		}
 		opts.Inputs.PGPassword = pw
@@ -215,13 +244,14 @@ func cmdInstall(args []string) error {
 	opts.Inputs.Env = deps.Env
 
 	run := installRun{
-		Opts:  opts,
-		Deps:  deps,
-		UI:    newTTYPrompter(os.Stdin, os.Stdout, deps.Redactor),
-		Read:  readOnlyPorts(deps),
-		Write: writablePorts(deps, opts.Inputs.DryRun),
-		Out:   deps.Stdout,
-		TTY:   term.IsTerminal(int(os.Stdout.Fd())),
+		Opts:    opts,
+		Deps:    deps,
+		UI:      newTTYPrompter(ctx, os.Stdin, os.Stdout, deps.Redactor),
+		Read:    readOnlyPorts(deps),
+		Write:   writablePorts(deps, opts.Inputs.DryRun),
+		Out:     deps.Stdout,
+		TTY:     term.IsTerminal(int(os.Stdout.Fd())),
+		Version: buildVersion().Short(),
 	}
 	return runInstall(ctx, run)
 }
@@ -237,6 +267,8 @@ type installRun struct {
 	Write setup.WritePorts
 	Out   io.Writer
 	TTY   bool
+	// Version is the running binary's version (injected so tests control it).
+	Version string
 }
 
 // runInstall builds the engine, runs it and prints the summary. It returns
@@ -246,7 +278,7 @@ func runInstall(ctx context.Context, r installRun) error {
 	rend := setup.NewRenderer(r.Out, red, setup.RenderOptions{TTY: r.TTY, Env: r.Deps.Env, DryRun: r.Opts.Inputs.DryRun})
 	write := r.Write
 	write.Progress = rend.Progress
-	ver := buildVersion().Short()
+	ver := r.Version
 	eng := &setup.Engine{
 		Steps:    setup.InstallSteps(ver, red),
 		Read:     r.Read,
@@ -254,19 +286,21 @@ func runInstall(ctx context.Context, r installRun) error {
 		UI:       r.UI,
 		Reporter: rend,
 		Version:  ver,
+		KnownIDs: setup.AllStepIDs,
 	}
 	res := eng.Run(ctx, r.Opts.Inputs)
 	rend.Summary(res)
 
-	// WI-S2-14b hook point: the final in-process doctor (AC-62) and its
-	// exit-code rule run here, after Summary and before the exit code is
-	// chosen. 2a exits with the engine's code only. r.Opts.NoDoctor skips it.
+	// The final doctor (AC-62, WI-S2-14b) will be the last registered Step
+	// (see setup.InstallSteps), not code here: 2a exits with the engine's
+	// code only.
 	return installExit(res, red)
 }
 
-// installExit maps an engine result to the process exit: 0 is nil; a usage
-// error (2, including a prompt that failed three times) prints its redacted
-// message; 130 and a plain failure (1, already in the summary) are quiet.
+// installExit maps an engine result to the process exit: 0 is nil; any other
+// code with an error prints that error, redacted (usage errors, exit 2); 130
+// and a failure without an error (exit 1, the summary and per-step lines
+// already say why) are quiet.
 func installExit(res setup.RunResult, red *setup.Redactor) error {
 	if res.ExitCode == setup.ExitOK {
 		return nil
@@ -279,4 +313,37 @@ func installExit(res setup.RunResult, red *setup.Redactor) error {
 		msg = red.Redact(msg)
 	}
 	return &exitError{code: res.ExitCode, err: errors.New(msg)}
+}
+
+// refuseTerminalStdin refuses --pg-password-stdin when stdin is a terminal
+// (AC-31: the flag is for a pipe or file; a typed password would echo).
+func refuseTerminalStdin(isTerminal bool) error {
+	if isTerminal {
+		return errors.New("--pg-password-stdin needs a pipe or file on stdin, not a terminal")
+	}
+	return nil
+}
+
+// interruptContext returns a context cancelled by the first SIGINT/SIGTERM.
+// The handler is then removed, so a second Ctrl-C uses the default action and
+// kills the process even when a prompt read is blocked.
+func interruptContext(parent context.Context, msg io.Writer) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-sigc:
+			signal.Stop(sigc)
+			_, _ = io.WriteString(msg, "\ninterrupted: stopping; press Ctrl-C again to quit now\n")
+			cancel()
+		case <-done:
+		}
+	}()
+	return ctx, func() {
+		signal.Stop(sigc)
+		close(done)
+		cancel()
+	}
 }

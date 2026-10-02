@@ -36,3 +36,21 @@ func TestInstallStepsRegistry(t *testing.T) {
 		}
 	}
 }
+
+// TestSkipAcceptsUnregisteredStepIDs (C4): --skip mcp works in 2a; a truly
+// unknown id is still a usage error.
+func TestSkipAcceptsUnregisteredStepIDs(t *testing.T) {
+	t.Parallel()
+	for _, id := range AllStepIDs {
+		e := &Engine{Steps: []Step{PlatformStep{}}, KnownIDs: AllStepIDs}
+		s := &session{e: e, idx: map[string]*stepRun{}, in: Inputs{Skip: []string{id}}}
+		if err := s.setup(); err != nil {
+			t.Errorf("--skip %s: %v", id, err)
+		}
+	}
+	e := &Engine{Steps: []Step{PlatformStep{}}, KnownIDs: AllStepIDs}
+	s := &session{e: e, idx: map[string]*stepRun{}, in: Inputs{Skip: []string{"nonsense"}}}
+	if err := s.setup(); err == nil {
+		t.Error("--skip nonsense must fail")
+	}
+}

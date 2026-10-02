@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -72,10 +75,15 @@ func (c *countingFS) Lock(p string) (func() error, error) {
 type countingRunner struct {
 	mutating atomic.Int32
 	total    atomic.Int32
+	mu       sync.Mutex
+	seen     []string // argv, env and stdin of every command, joined
 }
 
 func (r *countingRunner) Run(_ context.Context, c setup.Cmd) (setup.Result, error) {
 	r.total.Add(1)
+	r.mu.Lock()
+	r.seen = append(r.seen, strings.Join(c.Argv, " ")+" "+strings.Join(c.Env, " ")+" "+string(c.Stdin))
+	r.mu.Unlock()
 	if c.Mutating {
 		r.mutating.Add(1)
 		return setup.Result{}, setup.ErrReadOnly
@@ -151,7 +159,7 @@ func newDryRunFixture(t *testing.T, args ...string) *dryRunFixture {
 	f.run = installRun{
 		Opts: opts,
 		Deps: setupDeps{Paths: paths, Env: env, Platform: plat, Redactor: red},
-		Read: read, Write: write, Out: f.out,
+		Read: read, Write: write, Out: f.out, Version: "v0.0.0-test",
 	}
 	return f
 }
@@ -173,7 +181,8 @@ func tree(t *testing.T, dir string) []string {
 	return out
 }
 
-const dryRunSentinel = "S3ntinel-pw-9f2"
+// The AC-30 sentinel: URL-special characters in every encoding form.
+const dryRunSentinel = "S3ntinel-pw-$@:/x"
 
 var dryRunArgs = []string{"--dry-run", "--yes", "--topology", "remote",
 	"--pg-dsn", "postgresql://claude_memory@db.example.com:5432/claude_memory?sslmode=require",
@@ -208,8 +217,18 @@ func TestInstallDryRunGolden(t *testing.T) {
 	if got := tree(t, f.home); len(got) != 0 {
 		t.Errorf("HOME was written to: %v", got)
 	}
-	if strings.Contains(out, dryRunSentinel) {
-		t.Errorf("the password reached the output:\n%s", out)
+	forms := []string{dryRunSentinel, url.QueryEscape(dryRunSentinel), url.PathEscape(dryRunSentinel), url.UserPassword("", dryRunSentinel).String()[1:]}
+	for _, form := range forms {
+		if strings.Contains(out, form) {
+			t.Errorf("the password form %q reached the output:\n%s", form, out)
+		}
+		f.runner.mu.Lock()
+		for _, argv := range f.runner.seen {
+			if strings.Contains(argv, form) {
+				t.Errorf("the password form %q reached a command: %s", form, argv)
+			}
+		}
+		f.runner.mu.Unlock()
 	}
 	if !strings.Contains(out, "Dry run: nothing was changed.") {
 		t.Errorf("missing the dry-run line:\n%s", out)
@@ -246,17 +265,22 @@ func TestInstallBinaryOutsideCheckout(t *testing.T) {
 // production builder hands Apply the read-only adapters.
 func TestWritablePortsDryRun(t *testing.T) {
 	t.Parallel()
-	d := setupDeps{FS: readOnlyFS{}, Runner: execRunner{readOnly: true}}
+	d := setupDeps{FS: readOnlyFS{}, Runner: execRunner{readOnly: true}, DB: &fakeDB{}, Ollama: &fakeOllama{}}
 	for _, dry := range []bool{true, false} {
 		wp := writablePorts(d, dry)
 		_, werr := wp.FS.Lock(filepath.Join(t.TempDir(), "lock"))
 		_, rerr := wp.Runner.Run(context.Background(), setup.Cmd{Argv: []string{"true"}, Mutating: true})
+		merr := wp.DB.Migrate(context.Background(), "postgresql://u@h/db")
+		perr := wp.Ollama.Pull(context.Background(), "http://h", "m", nil)
 		if dry {
-			if werr == nil || rerr == nil {
-				t.Errorf("dry-run ports must refuse writes and mutating commands: %v, %v", werr, rerr)
+			if werr == nil || rerr == nil || !errors.Is(merr, setup.ErrReadOnly) || !errors.Is(perr, setup.ErrReadOnly) {
+				t.Errorf("dry-run ports must refuse writes, mutating commands, Migrate and Pull: %v, %v, %v, %v", werr, rerr, merr, perr)
 			}
-		} else if werr != nil || rerr != nil {
-			t.Errorf("writable ports refused: %v, %v", werr, rerr)
+			if _, err := wp.DB.Probe(context.Background(), "x"); err != nil {
+				t.Errorf("dry-run Probe must pass through: %v", err)
+			}
+		} else if werr != nil || rerr != nil || merr != nil || perr != nil {
+			t.Errorf("writable ports refused: %v, %v, %v, %v", werr, rerr, merr, perr)
 		}
 		if wp.ClaudeCLI != nil || wp.Jobs != nil || wp.ReadPorts.Jobs != nil {
 			t.Errorf("2a leaves ClaudeCLI, Jobs and ReadPorts.Jobs nil: %+v", wp)
@@ -266,4 +290,10 @@ func TestWritablePortsDryRun(t *testing.T) {
 	if rp.Jobs != nil {
 		t.Error("ReadPorts.Jobs must be nil in 2a")
 	}
+}
+
+// TestInstallSkipUnregisteredStep (C4): --skip mcp works in 2a.
+func TestInstallSkipUnregisteredStep(t *testing.T) {
+	f := newDryRunFixture(t, append([]string{"--skip", "mcp,jobs,doctor"}, dryRunArgs...)...)
+	f.execute(t)
 }

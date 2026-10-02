@@ -102,14 +102,20 @@ type NSRule struct {
 // Inputs is the parsed command line plus the environment snapshot, filled
 // by cmd before Run and read by every step (Design 16).
 type Inputs struct {
-	Yes            bool
-	DryRun         bool
-	Reconfigure    bool
-	Upgrade        bool
-	Skip           []string // step ids (AC-53)
-	Topology       string
-	PGDSN          string
-	PGSSLMode      string // --pg-sslmode: overrides the sslmode of a flag or env-file DSN
+	Yes         bool
+	DryRun      bool
+	Reconfigure bool
+	Upgrade     bool
+	Skip        []string // step ids (AC-53)
+	Topology    string
+	PGDSN       string
+	// PGSSLMode is --pg-sslmode (prefer|require|disable). It overrides the
+	// sslmode of a --pg-dsn, an env-file DSN or a shell DSN (the value then
+	// counts as flag-sourced, so the env file is rewritten, not kept as
+	// hand-edited); it is the default of the TLS prompt and the sslmode of
+	// the local create path.
+	PGSSLMode      string
+	NoDoctor       bool   // --no-doctor: the final doctor step (slice 2b/14b) is skipped
 	PGPassword     string // read from stdin before Detect (AC-31)
 	OllamaURL      string
 	OllamaModel    string

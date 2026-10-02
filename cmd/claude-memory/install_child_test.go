@@ -50,8 +50,8 @@ func TestInstallDryRunNoDSN(t *testing.T) {
 	if strings.Contains(out, dsnRequired) {
 		t.Errorf("install must not require MEMORY_PG_DSN:\n%s", out)
 	}
-	if code == 2 {
-		t.Errorf("exit 2 (usage error); output:\n%s", out)
+	if code != 0 {
+		t.Errorf("exit %d, want 0; output:\n%s", code, out)
 	}
 	for _, want := range []string{"STEP", "Platform", "Binary", "Plan", "Dry run: nothing was changed."} {
 		if !strings.Contains(out, want) {
@@ -94,7 +94,7 @@ func TestInstallUsageErrorsExit2(t *testing.T) {
 		{"HOME unset", nil, []string{"install", "--dry-run", "--yes"}, "HOME"},
 		{"HOME relative", []string{"HOME=rel/home"}, []string{"install", "--dry-run", "--yes"}, "HOME"},
 		{"relative --bin-dir", []string{"HOME=" + home}, []string{"install", "--dry-run", "--yes", "--bin-dir", "rel"}, "--bin-dir"},
-		{"unknown --skip step (mcp is not in 2a)", []string{"HOME=" + home}, []string{"install", "--dry-run", "--yes", "--skip", "mcp"}, "unknown step"},
+		{"unknown --skip step", []string{"HOME=" + home}, []string{"install", "--dry-run", "--yes", "--skip", "nonsense"}, "unknown step"},
 		{"non-interactive without --yes", []string{"HOME=" + home}, []string{"install", "--topology", "remote"}, "non-interactive"},
 	}
 	for _, tc := range cases {
