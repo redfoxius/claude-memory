@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestInstallStepsRegistry is the 2a registry (AC-7): the exact order, every
+// TestInstallStepsRegistry is the 2a registry (AC-7), ending in the final doctor: the exact order, every
 // Requires pointing at an earlier step, and no mcp or jobs step. 2a leaves
 // WritePorts.ClaudeCLI and WritePorts.Jobs (and ReadPorts.Jobs) nil, so a
 // registered step that used them would dereference nil.
@@ -26,11 +26,11 @@ func TestInstallStepsRegistry(t *testing.T) {
 		seen[s.ID()] = true
 		ids = append(ids, s.ID())
 	}
-	want := []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces"}
+	want := []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces", "doctor"}
 	if !slices.Equal(ids, want) {
 		t.Errorf("registry = %v, want %v", ids, want)
 	}
-	for _, banned := range []string{"mcp", "jobs", "hooks.scripts", "hooks.settings", "skills", "claude-md", "doctor"} {
+	for _, banned := range []string{"mcp", "jobs", "hooks.scripts", "hooks.settings", "skills", "claude-md"} {
 		if seen[banned] {
 			t.Errorf("slice 2a must not register %q", banned)
 		}

@@ -291,9 +291,9 @@ func runInstall(ctx context.Context, r installRun) error {
 	res := eng.Run(ctx, r.Opts.Inputs)
 	rend.Summary(res)
 
-	// The final doctor (AC-62, WI-S2-14b) will be the last registered Step
-	// (see setup.InstallSteps), not code here: 2a exits with the engine's
-	// code only.
+	// The final doctor (AC-62) is the last registered Step (setup.DoctorStep,
+	// run by the engine on the read-only ports); its fail already set the
+	// engine's exit code, so nothing runs here after the engine.
 	return installExit(res, red)
 }
 

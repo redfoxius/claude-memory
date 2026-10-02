@@ -119,7 +119,11 @@ func WriteDoctorText(w io.Writer, r DoctorReport, m ReportMeta, red *Redactor) e
 		width = max(width, len(c.ID))
 	}
 	for _, c := range r.Checks {
-		fmt.Fprintf(&b, "%-4s  %-*s  %s\n", strings.ToUpper(string(c.Status)), width, c.ID, c.Detail)
+		detail := c.Detail
+		if c.NotInstalled != "" {
+			detail = "(" + c.NotInstalled + ") " + detail
+		}
+		fmt.Fprintf(&b, "%-4s  %-*s  %s\n", strings.ToUpper(string(c.Status)), width, c.ID, detail)
 		if c.Status != StatusPass && c.Remedy != "" {
 			fmt.Fprintf(&b, "      %-*s  fix: %s\n", width, "", c.Remedy)
 		}
@@ -143,5 +147,9 @@ func summaryLine(r DoctorReport) string {
 			parts = append(parts, fmt.Sprintf("%d %s", p.n, p.name))
 		}
 	}
-	return fmt.Sprintf("%d checks: %s", r.Summary.Total(), strings.Join(parts, " · "))
+	line := fmt.Sprintf("%d checks: %s", r.Summary.Total(), strings.Join(parts, " · "))
+	if n := r.NotInstalledFails(); n > 0 {
+		line += fmt.Sprintf(" (%d of the fails: not installed, not counted)", n)
+	}
+	return line
 }

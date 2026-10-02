@@ -1,5 +1,10 @@
 package setup
 
+import (
+	"context"
+	"errors"
+)
+
 // InstallSteps is the step registry of `claude-memory install` (AC-7), in
 // execution order. This is slice 2a: platform, binary, prereqs, topology,
 // envfile, database, migrate, ollama, namespaces. The Claude integration and
@@ -11,9 +16,9 @@ package setup
 // version is the running binary's version; red is the run's Redactor, which
 // the steps that handle passwords or error text from the network need.
 //
-// WI-S2-14b hook point: the final `doctor` Step (AC-62) is registered here,
-// last, after namespaces; Inputs.NoDoctor makes it skip. It is deliberately
-// not part of 2a, and cmd runs nothing after the engine except the summary.
+// The final `doctor` Step (AC-62) is registered last, after namespaces. It is
+// a Finalizer: the engine runs it after Apply on read-only ports, never on a
+// dry run; Inputs.NoDoctor makes it do nothing.
 func InstallSteps(version string, red *Redactor) []Step {
 	return []Step{
 		PlatformStep{},
@@ -25,6 +30,7 @@ func InstallSteps(version string, red *Redactor) []Step {
 		MigrateStep{Redactor: red},
 		OllamaStep{Redactor: red},
 		NamespacesStep{Version: version},
+		DoctorStep{Version: version, Redactor: red},
 	}
 }
 
@@ -34,4 +40,121 @@ func InstallSteps(version string, red *Redactor) []Step {
 var AllStepIDs = []string{
 	"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces",
 	"hooks.scripts", "hooks.settings", "mcp", "skills", "claude-md", "jobs", "doctor",
+}
+
+// DoctorStepID is the id of the final doctor step.
+const DoctorStepID = "doctor"
+
+// DoctorCheckSteps maps every doctor check id to the install step that owns
+// it (AC-62): a fail of the check is exempt ("not installed: <step>
+// skipped") only when that step was skipped by the user, is soft blocked by
+// such a skip, or is not registered in this build. A test fails when a check
+// has no entry. manifest and dirs.state have no dedicated step; the platform
+// step (first in the pipeline) owns them.
+var DoctorCheckSteps = map[string]string{
+	"binary.version":   "binary",
+	"env.file":         "envfile",
+	"env.perms":        "envfile",
+	"env.format":       "envfile",
+	"pg.connect":       "database",
+	"pg.latency":       "database",
+	"pg.vector":        "database",
+	"pg.schema":        "migrate",
+	"ollama.reachable": "ollama",
+	"ollama.model":     "ollama",
+	"ollama.embed":     "ollama",
+	"tools.git":        "prereqs",
+	"tools.claude":     "prereqs",
+	"tools.az":         "prereqs",
+	"mcp.registered":   "mcp",
+	"hooks.scripts":    "hooks.scripts",
+	"hooks.settings":   "hooks.settings",
+	"skills":           "skills",
+	"claude-md":        "claude-md",
+	"namespaces":       "namespaces",
+	"jobs":             "jobs",
+	"dirs.state":       "platform",
+	"manifest":         "platform",
+}
+
+// claudeSteps are the steps whose change needs a restart of open Claude Code
+// sessions (hooks, MCP registration, skills, CLAUDE.md; WI-S1-0 default).
+var claudeSteps = []string{"hooks.scripts", "hooks.settings", "mcp", "skills", "claude-md"}
+
+// DoctorStep is the final doctor (AC-62). Its Detect/Plan/Apply are inert (it
+// always reports ok, so the engine never plans or applies it); the work is in
+// Final.
+type DoctorStep struct {
+	Version  string
+	Redactor *Redactor
+}
+
+var (
+	_ Step      = DoctorStep{}
+	_ Finalizer = DoctorStep{}
+)
+
+// ID implements Step.
+func (DoctorStep) ID() string { return DoctorStepID }
+
+// Title implements Step.
+func (DoctorStep) Title() string { return "Final doctor" }
+
+// Requires implements Step.
+func (DoctorStep) Requires() []string { return nil }
+
+// Detect implements Step.
+func (DoctorStep) Detect(_ context.Context, _ ReadPorts, st *RunState) Detection {
+	detail := "runs last, read-only"
+	if st != nil {
+		switch {
+		case st.Inputs.NoDoctor:
+			detail = "disabled by --no-doctor"
+		case st.Inputs.DryRun:
+			detail = "not run in --dry-run"
+		}
+	}
+	return Detection{State: StateOK, Detail: detail}
+}
+
+// Plan implements Step.
+func (DoctorStep) Plan(context.Context, ReadPorts, *RunState, Choices) (Plan, error) {
+	return Plan{}, nil
+}
+
+// Apply implements Step; the engine never calls it (Detect is always ok).
+func (DoctorStep) Apply(context.Context, WritePorts, *RunState, Plan) (StepResult, error) {
+	return StepResult{}, errors.New("doctor: nothing to apply")
+}
+
+// Final implements Finalizer: the doctor registry in-process on the read-only
+// ports, per-check timeout and overall deadline as the standalone doctor.
+func (s DoctorStep) Final(ctx context.Context, rc ReadPorts, st *RunState, fv FinalView) FinalResult {
+	if st.Inputs.NoDoctor {
+		return FinalResult{}
+	}
+	deps := DoctorDeps{
+		Paths: rc.Paths, Env: rc.Env, Platform: rc.Platform, FS: rc.FS, Runner: rc.Runner,
+		Clock: rc.Clock, DB: rc.DB, Ollama: rc.Ollama, Assets: rc.Assets,
+		Version: s.Version, Redactor: s.Redactor,
+	}
+	rep := RunDoctor(ctx, deps, DoctorOptions{})
+	for i, c := range rep.Checks {
+		if c.Status != StatusFail {
+			continue
+		}
+		if name, ok := fv.NotInstalled[DoctorCheckSteps[c.ID]]; ok {
+			rep.Checks[i].NotInstalled = "not installed: " + name + " skipped"
+		}
+	}
+	restart := false
+	for _, id := range claudeSteps {
+		if st.Applied[id] {
+			restart = true
+		}
+	}
+	return FinalResult{
+		Ran: true, Report: rep, Restart: restart,
+		Meta: ReportMeta{Version: s.Version, Platform: rc.Platform, ConfigDir: rc.Paths.ClaudeDir, Bin: rc.Paths.Self},
+	}
 }

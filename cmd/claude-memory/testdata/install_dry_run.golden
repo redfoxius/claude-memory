@@ -14,6 +14,7 @@ Database           ok        keep    connected to postgresql://claude_memory@db.
 Schema migrations  outdated  apply   schema behind: 0002 (missing records.namespace)
 Ollama             absent    apply   model bge-m3 is not pulled at http://ollama.example.com:11434
 Namespaces         absent    apply   $HOME/.config/claude-memory/namespaces.yaml will be created
+Final doctor       ok        keep    not run in --dry-run
 
 Plan
 

@@ -131,6 +131,37 @@ type Reporter interface {
 	StepDone(o StepOutcome)
 }
 
+// FinalView is what the engine tells a Finalizer about the run it follows.
+type FinalView struct {
+	// NotInstalled maps a step id to the step name to print in "not
+	// installed: <step> skipped" (AC-62): steps the user skipped, steps soft
+	// blocked by such a skip, and ids this build does not register. A step
+	// that was kept, or left blocked under --yes, is NOT in it.
+	NotInstalled map[string]string
+}
+
+// FinalResult is the output of a Finalizer: the annotated doctor report to
+// print and whether to print the restart line.
+type FinalResult struct {
+	Ran     bool // false: the step did nothing (--no-doctor)
+	Report  DoctorReport
+	Meta    ReportMeta
+	Restart bool
+}
+
+// Finalizer is implemented by the one Step that runs after Apply (phase 7,
+// AC-62). It gets read-only ports only. It runs only when the plan was
+// confirmed and applied (never on --dry-run, a declined plan or Ctrl-C).
+type Finalizer interface {
+	Final(ctx context.Context, rc ReadPorts, st *RunState, fv FinalView) FinalResult
+}
+
+// FinalReporter is optionally implemented by a Reporter to print the final
+// doctor report; a Reporter without it discards the report.
+type FinalReporter interface {
+	Final(fr FinalResult)
+}
+
 // RunResult is what Engine.Run returns.
 type RunResult struct {
 	ExitCode int
@@ -349,8 +380,11 @@ func (s *session) run(res *RunResult) (code int, err error) {
 			}
 		}
 
-		// Phase 6: apply.
-		return s.applyPhase()
+		// Phase 6: apply, then phase 7: the final doctor.
+		if err := s.applyPhase(); err != nil {
+			return err
+		}
+		return s.finalPhase()
 	}
 	if err := body(); err != nil {
 		var a *abort
@@ -1045,6 +1079,81 @@ func cloneManifest(m *Manifest) *Manifest {
 	c := *m
 	c.Artifacts = slices.Clone(m.Artifacts)
 	return &c
+}
+
+// ---- Final doctor (phase 7) -----------------------------------------------
+
+// finalPhase runs the Finalizer step (the doctor) once Apply is done. A fail
+// that counts (not annotated "not installed") fails the step, so the run
+// exits 1 (AC-62). An interrupted run skips it.
+func (s *session) finalPhase() error {
+	if err := s.checkCtx(); err != nil {
+		return err
+	}
+	for _, r := range s.runs {
+		fin, ok := r.step.(Finalizer)
+		if !ok || r.userSkip || r.failed || r.blocked != "" {
+			continue
+		}
+		fr := fin.Final(s.ctx, s.e.Read, s.st, s.finalView())
+		if !fr.Ran {
+			continue
+		}
+		if rep, ok := s.report().(FinalReporter); ok {
+			rep.Final(fr)
+		}
+		r.ran = true
+		if n := fr.Report.HardFails(); n > 0 {
+			r.failed, r.failErr = true, fmt.Errorf("doctor reported %d failing check(s)", n)
+		} else {
+			r.applied = true
+			r.det.Detail = summaryLine(fr.Report)
+		}
+		s.report().StepDone(s.outcomeOf(r))
+	}
+	return s.checkCtx()
+}
+
+// finalView computes which doctor fails are exempt as "not installed".
+func (s *session) finalView() FinalView {
+	ni := map[string]string{}
+	for _, r := range s.runs {
+		id := r.step.ID()
+		if r.userSkip {
+			ni[id] = id
+		} else if r.blocked != "" && !r.hard {
+			if root := s.skippedRoot(r, map[string]bool{}); root != "" {
+				ni[id] = root
+			}
+		}
+	}
+	for _, id := range s.e.KnownIDs {
+		if _, registered := s.idx[id]; !registered {
+			ni[id] = id
+		}
+	}
+	return FinalView{NotInstalled: ni}
+}
+
+// skippedRoot returns the id of the user-skipped step that r is (softly)
+// blocked by, walking Requires; "" when the cause is something else.
+func (s *session) skippedRoot(r *stepRun, seen map[string]bool) string {
+	for _, req := range r.step.Requires() {
+		if seen[req] {
+			continue
+		}
+		seen[req] = true
+		d := s.idx[req]
+		switch {
+		case d.userSkip && d.det.State != StateOK:
+			return req
+		case d.blocked != "" && !d.hard:
+			if root := s.skippedRoot(d, seen); root != "" {
+				return root
+			}
+		}
+	}
+	return ""
 }
 
 // ---- Await ----------------------------------------------------------------

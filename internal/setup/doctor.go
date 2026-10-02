@@ -46,11 +46,11 @@ type DoctorDeps struct {
 	Paths    Paths
 	Env      Env
 	Platform PlatformInfo
-	FS       FS     // read-only adapter: writes return ErrDryRun
+	FS       ReadFS // read-only view: doctor cannot write by type
 	Runner   Runner // read-only adapter: Mutating commands return ErrReadOnly
 	Clock    Clock
-	DB       DBProber
-	Ollama   OllamaProber
+	DB       DBProbe // Probe only: doctor never migrates
+	Ollama   OllamaProbe
 	// Assets is the embedded integration tree (package integration's FS):
 	// hook scripts, skills and the CLAUDE.md section to compare against.
 	Assets fs.FS
@@ -74,6 +74,10 @@ type CheckResult struct {
 	Detail    string
 	Remedy    string
 	Duration  time.Duration
+	// NotInstalled is set by install's final doctor on a fail whose owning
+	// step the user skipped (or this build does not install): "not installed:
+	// <step> skipped". The fail is printed but not counted (AC-62).
+	NotInstalled string
 }
 
 // DoctorSummary counts results by status.
@@ -93,8 +97,25 @@ type DoctorReport struct {
 // OK reports whether the run passes: no fail, and with strict no warn
 // either (AC-59: exit 0 when OK, else 1).
 func (r DoctorReport) OK(strict bool) bool {
-	return r.Summary.Fail == 0 && (!strict || r.Summary.Warn == 0)
+	return r.HardFails() == 0 && (!strict || r.Summary.Warn == 0)
 }
+
+// NotInstalledFails counts fails that install annotated as "not installed:
+// <step> skipped" (AC-62); they are printed but do not fail the run. A
+// standalone doctor never sets CheckResult.NotInstalled.
+func (r DoctorReport) NotInstalledFails() int {
+	n := 0
+	for _, c := range r.Checks {
+		if c.Status == StatusFail && c.NotInstalled != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// HardFails is the number of fails that count: all of them except those
+// annotated as not installed.
+func (r DoctorReport) HardFails() int { return r.Summary.Fail - r.NotInstalledFails() }
 
 // Result returns the result of the check with id.
 func (r DoctorReport) Result(id string) (CheckResult, bool) {
