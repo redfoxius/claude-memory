@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 
@@ -348,6 +350,67 @@ func readStdinSecret(ctx context.Context, r io.Reader, red *setup.Redactor, time
 		red.Register(s)
 	}
 	return s, nil
+}
+
+// ---- Claude CLI -----------------------------------------------------------
+
+// claudeCLI is the setup.ClaudeCLI adapter: `claude mcp add|remove --scope
+// user` through the exec Runner (argv only, Mutating set, so the read-only
+// Runner of --dry-run refuses it with ErrReadOnly). It has no read side:
+// `claude mcp get|list` spawn the registered server, so registration is read
+// from .claude.json instead (AC-40, AC-67). It never passes -e.
+type claudeCLI struct{ runner setup.Runner }
+
+var _ setup.ClaudeCLI = claudeCLI{}
+
+// maxClaudeErr bounds the stderr quoted in an error.
+const maxClaudeErr = 400
+
+// cleanCLIText makes CLI output safe to print in an error: control characters
+// (terminal escapes, newlines) become spaces, and the text is cut to
+// maxClaudeErr bytes on a rune boundary.
+func cleanCLIText(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == utf8.RuneError {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > maxClaudeErr {
+		cut := maxClaudeErr
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "..."
+	}
+	return s
+}
+
+func (c claudeCLI) run(ctx context.Context, args ...string) error {
+	argv := append([]string{"claude", "mcp"}, args...)
+	res, err := c.runner.Run(ctx, setup.Cmd{Argv: argv, Mutating: true})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		msg := cleanCLIText(string(res.Stderr))
+		if msg == "" {
+			msg = cleanCLIText(string(res.Stdout))
+		}
+		return fmt.Errorf("exit %d: %s", res.ExitCode, msg)
+	}
+	return nil
+}
+
+// MCPAdd runs `claude mcp add --scope user <name> -- <argv...>`.
+func (c claudeCLI) MCPAdd(ctx context.Context, name string, argv []string) error {
+	return c.run(ctx, append([]string{"add", "--scope", "user", name, "--"}, argv...)...)
+}
+
+// MCPRemove runs `claude mcp remove --scope user <name>`.
+func (c claudeCLI) MCPRemove(ctx context.Context, name string) error {
+	return c.run(ctx, "remove", "--scope", "user", name)
 }
 
 // readOnlyDB is the dry-run DB for Apply: every probe passes through, Migrate

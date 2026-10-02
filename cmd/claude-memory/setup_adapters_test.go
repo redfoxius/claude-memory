@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"claude-memory/internal/setup"
 )
@@ -190,8 +192,8 @@ func TestPortBuilders(t *testing.T) {
 	p := filepath.Join(dir, "f")
 
 	ro := readOnlyPorts(d)
-	if ro.Jobs != nil {
-		t.Error("ReadPorts.Jobs must be nil in 2a")
+	if ro.Jobs == nil {
+		t.Error("ReadPorts.Jobs must be set for the jobs step")
 	}
 	if _, ok := ro.FS.(setup.FS); ok {
 		// readOnlyFS carries write methods, but they all refuse; the
@@ -212,8 +214,11 @@ func TestPortBuilders(t *testing.T) {
 	if fmt.Sprintf("%T/%v", wp.ReadPorts.Runner, wp.ReadPorts.Runner) != fmt.Sprintf("%T/%v", wp.Runner, wp.Runner) {
 		t.Errorf("WritePorts.ReadPorts.Runner is %v, want the same adapter as Runner (%v)", wp.ReadPorts.Runner, wp.Runner)
 	}
-	if wp.Jobs != nil || wp.ClaudeCLI != nil {
-		t.Error("WritePorts.Jobs/ClaudeCLI must be nil in 2a")
+	if wp.Jobs == nil {
+		t.Error("WritePorts.Jobs must be set for the jobs step")
+	}
+	if wp.ClaudeCLI == nil {
+		t.Error("WritePorts.ClaudeCLI must be set for the mcp step")
 	}
 	if err := wp.FS.WriteFileAtomic(p, []byte("x"), 0o600); err != nil {
 		t.Errorf("writable ports write: %v", err)
@@ -231,5 +236,76 @@ func TestPortBuilders(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "g")); !os.IsNotExist(err) {
 		t.Error("dry-run wrote a file")
+	}
+}
+
+// stubRunner records the commands the claudeCLI adapter issues.
+type stubRunner struct {
+	cmds []setup.Cmd
+	res  setup.Result
+	err  error
+}
+
+func (s *stubRunner) Run(_ context.Context, c setup.Cmd) (setup.Result, error) {
+	s.cmds = append(s.cmds, c)
+	return s.res, s.err
+}
+func (*stubRunner) LookPath(string) (string, error) { return "/usr/bin/claude", nil }
+
+// WI-S2-10: the adapter builds the exact `claude mcp` argv, marks it mutating
+// (so the read-only Runner refuses it), has no read side, and reports a
+// failure with the CLI's own message.
+func TestClaudeCLIAdapter(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := &stubRunner{}
+	c := claudeCLI{runner: s}
+	if err := c.MCPAdd(ctx, "claude-memory", []string{"/b/claude-memory", "serve"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.MCPRemove(ctx, "claude-memory"); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"claude", "mcp", "add", "--scope", "user", "claude-memory", "--", "/b/claude-memory", "serve"},
+		{"claude", "mcp", "remove", "--scope", "user", "claude-memory"},
+	}
+	for i, w := range want {
+		if fmt.Sprint(s.cmds[i].Argv) != fmt.Sprint(w) || !s.cmds[i].Mutating {
+			t.Errorf("cmd %d = %v mutating=%v, want %v mutating", i, s.cmds[i].Argv, s.cmds[i].Mutating, w)
+		}
+	}
+	for _, cmd := range s.cmds {
+		for _, a := range cmd.Argv {
+			if a == "-e" || a == "get" || a == "list" {
+				t.Errorf("forbidden argument %q (AC-40, AC-67)", a)
+			}
+		}
+	}
+
+	s = &stubRunner{res: setup.Result{ExitCode: 1, Stderr: []byte("  boom: already exists\n")}}
+	if err := (claudeCLI{runner: s}).MCPAdd(ctx, "x", []string{"/b", "serve"}); err == nil || !strings.Contains(err.Error(), "exit 1: boom: already exists") {
+		t.Errorf("error = %v", err)
+	}
+	ro := claudeCLI{runner: execRunner{readOnly: true}}
+	if err := ro.MCPAdd(ctx, "x", []string{"/b", "serve"}); !errors.Is(err, setup.ErrReadOnly) {
+		t.Errorf("read-only MCPAdd = %v", err)
+	}
+	if err := ro.MCPRemove(ctx, "x"); !errors.Is(err, setup.ErrReadOnly) {
+		t.Errorf("read-only MCPRemove = %v", err)
+	}
+}
+
+// A7: CLI output in an error has no control characters and is cut on a rune
+// boundary.
+func TestCleanCLIText(t *testing.T) {
+	t.Parallel()
+	got := cleanCLIText("\x1b[31mred\x1b[0m\nline2\r\n")
+	if strings.ContainsAny(got, "\x1b\n\r") || !strings.Contains(got, "red") || !strings.Contains(got, "line2") {
+		t.Errorf("not cleaned: %q", got)
+	}
+	long := cleanCLIText(strings.Repeat("é", 500))
+	if !utf8.ValidString(long) || !strings.HasSuffix(long, "...") || len(long) > maxClaudeErr+3 {
+		t.Errorf("bad cut: valid=%v len=%d", utf8.ValidString(long), len(long))
 	}
 }

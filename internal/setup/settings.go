@@ -21,8 +21,8 @@ import (
 // may change one is decided by the manifest: only an entry equal to the
 // canonical entry install recorded is ours to replace (outdated); any other
 // entry of ours is modified (drift) and is kept unless the caller passes
-// overwriteModified (which slice 2 does only after an explicit Confirm). No
-// marker key is ever written inside a hook entry.
+// overwrite for that event (which the hooks.settings step does only after an
+// explicit Confirm). No marker key is ever written inside a hook entry.
 
 // Hook events install manages.
 const (
@@ -385,10 +385,11 @@ type MergeSummary struct {
 // MergeSettings ensures exactly one desired entry per event (AC-37). The
 // returned bytes equal b, and changed is false, when nothing semantic
 // changes — regardless of formatting. Modified entries are kept and listed
-// in Drift unless overwriteModified is set, in which case the preferred one
-// (an entry already equal to desired, else the first) is replaced in place
-// and the other entries of ours removed.
-func MergeSettings(b []byte, desired []HookEntry, recorded RecordedHooks, overwriteModified bool) ([]byte, MergeSummary, bool, error) {
+// in Drift unless overwrite[event] is set (the caller's confirmed, per-event
+// choice, Design 18), in which case the preferred one (an entry already
+// equal to desired, else the first) is replaced in place and the other
+// entries of ours removed. A nil map overwrites nothing.
+func MergeSettings(b []byte, desired []HookEntry, recorded RecordedHooks, overwrite map[string]bool) ([]byte, MergeSummary, bool, error) {
 	var sum MergeSummary
 	m, err := loadSettingsModel(b)
 	if err != nil {
@@ -410,7 +411,7 @@ func MergeSettings(b []byte, desired []HookEntry, recorded RecordedHooks, overwr
 			}
 			sum.Replaced++
 		case StateModified:
-			if !overwriteModified {
+			if !overwrite[d.Event] {
 				sum.Drift = append(sum.Drift, d.Event+": "+detail)
 				continue
 			}
@@ -618,36 +619,87 @@ func SettingsBackupPath(target string, c Clock) string {
 	return target + SettingsBackupSuffix + c.Now().UTC().Format("20060102T150405Z")
 }
 
+// BackupFileMode is the mode of every backup install makes: owner-only, so a
+// backup never exposes more than the original did.
+const BackupFileMode fs.FileMode = 0o600
+
+// UniqueBackupPath returns base, or base with a ".1", ".2", ... suffix when
+// that name exists, so a backup never overwrites an earlier one (two writes
+// in one second share a timestamp). The FS port has no exclusive create, so
+// the name is checked with Lstat; install holds the process lock meanwhile.
+func UniqueBackupPath(fsys ReadFS, base string) string {
+	p := base
+	for i := 1; ; i++ {
+		if _, err := fsys.Lstat(p); errors.Is(err, fs.ErrNotExist) {
+			return p
+		}
+		p = fmt.Sprintf("%s.%d", base, i)
+	}
+}
+
 // WriteSettingsFile saves out over f (AC-39): it re-reads the file and
 // aborts with ErrSettingsChanged if its hash changed since f was read,
-// copies the original to a timestamped backup with the same mode (one
-// backup per write; rotation is deferred, spec §12.1), re-checks the hash
+// copies the original to a timestamped backup at mode 0600, never over an
+// existing backup (one backup per write; rotation is deferred, spec §12.1), re-checks the hash
 // once more right before the write, and writes atomically keeping the mode
 // (0644 for a new file, its directory created 0700). It returns the backup
 // path ("" when the file did not exist). Callers write only when
 // MergeSettings reported changed.
 func WriteSettingsFile(fsys FS, clk Clock, f *SettingsFile, out []byte) (string, error) {
+	return WriteTextFile(fsys, clk, f, out, true)
+}
+
+// WriteTextFile is WriteSettingsFile with the backup optional: with backup
+// false an existing file is rewritten (hash rechecked, mode kept, atomic)
+// without a copy; the claude-md step backs up only a modified block.
+func WriteTextFile(fsys FS, clk Clock, f *SettingsFile, out []byte, backup bool) (string, error) {
 	if err := recheckSettings(fsys, f); err != nil {
 		return "", err
 	}
 	mode := fs.FileMode(0o644)
-	backup := ""
+	bak := ""
 	if f.Exists {
 		mode = f.Mode
-		backup = SettingsBackupPath(f.Target, clk)
-		if err := fsys.WriteFileAtomic(backup, f.Content, mode); err != nil {
-			return "", fmt.Errorf("backup %s: %w", backup, err)
-		}
-		if err := recheckSettings(fsys, f); err != nil {
-			return backup, err
+		if backup {
+			bak = UniqueBackupPath(fsys, SettingsBackupPath(f.Target, clk))
+			if err := fsys.WriteFileAtomic(bak, f.Content, BackupFileMode); err != nil {
+				return "", fmt.Errorf("backup %s: %w", bak, err)
+			}
+			if err := recheckSettings(fsys, f); err != nil {
+				return bak, err
+			}
 		}
 	} else if err := fsys.MkdirAll(filepath.Dir(f.Target), 0o700); err != nil {
 		return "", err
 	}
 	if err := fsys.WriteFileAtomic(f.Target, out, mode); err != nil {
-		return backup, err
+		return bak, err
 	}
-	return backup, nil
+	return bak, nil
+}
+
+// ErrParentOutsideHome is returned by CheckParentInHome.
+var ErrParentOutsideHome = errors.New("its directory is a symlink that resolves outside the home directory")
+
+// CheckParentInHome is the path policy of the Claude files install writes
+// besides settings.json (skills, CLAUDE.md): a path given literally outside
+// home (CLAUDE_CONFIG_DIR, an explicit --claude-md) is allowed as it is, but a
+// path inside home whose directory is a symlink resolving outside home is
+// refused, like a file symlink pointing outside (AC-38). A directory that does
+// not exist yet is fine.
+func CheckParentInHome(fsys ReadFS, home, p string) error {
+	dir := filepath.Dir(p)
+	if rel, err := filepath.Rel(home, dir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil // literally outside home
+	}
+	resolved, err := fsys.EvalSymlinks(dir)
+	if err != nil {
+		return nil // missing parent: nothing to follow
+	}
+	if !underDir(fsys, resolved, home) {
+		return fmt.Errorf("%s: %w (%s)", p, ErrParentOutsideHome, resolved)
+	}
+	return nil
 }
 
 func recheckSettings(fsys FS, f *SettingsFile) error {

@@ -144,8 +144,9 @@ func isJSONNull(raw json.RawMessage) bool { return string(bytes.TrimSpace(raw)) 
 
 // State compares the user-scope registration with the one install makes
 // for bin (AC-40): absent when missing (or the file is unparseable), ok
-// when type, command, args and env all match, else outdated with the
-// differing fields named. Env values are never shown, only key names (an
+// when type, command, args and env all match; modified when only the env
+// differs (command and args are ours, a user added env); else outdated with
+// the differing fields named. Env values are never shown, only key names (an
 // env could hold a DSN). Local-scope shadows do not change the state;
 // doctor reports them separately.
 func (r MCPRegistration) State(bin string) (State, string) {
@@ -171,11 +172,17 @@ func (r MCPRegistration) State(bin string) (State, string) {
 	if !slices.Equal(r.Server.Args, want.Args) {
 		diffs = append(diffs, fmt.Sprintf("args %q, want %q", r.Server.Args, want.Args))
 	}
-	if len(r.Server.Env) > 0 {
-		diffs = append(diffs, "env sets "+strings.Join(slices.Sorted(maps.Keys(r.Server.Env)), ", ")+" (install sets none)")
-	}
 	if len(diffs) > 0 {
+		if len(r.Server.Env) > 0 {
+			diffs = append(diffs, "env sets "+strings.Join(slices.Sorted(maps.Keys(r.Server.Env)), ", ")+" (install sets none)")
+		}
 		return StateOutdated, strings.Join(diffs, "; ")
+	}
+	if len(r.Server.Env) > 0 {
+		// Command and args are ours; the env was added by the user (e.g. a DSN
+		// via `claude mcp add -e`). That is hand customization, not an older
+		// install: kept unless the user confirms the overwrite.
+		return StateModified, "env sets " + strings.Join(slices.Sorted(maps.Keys(r.Server.Env)), ", ") + " (install sets none)"
 	}
 	return StateOK, "registered: " + want.Command + " serve"
 }

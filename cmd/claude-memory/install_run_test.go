@@ -154,7 +154,8 @@ func newDryRunFixture(t *testing.T, args ...string) *dryRunFixture {
 		JobsBackend: setup.JobsLaunchd, JobsBackendReason: "launchd user agents (macOS)"}
 	clock := fixedClock{time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)}
 	read := setup.ReadPorts{FS: f.fs, Runner: f.runner, DB: f.db, Ollama: f.ollama, Clock: clock,
-		Paths: paths, Env: env, Platform: plat, Assets: integration.FS}
+		Paths: paths, Env: env, Platform: plat, Assets: integration.FS,
+		Jobs: setup.LaunchdJobs{FS: f.fs, Runner: f.runner, Paths: paths, Assets: integration.FS}}
 	write := setup.WritePorts{ReadPorts: read, FS: f.fs, Runner: f.runner, DB: f.db, Ollama: f.ollama}
 	f.run = installRun{
 		Opts: opts,
@@ -186,7 +187,8 @@ const dryRunSentinel = "S3ntinel-pw-$@:/x"
 
 var dryRunArgs = []string{"--dry-run", "--yes", "--topology", "remote",
 	"--pg-dsn", "postgresql://claude_memory@db.example.com:5432/claude_memory?sslmode=require",
-	"--ollama-url", "http://ollama.example.com:11434", "--namespace", "work=~/work/**"}
+	"--ollama-url", "http://ollama.example.com:11434", "--namespace", "work=~/work/**",
+	"--pr-repos", "/work/api,/work/web"}
 
 func (f *dryRunFixture) execute(t *testing.T) string {
 	t.Helper()
@@ -265,7 +267,9 @@ func TestInstallBinaryOutsideCheckout(t *testing.T) {
 // production builder hands Apply the read-only adapters.
 func TestWritablePortsDryRun(t *testing.T) {
 	t.Parallel()
-	d := setupDeps{FS: readOnlyFS{}, Runner: execRunner{readOnly: true}, DB: &fakeDB{}, Ollama: &fakeOllama{}}
+	launchAgents := t.TempDir()
+	d := setupDeps{FS: readOnlyFS{}, Runner: execRunner{readOnly: true}, DB: &fakeDB{}, Ollama: &fakeOllama{},
+		Assets: integration.FS, Paths: setup.Paths{LaunchAgentsDir: launchAgents, UID: 501}}
 	for _, dry := range []bool{true, false} {
 		wp := writablePorts(d, dry)
 		_, werr := wp.FS.Lock(filepath.Join(t.TempDir(), "lock"))
@@ -282,18 +286,44 @@ func TestWritablePortsDryRun(t *testing.T) {
 		} else if werr != nil || rerr != nil || merr != nil || perr != nil {
 			t.Errorf("writable ports refused: %v, %v, %v, %v", werr, rerr, merr, perr)
 		}
-		if wp.ClaudeCLI != nil || wp.Jobs != nil || wp.ReadPorts.Jobs != nil {
-			t.Errorf("2a leaves ClaudeCLI, Jobs and ReadPorts.Jobs nil: %+v", wp)
+		if wp.Jobs == nil || wp.ReadPorts.Jobs == nil {
+			t.Fatalf("Jobs and ReadPorts.Jobs must be set for the jobs step: %+v", wp)
+		}
+		if dry {
+			// Install writes the plist first: the read-only FS refuses it
+			// before any launchctl call.
+			j := setup.DefaultJobSpecs(d.Paths, "/bin/claude-memory", "/usr/bin")[0]
+			j.LogPath = filepath.Join(launchAgents, "x.log")
+			if err := wp.Jobs.Install(context.Background(), j); !errors.Is(err, setup.ErrDryRun) {
+				t.Errorf("dry-run Jobs.Install = %v, want ErrDryRun", err)
+			}
+			if got := tree(t, launchAgents); len(got) != 0 {
+				t.Errorf("dry-run Install wrote %v", got)
+			}
+		}
+		if wp.ClaudeCLI == nil {
+			t.Fatal("ClaudeCLI must be set")
+		}
+		if dry {
+			// The adapter runs over the read-only Runner: `claude mcp add` is
+			// refused before anything is executed.
+			if err := wp.ClaudeCLI.MCPAdd(context.Background(), "x", []string{"/bin/x", "serve"}); !errors.Is(err, setup.ErrReadOnly) {
+				t.Errorf("dry-run MCPAdd = %v, want ErrReadOnly", err)
+			}
+			if err := wp.ClaudeCLI.MCPRemove(context.Background(), "x"); !errors.Is(err, setup.ErrReadOnly) {
+				t.Errorf("dry-run MCPRemove = %v, want ErrReadOnly", err)
+			}
 		}
 	}
 	rp := readOnlyPorts(setupDeps{FS: readOnlyFS{}})
-	if rp.Jobs != nil {
-		t.Error("ReadPorts.Jobs must be nil in 2a")
+	if rp.Jobs == nil {
+		t.Error("ReadPorts.Jobs must be set for the jobs step")
 	}
 }
 
-// TestInstallSkipUnregisteredStep (C4): --skip mcp works in 2a.
+// TestInstallSkipUnregisteredStep (C4): --skip works for registered steps and
+// for ids this build does not register yet (skills, jobs).
 func TestInstallSkipUnregisteredStep(t *testing.T) {
-	f := newDryRunFixture(t, append([]string{"--skip", "mcp,jobs,doctor"}, dryRunArgs...)...)
+	f := newDryRunFixture(t, append([]string{"--skip", "mcp,hooks.settings,skills,jobs,doctor"}, dryRunArgs...)...)
 	f.execute(t)
 }

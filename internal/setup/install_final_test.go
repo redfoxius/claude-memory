@@ -7,9 +7,11 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -72,17 +74,91 @@ func (a armStep) Apply(context.Context, WritePorts, *RunState, Plan) (StepResult
 	return StepResult{}, nil
 }
 
+// tamperStep is a test-only step whose Apply runs fn once.
+type tamperStep struct{ fn func() }
+
+func (tamperStep) ID() string         { return "tamper" }
+func (tamperStep) Title() string      { return "Tamper" }
+func (tamperStep) Requires() []string { return nil }
+func (tamperStep) Plan(context.Context, ReadPorts, *RunState, Choices) (Plan, error) {
+	return Plan{}, nil
+}
+func (tamperStep) Detect(context.Context, ReadPorts, *RunState) Detection {
+	return Detection{State: StateAbsent}
+}
+func (t tamperStep) Apply(context.Context, WritePorts, *RunState, Plan) (StepResult, error) {
+	t.fn()
+	return StepResult{}, nil
+}
+
+// fakeLaunchd is a stateful launchctl: print succeeds for a loaded label,
+// bootout of a loaded one unloads it (exit 3 "No such process" otherwise, as
+// measured on macOS 26.2) and bootstrap loads the plist's label.
+type fakeLaunchd struct {
+	mu     sync.Mutex
+	loaded map[string]bool
+	// failBootstrap makes the next n bootstrap calls fail with exit 5.
+	failBootstrap int
+}
+
+func newFakeLaunchd() *fakeLaunchd { return &fakeLaunchd{loaded: map[string]bool{}} }
+
+func (l *fakeLaunchd) isLoaded(label string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.loaded[label]
+}
+
+func (l *fakeLaunchd) handle(c Cmd) (Result, bool) {
+	if len(c.Argv) < 3 || c.Argv[0] != "launchctl" {
+		return Result{}, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	label := path.Base(c.Argv[2])
+	switch c.Argv[1] {
+	case "print":
+		if l.loaded[label] {
+			return Result{Stdout: []byte("\tlast exit code = 0\n")}, true
+		}
+		return Result{ExitCode: 113, Stderr: []byte("Could not find service")}, true
+	case "bootout":
+		if l.loaded[label] {
+			delete(l.loaded, label)
+			return Result{}, true
+		}
+		return Result{ExitCode: 3, Stderr: []byte("Boot-out failed: 3: No such process")}, true
+	case "bootstrap":
+		if l.failBootstrap > 0 {
+			l.failBootstrap--
+			return Result{ExitCode: 5, Stderr: []byte("Bootstrap failed: 5: Input/output error")}, true
+		}
+		l.loaded[strings.TrimSuffix(filepath.Base(c.Argv[3]), ".plist")] = true
+		return Result{}, true
+	}
+	return Result{}, false
+}
+
 type fullRig struct {
-	t      *testing.T
-	p      Paths
-	root   string
-	fs     *FakeFS
-	runner *FakeRunner
-	db     *statefulDB
-	oll    *scriptOllama
-	red    *Redactor
-	out    *bytes.Buffer
-	arm    bool // insert armStep before the doctor
+	t       *testing.T
+	p       Paths
+	root    string
+	fs      *FakeFS
+	runner  *FakeRunner
+	claude  *fakeClaude
+	launchd *fakeLaunchd
+	// linux runs the rig on a platform without launchd (the jobs step skips).
+	linux bool
+	db    *statefulDB
+	oll   *scriptOllama
+	red   *Redactor
+	out   *bytes.Buffer
+	arm   bool // insert armStep before the doctor
+	// tamper, when set, runs as a step placed right before hooks.settings
+	// (after migrate): a change made after the user confirmed the plan.
+	tamper func()
+	// ui scripts an interactive session; nil = non-interactive (--yes).
+	ui *FakePrompter
 }
 
 func newFullRig(t *testing.T) *fullRig {
@@ -107,7 +183,9 @@ func newFullRig(t *testing.T) *fullRig {
 	r.Script(ArgvPrefix("xattr"), Result{ExitCode: 1})
 	oll := newOllama()
 	oll.hasModel = false
-	return &fullRig{t: t, p: p, root: root, fs: NewFakeFS(t, root), runner: r, db: newStatefulDB(), oll: oll,
+	ld := newFakeLaunchd()
+	r.Handler = ld.handle
+	return &fullRig{t: t, p: p, root: root, fs: NewFakeFS(t, root), runner: r, claude: newFakeClaude(t, p), launchd: ld, db: newStatefulDB(), oll: oll,
 		red: NewRedactor(), out: &bytes.Buffer{}}
 }
 
@@ -126,16 +204,30 @@ func (r *fullRig) run(in Inputs) RunResult {
 	r.t.Helper()
 	r.red.Register(sentinel)
 	rend := NewRenderer(r.out, r.red, RenderOptions{})
-	plat := PlatformInfo{OS: OSLinux, Arch: "amd64", JobsBackend: JobsNone}
+	plat := PlatformInfo{OS: OSDarwin, Arch: "arm64", JobsBackend: JobsLaunchd}
+	if r.linux {
+		plat = PlatformInfo{OS: OSLinux, Arch: "amd64", JobsBackend: JobsNone}
+	}
 	clk := NewFakeClock(time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC))
 	rp := ReadPorts{FS: r.fs, Runner: r.runner, DB: r.db, Ollama: r.oll, Clock: clk, Paths: r.p, Env: in.Env,
 		Platform: plat, Assets: integration.FS}
+	jobs := LaunchdJobs{FS: r.fs, Runner: r.runner, Paths: r.p, Assets: integration.FS}
+	rp.Jobs = jobs
 	steps := InstallSteps("v1.2.0", r.red)
 	if r.arm {
 		steps = slices.Insert(steps, len(steps)-1, Step(armStep{r.db}))
 	}
-	wp := WritePorts{ReadPorts: rp, FS: r.fs, Runner: r.runner, DB: r.db, Ollama: r.oll, Progress: rend.Progress}
-	e := &Engine{Steps: steps, Read: rp, Write: wp, UI: NewFakePrompter(r.t, false), Reporter: rend,
+	if r.tamper != nil {
+		i := slices.IndexFunc(steps, func(s Step) bool { return s.ID() == "hooks.settings" })
+		steps = slices.Insert(steps, i, Step(tamperStep{r.tamper}))
+	}
+	wp := WritePorts{ReadPorts: rp, FS: r.fs, Runner: r.runner, DB: r.db, Ollama: r.oll, ClaudeCLI: r.claude, Progress: rend.Progress,
+		Jobs: LaunchdManager{LaunchdJobs: jobs, Write: r.fs, Sleep: func(time.Duration) {}}}
+	ui := r.ui
+	if ui == nil {
+		ui = NewFakePrompter(r.t, false)
+	}
+	e := &Engine{Steps: steps, Read: rp, Write: wp, UI: ui, Reporter: rend,
 		Version: "v1.2.0", KnownIDs: AllStepIDs}
 	res := e.Run(context.Background(), in)
 	rend.Summary(res)
@@ -218,6 +310,11 @@ func TestFullRunSentinel(t *testing.T) {
 				t.Errorf("password form %q in a command: %v", f, c.Argv)
 			}
 		}
+		for _, c := range r.claude.Calls() {
+			if strings.Contains(c, f) {
+				t.Errorf("password form %q in a claude mcp call: %s", f, c)
+			}
+		}
 	}
 	if !strings.Contains(r.out.String(), "claude-memory doctor") {
 		t.Errorf("the final doctor report is missing:\n%s", r.out)
@@ -234,6 +331,7 @@ func TestNoOpRerun(t *testing.T) {
 	manifest, _ := os.ReadFile(r.p.Manifest())
 	info, _ := os.Stat(r.p.Manifest())
 	writes, mut, migrated, pulled := r.nonLockWrites(), r.runner.MutatingCalls(), len(r.db.migrated), r.pulls()
+	claudeCalls := len(r.claude.Calls())
 
 	res := r.run(r.inputs())
 	if res.ExitCode != ExitOK {
@@ -254,7 +352,11 @@ func TestNoOpRerun(t *testing.T) {
 	if len(r.db.migrated) != migrated || r.pulls() != pulled {
 		t.Error("re-run migrated or pulled again")
 	}
-	for _, id := range []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces"} {
+	if n := len(r.claude.Calls()); n != claudeCalls {
+		t.Errorf("re-run made %d claude calls, want 0 (an ok registration needs none, AC-40)", n-claudeCalls)
+	}
+	for _, id := range []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces",
+		"hooks.scripts", "hooks.settings", "mcp", "skills", "claude-md", "jobs"} {
 		if o := outcomeOf(res, id); o != OutcomeUnchanged {
 			t.Errorf("%s: outcome %q on a no-op re-run, want unchanged", id, o)
 		}
@@ -262,8 +364,8 @@ func TestNoOpRerun(t *testing.T) {
 	if !strings.Contains(r.out.String(), "claude-memory doctor") {
 		t.Error("the doctor must run on a no-op re-run")
 	}
-	if !strings.Contains(r.out.String(), "Done: 10 unchanged\n") {
-		t.Errorf("want the summary \"Done: 10 unchanged\" (nothing applied):\n%s", r.out)
+	if !strings.Contains(r.out.String(), "Done: 16 unchanged\n") {
+		t.Errorf("want the summary \"Done: 16 unchanged\" (nothing applied):\n%s", r.out)
 	}
 }
 

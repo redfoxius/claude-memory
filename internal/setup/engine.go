@@ -132,6 +132,26 @@ type Reporter interface {
 	StepDone(o StepOutcome)
 }
 
+// Adopter is optionally implemented by a Step to record artifacts that are
+// already correct on disk but not in the manifest (a hand install, AC-51: "ok
+// and recorded"). Adopt runs on read-only ports after Apply, never on a dry
+// run, for steps that ran cleanly; it returns every artifact that is ok now
+// (never one the step would still have to change, and never a directory it did
+// not create). The engine records only those whose key the manifest lacks, so
+// a re-run writes nothing (AC-50).
+type Adopter interface {
+	Adopt(ctx context.Context, rc ReadPorts, st *RunState) []Artifact
+}
+
+// ModifiedDiffer is optionally implemented by a Step whose modified artifacts
+// get the AC-41 question "show diff / overwrite / keep" instead of the generic
+// overwrite Confirm (AC-6): the engine asks it per modified artifact in the
+// interactive choice phase, and ModifiedDiff returns the unified diff of what
+// an overwrite would change (read-only ports; never a secret).
+type ModifiedDiffer interface {
+	ModifiedDiff(ctx context.Context, rc ReadPorts, st *RunState, artifactID string) (string, error)
+}
+
 // FinalView is what the engine tells a Finalizer about the run it follows.
 type FinalView struct {
 	// NotInstalled maps a step id to the step name to print in "not
@@ -191,6 +211,7 @@ type Engine struct {
 func (e *Engine) Run(ctx context.Context, in Inputs) RunResult {
 	s := &session{e: e, ctx: ctx, in: in, st: NewRunState(in), idx: map[string]*stepRun{}}
 	s.auto = in.Yes || in.Upgrade || (in.DryRun && !s.interactive())
+	s.st.Auto = s.auto
 	res := RunResult{State: s.st, DryRun: in.DryRun}
 	code, err := s.run(&res)
 	res.ExitCode, res.Err = code, err
@@ -387,6 +408,9 @@ func (s *session) run(res *RunResult) (code int, err error) {
 		if err := s.applyPhase(); err != nil {
 			return err
 		}
+		if err := s.adoptPhase(); err != nil {
+			return err
+		}
 		return s.finalPhase()
 	}
 	if err := body(); err != nil {
@@ -442,6 +466,10 @@ func (s *session) setup() error {
 // after the step.
 func (s *session) detect(r *stepRun) {
 	r.det = r.step.Detect(s.ctx, s.e.Read, s.st)
+	if r.det.SkipReason != "" && !r.userSkip {
+		// One-way: a documented refusal (AC-42) is not lifted by a re-Detect.
+		r.userSkip, r.skipWhy = true, "skipped: "+r.det.SkipReason
+	}
 	if len(r.det.Artifacts) == 0 && r.det.State != StateBlocked {
 		r.det.Artifacts = []ArtifactState{{ID: r.step.ID(), State: r.det.State, Detail: r.det.Detail}}
 	}
@@ -572,7 +600,7 @@ func (s *session) askChoices() error {
 				case StateAbsent, StateOutdated:
 					ch[a.ID] = ChoiceApply
 				case StateModified:
-					ok, err := s.ui().Confirm(fmt.Sprintf("overwrite your modified %s? a backup is kept", a.ID), false)
+					ok, err := s.askOverwrite(r, a)
 					if errors.Is(err, ErrTooManyAttempts) {
 						tooMany = true
 						break arts
@@ -606,6 +634,39 @@ func (s *session) askChoices() error {
 		r.choices = ch
 	}
 	return nil
+}
+
+// askOverwrite is the AC-6 overwrite question for one modified artifact. A
+// step that implements ModifiedDiffer gets the AC-41 form: a Select of
+// keep / overwrite (backup kept) / show diff, repeated after each diff. The
+// explicit "overwrite" answer is the second, never auto-answered consent.
+func (s *session) askOverwrite(r *stepRun, a ArtifactState) (bool, error) {
+	md, ok := r.step.(ModifiedDiffer)
+	if !ok {
+		return s.ui().Confirm(fmt.Sprintf("overwrite your modified %s? a backup is kept", a.ID), false)
+	}
+	// A diff that cannot be built means an overwrite is impossible (a hand
+	// pasted section, a symlink outside Home): say why and keep.
+	d, derr := md.ModifiedDiff(s.ctx, s.e.Read, s.st, a.ID)
+	if derr != nil {
+		s.report().Notes([]Note{{NoteWarn, fmt.Sprintf("%s differs from this version and is kept: %s", a.ID, derr)}})
+		return false, nil
+	}
+	opts := []string{"keep", "overwrite (a backup is kept)", "show diff"}
+	for {
+		i, err := s.ui().Select(fmt.Sprintf("%s differs from this version (edited, or a manual install)", a.ID), opts, 0)
+		if err != nil {
+			return false, err
+		}
+		switch i {
+		case 1:
+			return true, nil
+		case 2:
+			s.report().Notes([]Note{{NoteInfo, strings.TrimRight(d, "\n")}})
+		default:
+			return false, nil
+		}
+	}
 }
 
 // skipStep aborts one step as skipped by the user (AC-10: a prompt that got
@@ -954,10 +1015,16 @@ func (s *session) applyStep(r *stepRun) error {
 	chosen := applyIDs(r.choices)
 	plan := r.plan
 	if !r.planned {
+		firstToken := r.plan.Token // from the plan the user confirmed (phase 5)
 		var err error
 		if plan, err = r.step.Plan(s.ctx, s.e.Read, s.st, r.choices); err != nil {
 			r.failed, r.failErr = true, fmt.Errorf("plan: %w", err)
 			return nil
+		}
+		// A Rule-B re-plan must not reset the Token: it carries what the
+		// confirmed plan was based on, so a change since then is caught.
+		if firstToken != "" && plan.Token != "" {
+			plan.Token = firstToken
 		}
 	}
 	r.ran = true
@@ -1096,6 +1163,38 @@ func cloneManifest(m *Manifest) *Manifest {
 	c := *m
 	c.Artifacts = slices.Clone(m.Artifacts)
 	return &c
+}
+
+// ---- Adoption -------------------------------------------------------------
+
+// adoptPhase records the already-correct artifacts of every Adopter step that
+// ended cleanly and that the manifest does not know yet (AC-51). It runs after
+// Apply, so what a step just wrote is already recorded and is not repeated.
+func (s *session) adoptPhase() error {
+	for _, r := range s.runs {
+		ad, ok := r.step.(Adopter)
+		if !ok || r.userSkip || r.failed || r.blocked != "" || r.det.State == StateBlocked {
+			continue
+		}
+		var fresh []Artifact
+		for _, a := range ad.Adopt(s.ctx, s.e.Read, s.st) {
+			known, ok := s.man.Lookup(a.Kind, a.Path, a.Identity)
+			// A known artifact whose recorded hash is stale (the user updated
+			// the file by hand to the current version) is re-recorded; hashes
+			// only, so an unchanged re-run still writes nothing (AC-50).
+			if !ok || (a.SHA256 != "" && known.SHA256 != a.SHA256) {
+				fresh = append(fresh, a)
+			}
+		}
+		if len(fresh) == 0 {
+			continue
+		}
+		if err := s.persist(StepResult{Artifacts: fresh}); err != nil {
+			r.failed, r.failErr = true, fmt.Errorf("write manifest: %w", err)
+			s.report().StepDone(s.outcomeOf(r))
+		}
+	}
+	return s.checkCtx()
 }
 
 // ---- Final doctor (phase 7) -----------------------------------------------

@@ -19,13 +19,13 @@ var hookBinRe = regexp.MustCompile(`CLAUDE_MEMORY_BIN:-([^}"]+)\}`)
 // runs the binary that install put in place (spec AC-36). It errors when
 // the asset has no such line, and when binPath is not absolute or holds a
 // character that is special inside the script's double-quoted default
-// (`"`, `$`, backtick, `\`). Doctor and install Detect both compare an
+// (`"`, `$`, backtick, `\`, `}` and `'`: the default sits inside `${VAR:-...}`). Doctor and install Detect both compare an
 // installed script against this rendering.
 func RenderHookScript(asset []byte, binPath string) ([]byte, error) {
 	if !filepath.IsAbs(binPath) {
 		return nil, fmt.Errorf("hook script binary path %q is not absolute", binPath)
 	}
-	if strings.ContainsAny(binPath, "\"$`\\") || strings.ContainsAny(binPath, "\r\n") {
+	if strings.ContainsAny(binPath, "\"$`\\}'") || strings.ContainsAny(binPath, "\r\n") {
 		return nil, fmt.Errorf("hook script binary path %q holds a character that is unsafe in a shell double-quoted string", binPath)
 	}
 	loc := hookBinRe.FindSubmatchIndex(asset)

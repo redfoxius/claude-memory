@@ -114,12 +114,18 @@ type Inputs struct {
 	// counts as flag-sourced, so the env file is rewritten, not kept as
 	// hand-edited); it is the default of the TLS prompt and the sslmode of
 	// the local create path.
-	PGSSLMode      string
-	NoDoctor       bool   // --no-doctor: the final doctor step is skipped
-	PGPassword     string // read from stdin before Detect (AC-31)
-	OllamaURL      string
-	OllamaModel    string
-	PRRepos        string
+	PGSSLMode   string
+	NoDoctor    bool   // --no-doctor: the final doctor step is skipped
+	PGPassword  string // read from stdin before Detect (AC-31)
+	OllamaURL   string
+	OllamaModel string
+	PRRepos     string
+	// NoJobs is --no-jobs: the jobs step is skipped.
+	NoJobs bool
+	// ClaudeMD is --claude-md PATH (AC-4, AC-42): the CLAUDE.md file that
+	// receives the managed block; "" = the default <ClaudeDir>/CLAUDE.md. It
+	// is resolved against Paths.Cwd by the claude-md step.
+	ClaudeMD       string
 	Namespaces     []string // --namespace NAME=GLOB, repeatable (AC-47)
 	JobsBackend    string
 	BinDir         string
@@ -178,6 +184,10 @@ type RunState struct {
 	JobPATH        Field[string]       // jobs [2b]
 
 	// Written by the engine.
+	// Auto is set when nothing is asked: --yes/--upgrade, or a --dry-run
+	// without a TTY. A step whose default must differ for an unattended run
+	// (claude-md, AC-42) reads it in Detect.
+	Auto    bool
 	Applied map[string]bool // step id -> applied in this run
 	Results []StepRecord
 }
@@ -236,6 +246,12 @@ type Detection struct {
 	Remedy    string
 	Artifacts []ArtifactState
 	Notes     []Note
+	// SkipReason, when set, makes the engine treat the step as skipped (all
+	// choices skip, outcome "skipped") with this text as the reason. It is a
+	// documented, non-failing refusal, e.g. claude-md under --yes for an
+	// explicit path inside a git repository (AC-42). Never set it for a
+	// problem the user must fix.
+	SkipReason string
 }
 
 // Choices maps an artifact ID to the user's choice; apply on a modified
@@ -253,6 +269,15 @@ type Plan struct {
 	Actions []Action
 	Diffs   []Diff
 	Notes   []Note
+	// Token is opaque, step-private data carried from Plan to Apply: the
+	// hooks.settings step puts the sha256 of the settings file it planned
+	// against here, so Apply can abort when the file changed while the user
+	// was confirming (AC-39); hooks.scripts does the same per script. The
+	// engine keeps the Token of the plan the user confirmed when it re-plans
+	// a step after a prerequisite was applied (Rule B). Limit: a step planned
+	// only after its prerequisite (afterDep) has no confirmed plan, so its
+	// Token covers just the span from that re-plan to Apply.
+	Token string
 }
 
 // Await asks the user to do something outside install, then re-check

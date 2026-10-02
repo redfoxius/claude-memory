@@ -35,3 +35,20 @@ func InGitRepo(fsys ReadFS, path, ceiling string) (bool, string, error) {
 		dir = parent
 	}
 }
+
+// InGitRepoResolved is InGitRepo for a path that may reach a repository
+// through a symlinked directory: it checks the path as given and, when its
+// directory resolves elsewhere, the resolved directory too (AC-42). A walk
+// error is returned, so a caller that must not write into a repository can
+// fail closed.
+func InGitRepoResolved(fsys ReadFS, path, ceiling string) (bool, string, error) {
+	if in, root, err := InGitRepo(fsys, path, ceiling); err != nil || in {
+		return in, root, err
+	}
+	dir := filepath.Dir(filepath.Clean(path))
+	resolved, err := fsys.EvalSymlinks(dir)
+	if err != nil || resolved == dir {
+		return false, "", nil
+	}
+	return InGitRepo(fsys, filepath.Join(resolved, filepath.Base(path)), ceiling)
+}

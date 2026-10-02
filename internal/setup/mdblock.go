@@ -71,30 +71,53 @@ func isHandPastedHeading(line string) bool {
 	return strings.HasPrefix(t, "#") && strings.Contains(strings.ToLower(t), "shared semantic memory") && strings.Contains(t, "claude-memory")
 }
 
-// mdFenceRe matches a Markdown code-fence line (``` or ~~~).
-var mdFenceRe = regexp.MustCompile("^\\s*(```|~~~)")
+// mdFenceRe matches a Markdown code-fence line: a run of three or more
+// backticks or tildes, optionally followed by an info string.
+var mdFenceRe = regexp.MustCompile("^\\s*(`{3,}|~{3,})(.*)$")
 
 // FindMDBlock locates the managed block. It returns an error wrapping
-// ErrMDMarkers for unbalanced, duplicated or out-of-order markers.
+// ErrMDMarkers for unbalanced, duplicated or out-of-order markers, and for
+// markers inside a code fence that is still open at the end of the file
+// (inserting a second block there would be wrong).
 func FindMDBlock(b []byte) (MDBlock, error) {
 	var begins, ends []int
 	lines := mdLines(b)
-	inFence := false
+	// Fences follow CommonMark: a closing fence uses the same character, is at
+	// least as long as the opening one and has no info string.
+	var fenceCh byte
+	fenceLen, fencedMarkers := 0, 0
 	for i, l := range lines {
-		// Marker lines inside a fenced code block are documentation, not a block.
-		if mdFenceRe.MatchString(l.text) {
-			inFence = !inFence
+		if m := mdFenceRe.FindStringSubmatch(l.text); m != nil {
+			ch, n := m[1][0], len(m[1])
+			switch {
+			case fenceLen == 0:
+				if ch == '`' && strings.Contains(m[2], "`") {
+					break // not a fence: backtick info strings cannot contain backticks
+				}
+				fenceCh, fenceLen = ch, n
+				continue
+			case ch == fenceCh && n >= fenceLen && strings.TrimSpace(m[2]) == "":
+				fenceLen = 0
+				continue
+			}
+		}
+		t := strings.TrimSpace(l.text)
+		if fenceLen > 0 {
+			// Marker lines inside a fenced code block are documentation, not a block.
+			if t == MDBeginMarker || t == MDEndMarker {
+				fencedMarkers++
+			}
 			continue
 		}
-		if inFence {
-			continue
-		}
-		switch strings.TrimSpace(l.text) {
+		switch t {
 		case MDBeginMarker:
 			begins = append(begins, i)
 		case MDEndMarker:
 			ends = append(ends, i)
 		}
+	}
+	if fenceLen > 0 && fencedMarkers > 0 {
+		return MDBlock{}, fmt.Errorf("%w: claude-memory markers inside a code fence that is never closed", ErrMDMarkers)
 	}
 	switch {
 	case len(begins) == 0 && len(ends) == 0:

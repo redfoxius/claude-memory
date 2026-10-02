@@ -17,6 +17,15 @@ const testScriptsDir = "/Users/owner/.claude/hooks/claude-memory"
 
 func testDesired() []HookEntry { return DesiredHooks(testScriptsDir) }
 
+// overwriteAll is the per-event overwrite set of "overwrite every modified
+// event" (all) or of none (nil).
+func overwriteAll(all bool) map[string]bool {
+	if !all {
+		return nil
+	}
+	return map[string]bool{EventUserPromptSubmit: true, EventSessionEnd: true}
+}
+
 func recordedFor(entries []HookEntry) RecordedHooks {
 	r := RecordedHooks{}
 	for _, e := range entries {
@@ -150,7 +159,7 @@ func TestSettingsGolden(t *testing.T) {
 				t.Errorf("state = %s (%s), want %s", a.State, a.Detail, tc.state)
 			}
 
-			out, sum, changed, err := MergeSettings(in, desired, tc.recorded, tc.overwrite)
+			out, sum, changed, err := MergeSettings(in, desired, tc.recorded, overwriteAll(tc.overwrite))
 			if err != nil {
 				t.Fatalf("MergeSettings: %v", err)
 			}
@@ -175,7 +184,7 @@ func TestSettingsGolden(t *testing.T) {
 			}
 
 			// Idempotence (AC-64): a second merge changes nothing.
-			out2, _, changed2, err := MergeSettings(out, desired, tc.recorded, tc.overwrite)
+			out2, _, changed2, err := MergeSettings(out, desired, tc.recorded, overwriteAll(tc.overwrite))
 			if err != nil || changed2 || !bytes.Equal(out2, out) {
 				t.Errorf("second merge: changed=%v err=%v", changed2, err)
 			}
@@ -279,7 +288,7 @@ func TestSettingsRefusals(t *testing.T) {
 			in := readTestdata(t, filepath.Join("testdata", "settings", tc.name+".in.json"))
 			for _, run := range []func() error{
 				func() error { _, err := AnalyzeSettings(in, testDesired(), nil); return err },
-				func() error { _, _, _, err := MergeSettings(in, testDesired(), nil, true); return err },
+				func() error { _, _, _, err := MergeSettings(in, testDesired(), nil, overwriteAll(true)); return err },
 				func() error { _, _, _, err := UnmergeSettings(in, desiredRecorded, true); return err },
 			} {
 				err := run()
@@ -367,7 +376,7 @@ func TestWriteSettingsFileBackupAndMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, _, changed, err := MergeSettings(f.Content, DesiredHooks(p.HookScriptsDir()), nil, false)
+	out, _, changed, err := MergeSettings(f.Content, DesiredHooks(p.HookScriptsDir()), nil, nil)
 	if err != nil || !changed {
 		t.Fatalf("merge: changed=%v err=%v", changed, err)
 	}
@@ -392,7 +401,7 @@ func TestWriteSettingsFileBackupAndMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, changed, _ := MergeSettings(f2.Content, DesiredHooks(p.HookScriptsDir()), nil, false); changed {
+	if _, _, changed, _ := MergeSettings(f2.Content, DesiredHooks(p.HookScriptsDir()), nil, nil); changed {
 		t.Error("second merge reports a change")
 	}
 }
@@ -405,7 +414,7 @@ func TestWriteSettingsFileNewFile(t *testing.T) {
 	if err != nil || f.Exists {
 		t.Fatalf("read missing: %+v, %v", f, err)
 	}
-	out, _, _, err := MergeSettings(nil, DesiredHooks(p.HookScriptsDir()), nil, false)
+	out, _, _, err := MergeSettings(nil, DesiredHooks(p.HookScriptsDir()), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,7 +532,7 @@ func TestReadSettingsFileSymlinks(t *testing.T) {
 	if f.Target != target || !f.Exists {
 		t.Errorf("target = %q exists=%v, want %q", f.Target, f.Exists, target)
 	}
-	out, _, _, _ := MergeSettings(f.Content, testDesired(), nil, false)
+	out, _, _, _ := MergeSettings(f.Content, testDesired(), nil, nil)
 	backup, err := WriteSettingsFile(fsys, NewFakeClock(testNow), f, out)
 	if err != nil {
 		t.Fatal(err)

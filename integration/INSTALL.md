@@ -1,5 +1,12 @@
 # Installing `claude-memory` integration
 
+> **Use `claude-memory install`** (and `claude-memory install --upgrade`
+> to bring an existing install up to date); `--dry-run` shows the plan
+> first. It does every step below (binary, env file, database, Ollama,
+> namespaces, hooks, MCP, skills, CLAUDE.md block, and on macOS the launchd
+> jobs) and `claude-memory doctor` checks the result. The manual steps
+> below are the reference for what it does.
+
 Everything under `integration/` is produced by this repo but installs
 into **user-level** config (`~/.local/bin`, `~/.config/claude-memory`,
 `~/.claude/`, `~/Library/LaunchAgents`, `acme/CLAUDE.md`). None of it
@@ -12,7 +19,7 @@ yourself. Follow them in order.
 CLAUDE.md block, namespaces and the launchd jobs. It never changes
 anything, prints a `fix:` line under each failing check, exits 1 when a
 check fails (`--strict`: also on warnings) and has `--json` for scripts.
-A guided `claude-memory install` is planned (`docs/specs/install-doctor/`).
+
 
 ## 0. Prerequisites
 
@@ -147,19 +154,23 @@ cp -r integration/skills/memory-digest ~/.claude/skills/
 Skip this to run `ingest-pr` / `cleanup` by hand (see `USAGE.md`); the
 first `ingest-pr` run spends two haiku calls per PR over the last 30 days.
 
+`claude-memory install` does this step (see the note at the top). By
+hand: create `~/.local/state/claude-memory`, then write one plist per job
+to `~/Library/LaunchAgents/io.github.claude-memory.<job>.plist` from
+the Go template `integration/launchd/job.plist.tmpl` (fields: `Label`
+`io.github.claude-memory.<job>`, `Program` the absolute path of the
+installed `claude-memory`, `Args` `[<job>]`, `PATH` the directories of
+`claude`, `git` and `az` plus `/usr/bin:/bin`, `Hour`/`Minute` 7:15 for
+`cleanup` and 7:00 for `ingest-pr`, `LogPath`
+`~/.local/state/claude-memory/<job>.log`). The jobs run the binary
+directly; it reads `~/.config/claude-memory/env` itself, so there is no
+wrapper script (the old `run-with-env.sh` wrapper `source`s the env file,
+which breaks passwords containing `$` or `&`). Then load each one:
+
 ```bash
-mkdir -p ~/.local/bin ~/.local/state/claude-memory
-cp integration/bin/run-with-env.sh ~/.local/bin/claude-memory-run-with-env.sh
-chmod 755 ~/.local/bin/claude-memory-run-with-env.sh
-
-for f in integration/launchd/io.github.claude-memory.ingest-pr.plist \
-         integration/launchd/io.github.claude-memory.cleanup.plist; do
-  dest="$HOME/Library/LaunchAgents/$(basename "$f")"
-  sed "s|__HOME__|$HOME|g" "$f" > "$dest"
-  launchctl unload "$dest" 2>/dev/null || true
-  launchctl load "$dest"
-done
-
+launchctl bootout gui/$(id -u)/io.github.claude-memory.cleanup 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.claude-memory.cleanup.plist
+# the same for ingest-pr
 launchctl list | grep io.github.claude-memory
 ```
 

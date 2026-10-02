@@ -14,7 +14,7 @@ import (
 func TestReferencedAssetsAreEmbedded(t *testing.T) {
 	paths := append([]string{
 		HookUserPromptSubmit, HookSessionEnd, ClaudeMDSection, SettingsSnippet,
-		LaunchdCleanup, LaunchdIngestPR,
+		LaunchdJobTemplate,
 	}, HookScripts...)
 	for _, s := range Skills {
 		paths = append(paths, SkillFile(s))

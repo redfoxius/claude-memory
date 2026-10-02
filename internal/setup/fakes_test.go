@@ -38,6 +38,7 @@ func testPaths(t testing.TB) Paths {
 		Cwd:             filepath.Join(root, "work"),
 		Self:            filepath.Join(home, ".local", "bin", "claude-memory"),
 		UID:             501,
+		GitCeiling:      root,
 	}
 }
 
@@ -50,6 +51,10 @@ func testPaths(t testing.TB) Paths {
 type FakeRunner struct {
 	t        testing.TB
 	ReadOnly bool // behave like the read-only adapter: Mutating cmds → ErrReadOnly
+
+	// Handler, when set, answers a command before the scripts are consulted
+	// (a stateful fake such as fakeLaunchd); ok=false falls through.
+	Handler func(Cmd) (res Result, ok bool)
 
 	mu      sync.Mutex
 	scripts []fakeScript
@@ -138,6 +143,11 @@ func (r *FakeRunner) Run(ctx context.Context, c Cmd) (Result, error) {
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
+	}
+	if r.Handler != nil {
+		if res, ok := r.Handler(c); ok {
+			return res, nil
+		}
 	}
 	for _, s := range scripts {
 		if s.match(c) {

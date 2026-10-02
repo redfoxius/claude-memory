@@ -1510,7 +1510,7 @@ tests.
 
 Satisfies AC-44 (install), AC-51 (jobs), AC-64 (goldens).
 
-**WI-S2-13b [S2b] systemd + `jobs` step.** files:
+**WI-S2-13b [S2b] systemd + `jobs` step.** *(v0.9: systemd dropped; only the launchd `jobs` step shipped, skipped with instructions elsewhere, spec §0.9.)* files:
 `internal/setup/jobs_systemd.go`, `integration/systemd/*.tmpl`,
 `steps_jobs.go`, golden units, tests.
 - systemd: write the units, `daemon-reload`, `enable --now`, with
@@ -1528,7 +1528,7 @@ Satisfies AC-44 (install), AC-51 (jobs), AC-64 (goldens).
 
 Satisfies AC-16 (wiring), AC-43, AC-45, AC-64 (goldens).
 
-**WI-S2-17 [S2b] Doctor slice-2 deltas.** files:
+**WI-S2-17 [S2b] Doctor slice-2 deltas.** *(v0.9: only the `jobs` check, rendering compare and `claude-memory install` remedies shipped; the rest is deferred.)* files:
 `internal/setup/checks_misc.go`, `checks_claude.go`, `doctor_test.go`,
 goldens.
 - `jobs` uses the full JobManager set on linux, plus a warning when the

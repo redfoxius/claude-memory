@@ -12,13 +12,29 @@ First run was FAIL `pg.connect` (server `home-server` offline over Tailscale); n
 
 
 ## Slice 2 status (branch `feature/install-s2a-install-cmd`)
-PR 2a is done on `feature/install-s2a-install-cmd`: WI-S2-8 (namespaces), WI-S2-14a (install command, dry-run) and WI-S2-14b (final doctor, exit-code rule, cross-cutting tests), each with its review fixes. Earlier: WI-S2-0..7 with the Opus reviews. Next: PR 2b (hooks, MCP, skills, CLAUDE.md, jobs, doctor deltas, uninstall, e2e, docs).
+PR 2a is done on `feature/install-s2a-install-cmd`: WI-S2-8 (namespaces), WI-S2-14a (install command, dry-run) and WI-S2-14b (final doctor, exit-code rule, cross-cutting tests), each with its review fixes. Earlier: WI-S2-0..7 with the Opus reviews. PR 2b part 1 is done on `feature/install-s2b-claude-steps`: WI-S2-9 (`hooks.scripts`, `hooks.settings`) and WI-S2-10 (`mcp`, `claudeCLI` adapter), with the Opus security and conformance review fixes (token kept across a Rule-B re-plan, per-script change check, adoption of ok-but-unrecorded artifacts through the new optional `Adopter` step method, 0600 unique backups, env-only MCP difference is `modified`, `hooks.settings` also requires `hooks.scripts`; spec v0.7 §0.7). Next in PR 2b: skills, CLAUDE.md, jobs, doctor deltas, uninstall, e2e, docs.
+
+## Owner decision (2026-10-02): 2b scope reduced
+Reason: installer outgrew the product; keep it minimal; revisit if needed.
+- Remaining in 2b: a launchd-only minimal `jobs` step (WI-S2-13a + trimmed `jobs`, no systemd), trimmed doctor deltas (17), docs pointing `INSTALL.md`/`DEPLOY.md` at `claude-memory install`.
+- DROPPED from 2b: systemd (WI-S2-13b), uninstall (WI-S2-15), testcontainers e2e (16).
+- Done: WI-S2-11 (`skills`) and WI-S2-12 (`claude-md`) with review fixes (spec v0.8 §0.8).
+
+## Slice 2b minimal jobs (branch `feature/install-s2b-claude-steps`, commit d7bfac9 plus a review delta)
+Done: `jobs` step (launchd only) with the trimmed WI-S2-13a: `integration/launchd/job.plist.tmpl` replaces the two `__HOME__` plists; `LaunchdJobs.Render`, `LaunchdManager.Install` (bootout tolerates exit 3/113/"No such process"/"not loaded", then bootstrap), `Inspect`/`Detect` compare with the recorded hash and the rendering (`recordedJobHashes`, `ComputeJobPATH`); `--no-jobs` and `--pr-repos` are bound; `ReadPorts.Jobs`/`WritePorts.Jobs` wired; doctor `jobs` check compares against the rendering and names `claude-memory install`; `INSTALL.md`/`DEPLOY.md` point at `install`. `JobManager.Remove` is dropped (no uninstall).
+Not done (by the owner decision): systemd, uninstall, e2e, doctor deltas beyond `jobs` (no `tools.claude` recorded-PATH check, no backend-vs-manifest warning), stable-shim PATH preference (nvm/volta), a `jobs`-specific diff question for modified plists (generic overwrite Confirm only).
+
+## Manual check on the owner Mac (gate)
+- Replacing a *loaded* job (`install --upgrade` after changing the PATH or schedule): confirm `launchctl bootout` + `bootstrap gui/<uid>` leaves the job loaded (`launchctl print`), and whether a retry after exit 5/37 is ever needed. Known edge: a plist loaded earlier with `launchctl load` may sit in the `user/<uid>` domain, where `bootout gui/<uid>/...` reports "not loaded".
+- `integration/bin/run-with-env.sh` is kept: INSTALL.md (uninstall) and the spec still name it as the legacy wrapper doctor flags.
 
 ## Open follow-ups
+- If uninstall is ever revived: skill backups (`SKILL.md.bak.claude-memory.*`) live inside `skills/<name>`, so that owned dir is not empty after removing our files and stays; an `md-block` with `CreatedFile` is removed with its file only when our block is the only content; nested skill subdirs are recorded as owned `dir` artifacts; an empty unrecorded `skills/<name>` left by a failed Apply is the same gap as for `hooks/claude-memory`.
+- Uninstall (WI-S2-15) must handle an owned `hooks/claude-memory` dir that is not in the manifest: a failed `hooks.scripts` Apply (AC-8: nothing recorded) can leave the directory created but unrecorded. Treat an empty, unrecorded dir under `<ClaudeDir>/hooks/claude-memory` as removable, or record it before the first write.
+- `Plan.Token` of a step planned only after its prerequisite (`afterDep`) covers just the span from that re-plan to Apply; no confirmed plan exists for it.
+- MCP `outdated` (other command/args) still drops any user env on replace; the plan names the env keys. `modified` (env only) needs the overwrite Confirm.
 - Engine prompt for a `modified` unparseable `namespaces.yaml` says "a backup is kept", which is misleading; it needs an engine flag per artifact.
 - `LinePrompter` has no ctx: `Select`/`Text` wait for Enter after the first Ctrl-C.
-- `--claude-md`, `--no-jobs`, `--pr-repos` exit 2 in 2a; 2b must undo that (`deferredInstallFlags`).
-- WI-S2-13a must tolerate `launchctl bootout` exit 3 (not loaded), see the WI-S1-0 fixtures above.
 - 14a review carried-over items 10-12: AC-34 child test with `MEMORY_PG_DSN` set; duplicate remote-Ollama warning in the dry-run golden.
 - `manifest` and `dirs.state` doctor checks have no owning step (`unownedChecks`), so their fails are never exempt; decide in 2b whether an owner is wanted.
 - Kept from earlier: ParseDBTarget refuses DSN query options other than `sslmode`; the Await-wait Select maps ErrTooManyAttempts to exit 2.

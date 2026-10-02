@@ -5,11 +5,8 @@ import (
 	"testing"
 )
 
-// TestInstallStepsRegistry is the 2a registry (AC-7), ending in the final
-// doctor: the exact order, every Requires pointing at an earlier step, and no
-// mcp or jobs step. 2a leaves
-// WritePorts.ClaudeCLI and WritePorts.Jobs (and ReadPorts.Jobs) nil, so a
-// registered step that used them would dereference nil.
+// TestInstallStepsRegistry is the registry in AC-7 order, ending in the final
+// doctor: the exact order and every Requires pointing at an earlier step.
 func TestInstallStepsRegistry(t *testing.T) {
 	t.Parallel()
 	steps := InstallSteps("v1.0.0", NewRedactor())
@@ -27,18 +24,18 @@ func TestInstallStepsRegistry(t *testing.T) {
 		seen[s.ID()] = true
 		ids = append(ids, s.ID())
 	}
-	want := []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces", "doctor"}
+	want := []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces",
+		"hooks.scripts", "hooks.settings", "mcp", "skills", "claude-md", "jobs", "doctor"}
 	if !slices.Equal(ids, want) {
 		t.Errorf("registry = %v, want %v", ids, want)
 	}
-	for _, banned := range []string{"mcp", "jobs", "hooks.scripts", "hooks.settings", "skills", "claude-md"} {
-		if seen[banned] {
-			t.Errorf("slice 2a must not register %q", banned)
-		}
+	hs := steps[slices.IndexFunc(steps, func(s Step) bool { return s.ID() == "hooks.settings" })].Requires()
+	if !slices.Contains(hs, "migrate") || !slices.Contains(hs, "hooks.scripts") {
+		t.Errorf("hooks.settings must require migrate and hooks.scripts (AC-7), has %v", hs)
 	}
 }
 
-// TestSkipAcceptsUnregisteredStepIDs (C4): --skip mcp works in 2a; a truly
+// TestSkipAcceptsUnregisteredStepIDs (C4): --skip works for the ids this build does not register (skills, jobs); a truly
 // unknown id is still a usage error.
 func TestSkipAcceptsUnregisteredStepIDs(t *testing.T) {
 	t.Parallel()
