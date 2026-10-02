@@ -218,6 +218,10 @@ func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
 		FS:       fsys,
 		Runner:   runner,
 		Clock:    &systemClock{},
+		DB:       postgres.Prober{},
+		// No client Timeout: a pull streams for minutes; the checks bound
+		// each call with their context.
+		Ollama:   ollama.Prober{Client: &http.Client{}},
 		Redactor: redactor,
 		Stdout:   redactor.Writer(os.Stdout),
 		Stderr:   redactor.Writer(os.Stderr),

@@ -29,6 +29,8 @@ type setupDeps struct {
 	FS       setup.FS
 	Runner   setup.Runner
 	Clock    setup.Clock
+	DB       setup.DBProber     // postgres.Prober
+	Ollama   setup.OllamaProber // ollama.Prober
 	Redactor *setup.Redactor
 	Stdout   io.Writer // redacting (AC-30)
 	Stderr   io.Writer // redacting (AC-30)
