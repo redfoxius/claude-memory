@@ -486,10 +486,11 @@ func (d *jsonDoc) bytes() []byte {
 	if !d.changed() {
 		return d.src
 	}
-	e := &jsonEmitter{unit: d.unit}
+	nl := newlineOf(d.src)
+	e := &jsonEmitter{unit: d.unit, nl: nl}
 	if d.blank {
 		e.emit(d.root, 0)
-		e.buf.WriteByte('\n')
+		e.buf.WriteString(nl)
 		return e.buf.Bytes()
 	}
 	e.buf.Write(d.src[:d.root.start])
@@ -497,7 +498,7 @@ func (d *jsonDoc) bytes() []byte {
 	e.buf.Write(d.src[d.root.end:])
 	out := e.buf.Bytes()
 	if !bytes.HasSuffix(out, []byte("\n")) {
-		out = append(out, '\n')
+		out = append(out, nl...)
 	}
 	return out
 }
@@ -505,10 +506,11 @@ func (d *jsonDoc) bytes() []byte {
 type jsonEmitter struct {
 	buf  bytes.Buffer
 	unit string
+	nl   string // newline style of the source ("\r\n" when it uses CRLF)
 }
 
 func (e *jsonEmitter) indent(depth int) {
-	e.buf.WriteByte('\n')
+	e.buf.WriteString(e.nl)
 	for range depth {
 		e.buf.WriteString(e.unit)
 	}

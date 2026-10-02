@@ -185,8 +185,7 @@ func newDoctorFixture(t *testing.T) *doctorFixture {
 	writeFile(t, p.EnvFile(), []byte("# claude-memory\nMEMORY_PG_DSN="+testDSN+"\nMEMORY_OLLAMA_URL=http://127.0.0.1:11434\nMEMORY_EMBED_MAX_TOKENS=2048\n"), 0o600)
 	writeFile(t, p.InstalledBinary(), []byte("#!/bin/false\n"), 0o755)
 	writeFile(t, filepath.Join(p.BinDir, "claude"), []byte("#!/bin/false\n"), 0o755)
-	writeFile(t, filepath.Join(p.HookScriptsDir(), HookScriptUserPromptSubmit), asset(t, integration.HookUserPromptSubmit), 0o755)
-	writeFile(t, filepath.Join(p.HookScriptsDir(), HookScriptSessionEnd), asset(t, integration.HookSessionEnd), 0o755)
+	f.writeHookScripts(p.InstalledBinary())
 	writeFile(t, p.SettingsJSON(), settingsWith(DesiredHooks(p.HookScriptsDir())...), 0o644)
 	reg := fmt.Sprintf(`{"numStartups": 3, "mcpServers": {"claude-memory": {"type": "stdio", "command": %q, "args": ["serve"], "env": {}}}}`, p.InstalledBinary())
 	writeFile(t, p.ClaudeJSON, []byte(reg), 0o600)
@@ -206,6 +205,22 @@ func newDoctorFixture(t *testing.T) *doctorFixture {
 		t.Fatal(err)
 	}
 	return f
+}
+
+// writeHookScripts installs the embedded hook scripts rendered for bin, the
+// way `install` writes them (AC-36).
+func (f *doctorFixture) writeHookScripts(bin string) {
+	f.t.Helper()
+	for name, a := range map[string]string{
+		HookScriptUserPromptSubmit: integration.HookUserPromptSubmit,
+		HookScriptSessionEnd:       integration.HookSessionEnd,
+	} {
+		out, err := RenderHookScript(asset(f.t, a), bin)
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		writeFile(f.t, filepath.Join(f.p.HookScriptsDir(), name), out, 0o755)
+	}
 }
 
 func (f *doctorFixture) deps() DoctorDeps {
@@ -489,7 +504,7 @@ func TestDoctorBranches(t *testing.T) {
 		{name: "hooks.settings: one event missing", mutate: func(f *doctorFixture) {
 			writeFile(f.t, f.p.SettingsJSON(), settingsWith(DesiredHooks(f.p.HookScriptsDir())[0]), 0o644)
 		}, want: map[string]Status{"hooks.settings": StatusFail}, detail: map[string]string{"hooks.settings": "no SessionEnd entry"}},
-		{name: "hooks.settings: legacy $HOME form", mutate: func(f *doctorFixture) {
+		{name: "hooks.settings: legacy HOME form", mutate: func(f *doctorFixture) {
 			b := strings.ReplaceAll(string(asset(f.t, integration.SettingsSnippet)), "$HOME", "$HOME")
 			writeFile(f.t, f.p.SettingsJSON(), []byte(b), 0o644)
 		}, want: map[string]Status{"hooks.settings": StatusWarn}, detail: map[string]string{"hooks.settings": "legacy $HOME"}},
@@ -836,7 +851,7 @@ func TestDoctorNeverRunsRegisteredMCPCommand(t *testing.T) {
 		t.Fatalf("ReadMCPRegistration = %+v, %v", reg, err)
 	}
 	lj := LaunchdJobs{FS: f.fs, Runner: f.runner, Paths: f.p}
-	for _, j := range DefaultJobSpecs(f.p) {
+	for _, j := range DefaultJobSpecs(f.p, f.p.InstalledBinary()) {
 		if _, _, err := lj.Detect(context.Background(), j); err != nil {
 			t.Errorf("Detect %s: %v", j.Name, err)
 		}
@@ -859,6 +874,24 @@ func TestDoctorNeverRunsRegisteredMCPCommand(t *testing.T) {
 // normalizeRoot replaces the per-test temp root with a fixed token.
 func normalizeRoot(b []byte, root string) []byte {
 	return bytes.ReplaceAll(b, []byte(root), []byte("$ROOT"))
+}
+
+// goldenDetailChecks keep their `detail` in the goldens: their text is the
+// part of the output users act on (the env-file findings, the MCP registration
+// and the manifest summary).
+var goldenDetailChecks = []string{"env.file", "mcp.registered", "manifest"}
+
+// stripGoldenDetails returns r with Detail cleared on every check outside
+// goldenDetailChecks.
+func stripGoldenDetails(r DoctorReport) DoctorReport {
+	out := r
+	out.Checks = slices.Clone(r.Checks)
+	for i := range out.Checks {
+		if !slices.Contains(goldenDetailChecks, out.Checks[i].ID) {
+			out.Checks[i].Detail = ""
+		}
+	}
+	return out
 }
 
 func TestDoctorGoldenJSON(t *testing.T) {
@@ -893,10 +926,24 @@ func TestDoctorGoldenJSON(t *testing.T) {
 				t.Fatal(err)
 			}
 			root := filepath.Dir(f.p.Home)
-			checkGolden(t, "testdata/doctor/"+tc.name+".golden.json", normalizeRoot(js.Bytes(), root))
-			checkGolden(t, "testdata/doctor/"+tc.name+".golden.txt", normalizeRoot(text.Bytes(), root))
 
-			// Every AC-60 key is always present.
+			// The goldens pin status, remedy and the schema, not the free
+			// text of `detail` (AC-60, plan WI-S2-0): only the checks in
+			// goldenDetailChecks keep it.
+			gr := stripGoldenDetails(r)
+			var gjs, gtext bytes.Buffer
+			if err := WriteDoctorJSON(&gjs, gr, meta, f.red); err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteDoctorText(&gtext, gr, meta, f.red); err != nil {
+				t.Fatal(err)
+			}
+			checkGolden(t, "testdata/doctor/"+tc.name+".golden.json", normalizeRoot(gjs.Bytes(), root))
+			checkGolden(t, "testdata/doctor/"+tc.name+".golden.txt", normalizeRoot(gtext.Bytes(), root))
+
+			// Every AC-60 key is always present. This key-set assertion, run
+			// on the unstripped report, is the schema contract: the goldens
+			// no longer compare `detail`.
 			var doc map[string]any
 			if err := json.Unmarshal(js.Bytes(), &doc); err != nil {
 				t.Fatal(err)
@@ -923,4 +970,87 @@ func TestDoctorGoldenJSON(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A file byte-equal to the raw embedded script (a manual install of this
+// version) is ok in doctor, with the detail "manual install" (WI-S2-0).
+func TestDoctorHookScriptsManualInstall(t *testing.T) {
+	t.Parallel()
+	f := newDoctorFixture(t)
+	writeFile(t, filepath.Join(f.p.HookScriptsDir(), HookScriptUserPromptSubmit), asset(t, integration.HookUserPromptSubmit), 0o755)
+	writeFile(t, filepath.Join(f.p.HookScriptsDir(), HookScriptSessionEnd), asset(t, integration.HookSessionEnd), 0o755)
+	c := mustResult(t, f.run(), "hooks.scripts")
+	if c.Status != StatusPass || !strings.Contains(c.Detail, "manual install") {
+		t.Errorf("hooks.scripts = %s (%s), want pass with \"manual install\"", c.Status, c.Detail)
+	}
+}
+
+// A script rendered for another binary path is not this version's script.
+func TestDoctorHookScriptsOtherBinary(t *testing.T) {
+	t.Parallel()
+	f := newDoctorFixture(t)
+	f.writeHookScripts(filepath.Join(f.p.Home, "elsewhere", "claude-memory"))
+	writeFile(t, filepath.Join(f.p.Home, "elsewhere", "claude-memory"), []byte("#!/bin/false\n"), 0o755)
+	c := mustResult(t, f.run(), "hooks.scripts")
+	if c.Status != StatusWarn || !strings.Contains(c.Detail, "modified") {
+		t.Errorf("hooks.scripts = %s (%s), want warn (differs from the rendered script)", c.Status, c.Detail)
+	}
+}
+
+// TestDoctorStickyBinPath is H3/AC-35: after `install --bin-dir X` the
+// manifest records the binary, and doctor (which has no --bin-dir) compares
+// hooks, MCP and jobs against that path and checks X, not Paths.BinDir, for
+// PATH membership.
+func TestDoctorStickyBinPath(t *testing.T) {
+	t.Parallel()
+	setup := func(t *testing.T, onPath bool) (*doctorFixture, DoctorReport) {
+		f := newDoctorFixture(t)
+		f.darwin(true)
+		binDir := filepath.Join(f.p.Home, "opt", "x")
+		bin := filepath.Join(binDir, BinaryName)
+		writeFile(t, bin, []byte("#!/bin/false\n"), 0o755)
+		if err := os.Remove(f.p.InstalledBinary()); err != nil {
+			t.Fatal(err)
+		}
+		f.p.Self = bin
+		f.runner.SetPath(BinaryName, bin)
+		f.writeHookScripts(bin)
+		writeFile(t, f.p.ClaudeJSON, []byte(fmt.Sprintf(`{"mcpServers":{"claude-memory":{"type":"stdio","command":%q,"args":["serve"],"env":{}}}}`, bin)), 0o600)
+		for _, job := range []string{JobCleanup, JobIngestPR} {
+			pl := filepath.Join(f.p.LaunchAgentsDir, LaunchdLabelPrefix+job+".plist")
+			b, err := os.ReadFile(pl)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, pl, []byte(strings.ReplaceAll(string(b), f.p.InstalledBinary(), bin)), 0o644)
+		}
+		writeManifest(f, Artifact{Step: BinaryStepName, Kind: KindFile, Path: bin, Version: "v1"})
+		f.env = Env{"PATH": "/usr/bin:/bin"}
+		if onPath {
+			f.env["PATH"] = binDir + ":/usr/bin:/bin"
+		}
+		return f, f.run()
+	}
+	t.Run("on PATH", func(t *testing.T) {
+		t.Parallel()
+		_, r := setup(t, true)
+		for _, id := range []string{"binary.version", "mcp.registered", "hooks.scripts", "jobs"} {
+			if c := mustResult(t, r, id); c.Status != StatusPass {
+				t.Errorf("%s = %s (%s), want pass", id, c.Status, c.Detail)
+			}
+		}
+	})
+	t.Run("not on PATH", func(t *testing.T) {
+		t.Parallel()
+		f, r := setup(t, false)
+		c := mustResult(t, r, "binary.version")
+		if c.Status != StatusInfo || !strings.Contains(c.Detail, filepath.Join(f.p.Home, "opt", "x")+" is not on PATH") {
+			t.Errorf("binary.version = %s (%s), want the not-on-PATH info for the recorded dir", c.Status, c.Detail)
+		}
+		for _, id := range []string{"mcp.registered", "hooks.scripts", "jobs"} {
+			if c := mustResult(t, r, id); c.Status != StatusPass {
+				t.Errorf("%s = %s (%s), want pass", id, c.Status, c.Detail)
+			}
+		}
+	})
 }

@@ -36,9 +36,10 @@ func (d *doctor) checkBinary(context.Context) (Status, string, string) {
 				"remove or update " + found + ", or put " + filepath.Dir(self) + " first on PATH"
 		}
 	}
-	if !slices.Contains(filepath.SplitList(d.Env.Get("PATH")), d.Paths.BinDir) {
-		return StatusInfo, detail + "; " + d.Paths.BinDir + " is not on PATH (hooks, MCP and jobs use absolute paths, so only your shell is affected)",
-			"add " + d.Paths.BinDir + " to PATH in your shell profile"
+	binDir := filepath.Dir(d.binPath)
+	if !slices.Contains(filepath.SplitList(d.Env.Get("PATH")), binDir) {
+		return StatusInfo, detail + "; " + binDir + " is not on PATH (hooks, MCP and jobs use absolute paths, so only your shell is affected)",
+			"add " + binDir + " to PATH in your shell profile"
 	}
 	return pass(detail)
 }
@@ -136,7 +137,7 @@ func (d *doctor) checkJobs(ctx context.Context) (Status, string, string) {
 	lj := LaunchdJobs{FS: d.FS, Runner: d.Runner, Paths: d.Paths}
 	var warns, oks []string
 	remedy := ""
-	for _, j := range DefaultJobSpecs(d.Paths) {
+	for _, j := range DefaultJobSpecs(d.Paths, d.binPath) {
 		s, err := lj.Inspect(ctx, j)
 		switch {
 		case err != nil:

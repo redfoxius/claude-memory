@@ -1,28 +1,28 @@
 claude-memory doctor · test · linux/amd64 (Ubuntu 24.04) · jobs: none
 claude config: $ROOT/home/.claude
 
-PASS  binary.version    claude-memory test at $ROOT/home/.local/bin/claude-memory
+PASS  binary.version    
 PASS  env.file          $ROOT/home/.config/claude-memory/env (3 keys)
-PASS  env.perms         mode 0600
-PASS  env.format        KEY=VALUE format; MEMORY_PG_DSN (env file): user claude_memory @ db.example:5432, database claude_memory
-PASS  pg.connect        connected (user claude_memory @ db.example:5432, database claude_memory, DSN from the env file; PostgreSQL 16.4, no TLS)
-PASS  pg.latency        ping 4 ms
-PASS  pg.vector         pgvector 0.7.0
-PASS  pg.schema         migrations 0001, 0002 applied
-PASS  ollama.reachable  Ollama 0.12.3 at http://127.0.0.1:11434
-PASS  ollama.model      model bge-m3 present
-PASS  ollama.embed      1024 dims in 40 ms
-PASS  tools.git         /usr/bin/git
-PASS  tools.claude      $ROOT/home/.local/bin/claude
-INFO  tools.az          not needed: MEMORY_PR_INGEST_REPOS is not set
+PASS  env.perms         
+PASS  env.format        
+PASS  pg.connect        
+PASS  pg.latency        
+PASS  pg.vector         
+PASS  pg.schema         
+PASS  ollama.reachable  
+PASS  ollama.model      
+PASS  ollama.embed      
+PASS  tools.git         
+PASS  tools.claude      
+INFO  tools.az          
 PASS  mcp.registered    registered: $ROOT/home/.local/bin/claude-memory serve
-PASS  hooks.scripts     user-prompt-submit.sh, session-end.sh in $ROOT/home/.claude/hooks/claude-memory
-PASS  hooks.settings    one claude-memory entry each for UserPromptSubmit and SessionEnd
-PASS  skills            remember, memory-digest match this version
-PASS  claude-md         memory block up to date in $ROOT/home/.claude/CLAUDE.md
-PASS  namespaces        1 mapping(s), default global; $ROOT/work → global (default)
-INFO  jobs              not checked yet: systemd user timers are detected from slice 2 on
-PASS  dirs.state        $ROOT/home/.local/state/claude-memory writable
+PASS  hooks.scripts     
+PASS  hooks.settings    
+PASS  skills            
+PASS  claude-md         
+PASS  namespaces        
+INFO  jobs              
+PASS  dirs.state        
 INFO  manifest          no $ROOT/home/.config/claude-memory/install.json (a manual install, or install has not run yet)
 
 23 checks: 20 pass · 3 info

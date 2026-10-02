@@ -76,7 +76,7 @@ func TestLaunchdInspect(t *testing.T) {
 			p := testPaths(t)
 			fsys := NewFakeFS(t, filepath.Dir(p.Home))
 			fsys.ReadOnly = true
-			job := DefaultJobSpecs(p)[0]
+			job := DefaultJobSpecs(p, p.InstalledBinary())[0]
 			if job.Name != JobCleanup {
 				t.Fatalf("first default job = %s", job.Name)
 			}
@@ -130,7 +130,7 @@ func TestLaunchdInspect(t *testing.T) {
 func TestDefaultJobSpecs(t *testing.T) {
 	t.Parallel()
 	p := testPaths(t)
-	jobs := DefaultJobSpecs(p)
+	jobs := DefaultJobSpecs(p, p.InstalledBinary())
 	if len(jobs) != 2 {
 		t.Fatalf("jobs = %+v", jobs)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -250,6 +251,9 @@ type doctor struct {
 	envFile    *config.EnvFile
 	manifest   ManifestLoad
 	manifestEr error
+	// binPath is the binary path every check compares against: the manifest-
+	// recorded one, else Paths.InstalledBinary() (ResolveBinPath, AC-35).
+	binPath string
 
 	dbStatus DBStatus // written by pg.connect
 	dbErr    error
@@ -286,6 +290,7 @@ func (d *doctor) prepare() {
 		}
 	}
 	d.manifest, d.manifestEr = LoadManifest(d.FS, d.Paths)
+	d.binPath = ResolveBinPath(d.Paths, d.manifest.Manifest, false)
 }
 
 // setting returns the effective value of key as the binary would see it:
@@ -319,27 +324,133 @@ func (d *doctor) prRepos() bool {
 	return strings.Trim(v, " ,") != ""
 }
 
-// dsnPasswords returns the password of a URL-form DSN as written and
-// percent-decoded, or of a key/value DSN's password= field.
+// dsnPasswords returns every form of the password of a DSN that must be
+// masked: the percent-decoded password and the password as written (they
+// differ when the DSN encodes it). URL DSNs go through url.Parse; only when
+// that fails (an unencoded '@' or '/' in the password) does the manual split
+// on the last '@' apply. Key/value DSNs are scanned quote-aware (libpq: a
+// value may be 'single quoted' with \' and \\ escapes).
 func dsnPasswords(dsn string) []string {
 	var out []string
+	add := func(pw string) {
+		if pw != "" && !slices.Contains(out, pw) {
+			out = append(out, pw)
+		}
+	}
 	if _, rest, ok := strings.Cut(dsn, "://"); ok {
-		if at := strings.LastIndex(rest, "@"); at >= 0 {
-			if _, pw, ok := strings.Cut(rest[:at], ":"); ok && pw != "" {
-				out = append(out, pw)
-				if dec, err := url.PathUnescape(pw); err == nil && dec != pw {
-					out = append(out, dec)
+		if u, err := url.Parse(dsn); err == nil {
+			if pw, set := u.User.Password(); set {
+				add(pw)
+			}
+			// As written, when the DSN encodes it (the Redactor also learns
+			// the pctEncode form of the decoded one).
+			auth := rest
+			if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+				auth = rest[:i]
+			}
+			if at := strings.LastIndex(auth, "@"); at >= 0 {
+				if _, raw, ok := strings.Cut(auth[:at], ":"); ok {
+					add(raw)
+				}
+			}
+			return out
+		}
+		// Unparseable (an unencoded '@' or '/' in the password): split on the
+		// last '@' before the first '/', else on the last '@'.
+		end := len(rest)
+		if i := strings.Index(rest, "/"); i >= 0 && strings.Contains(rest[:i], "@") {
+			end = i
+		}
+		if at := strings.LastIndex(rest[:end], "@"); at >= 0 {
+			if _, pw, ok := strings.Cut(rest[:at], ":"); ok {
+				add(pw)
+				if dec, err := url.PathUnescape(pw); err == nil {
+					add(dec)
 				}
 			}
 		}
 		return out
 	}
-	for _, f := range strings.Fields(dsn) {
-		if v, ok := strings.CutPrefix(f, "password="); ok && v != "" {
-			out = append(out, strings.Trim(v, `'`))
+	for _, kv := range scanKeyValueDSN(dsn) {
+		if kv.key == "password" {
+			add(kv.val)
+			add(kv.raw)
 		}
 	}
 	return out
+}
+
+type dsnPair struct{ key, val, raw string }
+
+// scanKeyValueDSN splits a libpq key/value connection string. val is the
+// unquoted, unescaped value; raw is the value as written (inside the quotes
+// for a quoted one). A malformed tail ends the scan.
+func scanKeyValueDSN(s string) []dsnPair {
+	var out []dsnPair
+	i := 0
+	skipSpace := func() {
+		for i < len(s) && strings.ContainsRune(" \t\r\n", rune(s[i])) {
+			i++
+		}
+	}
+	for {
+		skipSpace()
+		start := i
+		for i < len(s) && s[i] != '=' && !strings.ContainsRune(" \t\r\n", rune(s[i])) {
+			i++
+		}
+		key := s[start:i]
+		skipSpace()
+		if key == "" || i >= len(s) || s[i] != '=' {
+			return out
+		}
+		i++
+		skipSpace()
+		var val, raw strings.Builder
+		if i < len(s) && s[i] == '\'' {
+			i++
+			closed := false
+			for i < len(s) {
+				c := s[i]
+				if c == '\\' && i+1 < len(s) {
+					raw.WriteByte(c)
+					raw.WriteByte(s[i+1])
+					val.WriteByte(s[i+1])
+					i += 2
+					continue
+				}
+				if c == '\'' {
+					i++
+					closed = true
+					break
+				}
+				raw.WriteByte(c)
+				val.WriteByte(c)
+				i++
+			}
+			if !closed {
+				// Unterminated quote: still report what was read, so the
+				// password is masked.
+				out = append(out, dsnPair{key, val.String(), raw.String()})
+				return out
+			}
+		} else {
+			for i < len(s) && !strings.ContainsRune(" \t\r\n", rune(s[i])) {
+				c := s[i]
+				if c == '\\' && i+1 < len(s) {
+					raw.WriteByte(c)
+					raw.WriteByte(s[i+1])
+					val.WriteByte(s[i+1])
+					i += 2
+					continue
+				}
+				raw.WriteByte(c)
+				val.WriteByte(c)
+				i++
+			}
+		}
+		out = append(out, dsnPair{key, val.String(), raw.String()})
+	}
 }
 
 // checks is the AC-58 table, in report order.
