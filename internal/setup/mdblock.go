@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -70,12 +71,24 @@ func isHandPastedHeading(line string) bool {
 	return strings.HasPrefix(t, "#") && strings.Contains(strings.ToLower(t), "shared semantic memory") && strings.Contains(t, "claude-memory")
 }
 
+// mdFenceRe matches a Markdown code-fence line (``` or ~~~).
+var mdFenceRe = regexp.MustCompile("^\\s*(```|~~~)")
+
 // FindMDBlock locates the managed block. It returns an error wrapping
 // ErrMDMarkers for unbalanced, duplicated or out-of-order markers.
 func FindMDBlock(b []byte) (MDBlock, error) {
 	var begins, ends []int
 	lines := mdLines(b)
+	inFence := false
 	for i, l := range lines {
+		// Marker lines inside a fenced code block are documentation, not a block.
+		if mdFenceRe.MatchString(l.text) {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
 		switch strings.TrimSpace(l.text) {
 		case MDBeginMarker:
 			begins = append(begins, i)

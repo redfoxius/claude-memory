@@ -365,7 +365,8 @@ func TestDoctorBranches(t *testing.T) {
 		{name: "env: no file, DSN in the environment", mutate: func(f *doctorFixture) {
 			rm(f, f.p.EnvFile())
 			f.env["MEMORY_PG_DSN"] = testDSN
-		}, want: map[string]Status{"env.file": StatusWarn, "env.perms": StatusSkip, "env.format": StatusPass, "pg.connect": StatusPass}},
+		}, want: map[string]Status{"env.file": StatusWarn, "env.perms": StatusSkip, "env.format": StatusFail, "pg.connect": StatusSkip},
+			detail: map[string]string{"env.format": "do not see your shell"}},
 		{name: "env: group-readable", mutate: func(f *doctorFixture) { f.setEnvFile("MEMORY_PG_DSN="+testDSN+"\n", 0o644) },
 			want: map[string]Status{"env.perms": StatusFail, "env.format": StatusPass, "pg.connect": StatusPass}, remedy: map[string]string{"env.perms": "chmod 600"}},
 		{name: "env: DEPLOY.md export form", mutate: func(f *doctorFixture) {

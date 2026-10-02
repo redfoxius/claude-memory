@@ -33,6 +33,8 @@ func TestMDBlockGolden(t *testing.T) {
 		{name: "idempotent", state: StateOK},
 		{name: "crlf", state: StateAbsent, changed: true, roundTrip: true},
 		{name: "inline-marker", state: StateAbsent, changed: true, roundTrip: true},
+		{name: "fenced-markers-only", state: StateAbsent, changed: true, roundTrip: true},
+		{name: "fenced-begin-plus-block", state: StateOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -53,7 +53,7 @@
       "id": "pg.connect",
       "title": "Postgres connection",
       "status": "pass",
-      "detail": "connected (user claude_memory @ db.example:5432, database claude_memory; PostgreSQL 16.4, no TLS)",
+      "detail": "connected (user claude_memory @ db.example:5432, database claude_memory, DSN from the env file; PostgreSQL 16.4, no TLS)",
       "remedy": "",
       "duration_ms": 0
     },

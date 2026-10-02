@@ -531,6 +531,12 @@ func TestReadSettingsFileSymlinks(t *testing.T) {
 	if !errors.As(err, &r) || !strings.Contains(r.Reason, "outside") {
 		t.Errorf("err = %v, want an outside-Home refusal", err)
 	}
+
+	// Read-only callers (doctor) follow it and get the flag.
+	ff, err := ReadSettingsFileFollow(fsys, p.Home, other)
+	if err != nil || !ff.OutsideHome || ff.Target != outside || !ff.Exists {
+		t.Errorf("follow: %+v, %v", ff, err)
+	}
 }
 
 // AC-70: other settings files are read-only inputs for duplicate warnings.

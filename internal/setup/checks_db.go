@@ -12,8 +12,9 @@ import (
 // four; the three dependents only read its result.
 
 func (d *doctor) checkPGConnect(ctx context.Context) (Status, string, string) {
-	dsn, _ := d.setting("MEMORY_PG_DSN", "")
+	dsn, src := d.setting("MEMORY_PG_DSN", "")
 	desc, _ := describeDSN(dsn)
+	desc += ", DSN from the " + src
 	st, err := d.DB.Probe(ctx, dsn)
 	d.dbStatus, d.dbErr = st, err
 	if !st.Connected {

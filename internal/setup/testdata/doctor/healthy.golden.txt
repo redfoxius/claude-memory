@@ -5,7 +5,7 @@ PASS  binary.version    claude-memory test at $ROOT/home/.local/bin/claude-memor
 PASS  env.file          $ROOT/home/.config/claude-memory/env (3 keys)
 PASS  env.perms         mode 0600
 PASS  env.format        KEY=VALUE format; MEMORY_PG_DSN (env file): user claude_memory @ db.example:5432, database claude_memory
-PASS  pg.connect        connected (user claude_memory @ db.example:5432, database claude_memory; PostgreSQL 16.4, no TLS)
+PASS  pg.connect        connected (user claude_memory @ db.example:5432, database claude_memory, DSN from the env file; PostgreSQL 16.4, no TLS)
 PASS  pg.latency        ping 4 ms
 PASS  pg.vector         pgvector 0.7.0
 PASS  pg.schema         migrations 0001, 0002 applied

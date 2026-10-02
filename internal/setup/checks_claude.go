@@ -191,7 +191,7 @@ func (d *doctor) checkHookScripts(context.Context) (Status, string, string) {
 func (d *doctor) checkHookSettings(context.Context) (Status, string, string) {
 	settingsPath := d.Paths.SettingsJSON()
 	snippet := "merge integration/settings.snippet.json into " + settingsPath + " by hand (integration/INSTALL.md step 5)"
-	f, err := ReadSettingsFile(d.FS, d.Paths.Home, settingsPath)
+	f, err := ReadSettingsFileFollow(d.FS, d.Paths.Home, settingsPath)
 	if err != nil {
 		return StatusFail, d.redact(err.Error()), "fix the file so it is strict JSON (no comments, no trailing commas), or " + snippet
 	}
@@ -209,6 +209,9 @@ func (d *doctor) checkHookSettings(context.Context) (Status, string, string) {
 	}
 
 	var fails, warns []string
+	if f.OutsideHome {
+		warns = append(warns, settingsPath+" is a symlink to "+f.Target+", outside "+d.Paths.Home+"; `claude-memory install` will refuse to edit it (AC-38)")
+	}
 	for _, ev := range a.Events {
 		switch {
 		case ev.State == StateAbsent:

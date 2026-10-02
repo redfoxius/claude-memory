@@ -111,6 +111,12 @@ func (d *doctor) checkEnvFormat(context.Context) (Status, string, string) {
 		}
 		return StatusFail, joinDetail(detail, warns), remedy
 	}
+	if src == "environment" && (d.envFile == nil || d.envFile.Values["MEMORY_PG_DSN"] == "") {
+		// The shell's DSN is invisible to hooks, the MCP server and scheduled
+		// jobs, which read only the env file.
+		return StatusFail, joinDetail("MEMORY_PG_DSN is set in your shell, but "+d.envPath+" has no usable MEMORY_PG_DSN line: hooks, the MCP server and scheduled jobs do not see your shell's value", warns),
+			"put MEMORY_PG_DSN=… (no `export`, no quotes) in " + d.envPath
+	}
 	desc, err := describeDSN(dsn)
 	if err != nil {
 		detail := "MEMORY_PG_DSN (from the " + src + ") is unusable: " + err.Error()

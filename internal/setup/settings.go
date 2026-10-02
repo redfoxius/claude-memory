@@ -539,12 +539,26 @@ type SettingsFile struct {
 	Content []byte
 	Hash    [32]byte // sha256 of Content (zero when !Exists)
 	Mode    fs.FileMode
+	// OutsideHome is set when the symlink target lies outside home and the
+	// read was allowed to follow it (read-only callers such as doctor).
+	OutsideHome bool
 }
 
 // ReadSettingsFile reads a settings file through the FS port, following a
 // symlink only when its target lies inside home (AC-38; §8: dotfiles). A
 // missing file is not an error (Exists false).
 func ReadSettingsFile(fsys FS, home, path string) (*SettingsFile, error) {
+	return readSettingsFile(fsys, home, path, false)
+}
+
+// ReadSettingsFileFollow is ReadSettingsFile for read-only callers: a
+// symlink whose target is outside home is followed and flagged
+// (OutsideHome) instead of refused. Writers must keep using ReadSettingsFile.
+func ReadSettingsFileFollow(fsys FS, home, path string) (*SettingsFile, error) {
+	return readSettingsFile(fsys, home, path, true)
+}
+
+func readSettingsFile(fsys FS, home, path string, followOutside bool) (*SettingsFile, error) {
 	f := &SettingsFile{Path: path, Target: path}
 	li, err := fsys.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -559,7 +573,11 @@ func ReadSettingsFile(fsys FS, home, path string) (*SettingsFile, error) {
 			return nil, &SettingsRefusal{Path: path, Reason: fmt.Sprintf("cannot resolve symlink: %v", err)}
 		}
 		if !underDir(fsys, target, home) {
-			return nil, &SettingsRefusal{Path: path, Reason: fmt.Sprintf("symlink target %s is outside %s", target, home)}
+			if followOutside {
+				f.OutsideHome = true
+			} else {
+				return nil, &SettingsRefusal{Path: path, Reason: fmt.Sprintf("symlink target %s is outside %s", target, home)}
+			}
 		}
 		f.Target = target
 	}
