@@ -29,13 +29,14 @@ func NewMemoryService() *Service {
 func (s *Service) Store(ctx context.Context, req *memory.StoreRequest) (*memory.StoreResponse, error) {
 	// Simulate storing a record.
 	rec := &record.Record{
-		ID:        "test-id-" + req.Title,
-		Kind:      req.Kind,
-		Title:     req.Title,
-		Content:   req.Content,
-		Repo:      req.Repo,
-		Source:    req.Source,
-		Status:    record.StatusCandidate,
+		ID:         "test-id-" + req.Title,
+		Kind:       req.Kind,
+		Title:      req.Title,
+		Content:    req.Content,
+		Repo:       req.Repo,
+		CommitSHA:  req.CommitSHA,
+		Source:     req.Source,
+		Status:     record.StatusCandidate,
 		Confidence: 0.8,
 	}
 	s.storedRecords = append(s.storedRecords, rec)
@@ -125,7 +126,7 @@ func (s *Service) Deprecate(ctx context.Context, req *memory.DeprecateRequest) (
 }
 
 // FindCandidates implements finding candidate records for testing.
-func (s *Service) FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*memory.Candidate, error) {
+func (s *Service) FindCandidates(ctx context.Context, embedding []float32, namespace, repo string, limit int) ([]*memory.Candidate, error) {
 	return s.candidates, nil
 }
 

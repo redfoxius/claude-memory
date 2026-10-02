@@ -16,6 +16,7 @@ func recordToOutput(r *record.Record) RecordOutput {
 		Title:      r.Title,
 		Content:    r.Content,
 		Repo:       r.Repo,
+		Namespace:  r.Namespace,
 		Files:      r.Files,
 		Tags:       r.Tags,
 		Status:     string(r.Status),

@@ -40,18 +40,24 @@ func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in Se
 
 	out := SearchOutput{Degraded: result.Degraded}
 	for _, r := range result.Records {
-		out.Results = append(out.Results, SearchResultItem{
+		item := SearchResultItem{
 			ID:         r.ID,
 			Kind:       string(r.Kind),
 			Title:      r.Title,
 			Repo:       r.Repo,
+			Namespace:  r.Namespace,
 			Tags:       r.Tags,
 			Status:     string(r.Status),
 			Confidence: r.Confidence,
 			Score:      r.Score,
 			Similarity: r.Similarity,
 			Unverified: r.Unverified,
-		})
+		}
+		if r.Stale != nil {
+			item.StaleHint = true
+			item.StaleCommits = r.Stale.Commits
+		}
+		out.Results = append(out.Results, item)
 	}
 
 	s.logCall("memory_search", start, nil, map[string]interface{}{
@@ -88,6 +94,7 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 		Kind:       kind,
 		Title:      in.Title,
 		Content:    in.Content,
+		Namespace:  in.Namespace,
 		Repo:       repo,
 		Files:      in.Files,
 		Tags:       in.Tags,
@@ -121,7 +128,7 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 		return nil, StoreOutput{}, toToolError("memory_store", err)
 	}
 
-	out := StoreOutput{}
+	out := StoreOutput{Namespace: resp.Namespace}
 	for _, c := range resp.CandidatesConsidered {
 		out.CandidatesConsidered = append(out.CandidatesConsidered, StoreCandidate{
 			ID:         c.ID,
@@ -165,6 +172,7 @@ func (s *Server) handleUpdate(ctx context.Context, _ *mcp.CallToolRequest, in Up
 		Files:      in.Files,
 		Ticket:     in.Ticket,
 		Confidence: in.Confidence,
+		CommitSHA:  in.CommitSHA,
 	}
 	if in.Status != nil {
 		st := record.Status(*in.Status)
@@ -209,7 +217,12 @@ func (s *Server) handleGet(ctx context.Context, _ *mcp.CallToolRequest, in GetIn
 	if err != nil {
 		return nil, RecordOutput{}, toToolError("memory_get", err)
 	}
-	return nil, recordToOutput(rec), nil
+	out := recordToOutput(rec)
+	if h := s.svc.StaleHint(ctx, rec); h != nil {
+		out.StaleHint = true
+		out.StaleCommits = h.Commits
+	}
+	return nil, out, nil
 }
 
 // handleList implements memory_list (AC-11).

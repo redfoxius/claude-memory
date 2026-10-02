@@ -51,13 +51,20 @@ func (s *Store) searchHybridRRF(
 	var args []interface{}
 	argCount := 1
 
-	// Base repo scope (same repo or "*")
-	args = append(args, embeddingVec, repo, query)
-	baseArgCount := argCount + 3
+	// Base repo scope (same repo or "*"). $3/$4 are the OR-semantics
+	// tsquery strings (all terms / identifier-like terms), NULL when empty.
+	prompt, idToks := ftsInputs(query)
+	args = append(args, embeddingVec, repo, prompt, idToks, sortedStopwords())
+	baseArgCount := argCount + 5
 
 	if !opts.IncludeDeprecated {
 		whereClause = " AND r.status IN ('candidate', 'active')"
 	}
+
+	// Namespace isolation: only the caller's namespace(s) are ever visible.
+	whereClause += fmt.Sprintf(" AND r.namespace = ANY($%d)", baseArgCount)
+	args = append(args, opts.Namespaces)
+	baseArgCount++
 
 	if opts.Kind != nil {
 		whereClause += fmt.Sprintf(" AND r.kind = $%d", baseArgCount)
@@ -81,20 +88,34 @@ func (s *Store) searchHybridRRF(
 			WHERE (repo = $2 OR repo = '*')
 				%s
 		),
-		fts_ranks AS (
+		%s,
+		fts_scored AS (
 			SELECT
-				id,
-				ROW_NUMBER() OVER (ORDER BY ts_rank(tsvector_content, plainto_tsquery('simple', $3)) DESC, %s, id) as fts_rank
-			FROM records r
-			WHERE (repo = $2 OR repo = '*')
-				AND tsvector_content @@ plainto_tsquery('simple', $3)
+				r.id,
+				ts_rank(r.tsvector_content, fts_q.q_all) AS rk,
+				ts_rank('{1,1,1,1}', r.tsvector_content, fts_q.q_all) AS rk_flat,
+				COALESCE(r.tsvector_content @@ fts_q.q_id, false) AS id_hit,
+				%s AS st
+			FROM records r, fts_q
+			WHERE (r.repo = $2 OR r.repo = '*')
+				AND r.tsvector_content @@ fts_q.q_all
 				%s
+		),
+		fts_ranks AS (
+			-- OR-noise guard: identifier matches always count; others only when
+			-- close to the best match (flat weights; see ftsRelativeFloor).
+			SELECT id, ROW_NUMBER() OVER (ORDER BY rk DESC, st, id) AS fts_rank
+			FROM fts_scored
+			WHERE id_hit OR rk_flat >= %g * (SELECT MAX(rk_flat) FROM fts_scored)
 		)
 		SELECT
 			r.id,
 			r.kind,
 			r.title,
 			r.repo,
+			r.namespace,
+			r.files,
+			r.commit_sha,
 			r.tags,
 			r.status,
 			r.confidence,
@@ -109,7 +130,7 @@ func (s *Store) searchHybridRRF(
 			AND (v.id IS NOT NULL OR f.id IS NOT NULL)
 		ORDER BY rrf_score DESC, %s, similarity DESC, r.id
 		LIMIT $%d
-	`, statusTieBreak, whereClause, statusTieBreak, whereClause, rffK, rffK, whereClause, statusTieBreak, baseArgCount)
+	`, statusTieBreak, whereClause, ftsQueryCTE(3, 4, 5), statusTieBreak, whereClause, ftsRelativeFloor, rffK, rffK, whereClause, statusTieBreak, baseArgCount)
 
 	args = append(args, limit)
 
@@ -125,13 +146,16 @@ func (s *Store) searchHybridRRF(
 		var kind string
 		var title string
 		var repo string
+		var namespace string
+		var files []string
+		var commitSHA *string
 		var tags []string
 		var status string
 		var confidence float64
 		var score float64
 		var similarity float64
 
-		if err := rows.Scan(&id, &kind, &title, &repo, &tags, &status, &confidence, &score, &similarity); err != nil {
+		if err := rows.Scan(&id, &kind, &title, &repo, &namespace, &files, &commitSHA, &tags, &status, &confidence, &score, &similarity); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 
@@ -140,6 +164,9 @@ func (s *Store) searchHybridRRF(
 			Kind:       record.Kind(kind),
 			Title:      title,
 			Repo:       repo,
+			Namespace:  namespace,
+			Files:      files,
+			CommitSHA:  derefString(commitSHA),
 			Tags:       tags,
 			Status:     record.Status(status),
 			Confidence: confidence,
@@ -170,13 +197,19 @@ func (s *Store) searchFullTextOnly(
 	var whereClause string
 	argCount := 1
 
-	args = append(args, query, repo)
-	baseArgCount := argCount + 2
+	prompt, idToks := ftsInputs(query)
+	args = append(args, prompt, repo, idToks, sortedStopwords())
+	baseArgCount := argCount + 4
 
 	// Base repo scope
 	if !opts.IncludeDeprecated {
 		whereClause = " AND status IN ('candidate', 'active')"
 	}
+
+	// Namespace isolation: only the caller's namespace(s) are ever visible.
+	whereClause += fmt.Sprintf(" AND namespace = ANY($%d)", baseArgCount)
+	args = append(args, opts.Namespaces)
+	baseArgCount++
 
 	if opts.Kind != nil {
 		whereClause += fmt.Sprintf(" AND kind = $%d", baseArgCount)
@@ -191,22 +224,25 @@ func (s *Store) searchFullTextOnly(
 	}
 
 	sqlQuery := fmt.Sprintf(`
-		SELECT
-			id,
-			kind,
-			title,
-			repo,
-			tags,
-			status,
-			confidence,
-			ts_rank(tsvector_content, plainto_tsquery('simple', $1)) as score
-		FROM records r
-		WHERE (repo = $2 OR repo = '*')
-			AND tsvector_content @@ plainto_tsquery('simple', $1)
-			%s
-		ORDER BY score DESC, %s, id
+		WITH %s,
+		scored AS (
+			SELECT
+				r.id, r.kind, r.title, r.repo, r.namespace, r.files, r.commit_sha, r.tags, r.status, r.confidence,
+				ts_rank(r.tsvector_content, fts_q.q_all) AS score,
+				ts_rank('{1,1,1,1}', r.tsvector_content, fts_q.q_all) AS rk_flat,
+				COALESCE(r.tsvector_content @@ fts_q.q_id, false) AS id_hit,
+				%s AS st
+			FROM records r, fts_q
+			WHERE (r.repo = $2 OR r.repo = '*')
+				AND r.tsvector_content @@ fts_q.q_all
+				%s
+		)
+		SELECT id, kind, title, repo, namespace, files, commit_sha, tags, status, confidence, score
+		FROM scored
+		WHERE id_hit OR rk_flat >= %g * (SELECT MAX(rk_flat) FROM scored)
+		ORDER BY score DESC, st, id
 		LIMIT $%d
-	`, whereClause, statusTieBreak, baseArgCount)
+	`, ftsQueryCTE(1, 3, 4), statusTieBreak, whereClause, ftsRelativeFloor, baseArgCount)
 
 	args = append(args, limit)
 
@@ -222,12 +258,15 @@ func (s *Store) searchFullTextOnly(
 		var kind string
 		var title string
 		var repo string
+		var namespace string
+		var files []string
+		var commitSHA *string
 		var tags []string
 		var status string
 		var confidence float64
 		var score float64
 
-		if err := rows.Scan(&id, &kind, &title, &repo, &tags, &status, &confidence, &score); err != nil {
+		if err := rows.Scan(&id, &kind, &title, &repo, &namespace, &files, &commitSHA, &tags, &status, &confidence, &score); err != nil {
 			return nil, fmt.Errorf("scan full-text result: %w", err)
 		}
 
@@ -236,6 +275,9 @@ func (s *Store) searchFullTextOnly(
 			Kind:       record.Kind(kind),
 			Title:      title,
 			Repo:       repo,
+			Namespace:  namespace,
+			Files:      files,
+			CommitSHA:  derefString(commitSHA),
 			Tags:       tags,
 			Status:     record.Status(status),
 			Confidence: confidence,
@@ -253,4 +295,11 @@ func (s *Store) searchFullTextOnly(
 		Records:  results,
 		Degraded: true,
 	}, nil
+}
+
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }

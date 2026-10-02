@@ -18,6 +18,7 @@ type fakeService struct {
 	deprecateFn func(ctx context.Context, req *memory.DeprecateRequest) (*record.Record, error)
 	listFn      func(ctx context.Context, filters memory.ListFilters) ([]*record.Record, error)
 	feedbackFn  func(ctx context.Context, req *memory.FeedbackRequest) (*memory.FeedbackResponse, error)
+	staleHint   func(rec *record.Record) *memory.StaleHint
 }
 
 func (f *fakeService) Search(ctx context.Context, req *memory.SearchRequest) (*memory.SearchResult, error) {
@@ -30,6 +31,13 @@ func (f *fakeService) Store(ctx context.Context, req *memory.StoreRequest) (*mem
 
 func (f *fakeService) GetRecord(ctx context.Context, id string) (*record.Record, error) {
 	return f.getFn(ctx, id)
+}
+
+func (f *fakeService) StaleHint(ctx context.Context, rec *record.Record) *memory.StaleHint {
+	if f.staleHint != nil {
+		return f.staleHint(rec)
+	}
+	return nil
 }
 
 func (f *fakeService) UpdateRecord(ctx context.Context, req *memory.UpdateRequest) (*record.Record, error) {

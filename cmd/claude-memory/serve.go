@@ -19,7 +19,11 @@ import (
 // memory.Service built in main.go, not by this transport layer.
 func serveCmd(ctx context.Context, _ *config.Config, svc *memory.Service) error {
 	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
-	logger.Info().Msg("claude-memory MCP server starting (stdio)")
+	checkout := "none"
+	if co, ok := svc.Checkout(); ok {
+		checkout = co.Dir
+	}
+	logger.Info().Str("namespace", svc.Namespace()).Str("checkout", checkout).Msg("claude-memory MCP server starting (stdio)")
 
 	srv := mcpserver.New(svc, logger)
 

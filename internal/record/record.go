@@ -8,6 +8,10 @@ import (
 // Kind represents the category of a memory record.
 type Kind string
 
+// GlobalNamespace is the shared namespace searched alongside the current one.
+// Nothing is written to it automatically.
+const GlobalNamespace = "global"
+
 const (
 	KindPattern   Kind = "pattern"
 	KindDecision  Kind = "decision"
@@ -75,6 +79,11 @@ type Record struct {
 
 	// Content is the full record text in markdown.
 	Content string
+
+	// Namespace isolates records between projects/companies (e.g. "acme",
+	// "pet-game"). All reads and writes are scoped to it; "global" holds
+	// explicitly-shared, stack-generic facts visible from every namespace.
+	Namespace string
 
 	// Repo is the repository scope: a specific repo name (e.g., "billing-service")
 	// or "*" for cross-repo availability.

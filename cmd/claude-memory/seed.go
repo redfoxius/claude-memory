@@ -63,7 +63,7 @@ func cmdSeed(cfg *config.Config) error {
 	}
 
 	ctx := context.Background()
-	svc, cleanup, err := buildService(ctx, cfg)
+	svc, cleanup, err := buildService(ctx, cfg, true)
 	if err != nil {
 		return fmt.Errorf("build service: %w", err)
 	}

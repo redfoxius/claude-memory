@@ -1,0 +1,23 @@
+{
+  "numStartups": 3,
+  "mcpServers": {
+    "other-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "some-mcp"],
+      "env": {}
+    },
+    "claude-memory": {
+      "type": "stdio",
+      "command": "/Users/owner/.local/bin/claude-memory",
+      "args": ["serve"],
+      "env": {}
+    }
+  },
+  "projects": {
+    "/Users/owner/work": {
+      "allowedTools": [],
+      "mcpServers": {}
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # Claude Memory — MVP (Shared Semantic Memory for Claude Code)
 
-**Status:** not started
+**Status:** implemented (see 04-implementation-report.md and 07-verification.md)
 
 ## Spec
 - `docs/specs/memory-mvp/01-spec.md` (SPEC-2026-10-01-memory-mvp, v0.5,

@@ -1,0 +1,30 @@
+gui/501/io.github.claude-memory.cleanup = {
+	active count = 0
+	path = /Users/owner/Library/LaunchAgents/io.github.claude-memory.cleanup.plist
+	type = LaunchAgent
+	state = not running
+
+	program = /Users/owner/.local/bin/claude-memory
+	arguments = {
+		/Users/owner/.local/bin/claude-memory
+		cleanup
+	}
+
+	stdout path = /Users/owner/.local/state/claude-memory/cleanup.log
+	stderr path = /Users/owner/.local/state/claude-memory/cleanup.log
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	domain = gui/501 [100005]
+	runs = 3
+	last exit code = 0
+
+	event triggers = {
+		io.github.claude-memory.cleanup.268435466 => {
+			keepalive = 0
+			service = io.github.claude-memory.cleanup
+			stream = com.apple.launchd.calendarinterval.501
+		}
+	}
+}

@@ -2,11 +2,27 @@
 
 | Feature | Spec ID | Status |
 |---|---|---|
-| [memory-mvp](memory-mvp/01-spec.md) | SPEC-2026-10-01-memory-mvp | clarifying |
+| [memory-mvp](memory-mvp/01-spec.md) | SPEC-2026-10-01-memory-mvp | implemented and verified (`memory-mvp/07-verification.md`); operational ACs (AC-30/48/49/50/51/53) still need runs on the real setup |
+| [namespaces](namespaces/01-spec.md) | namespaces | implemented; integration suite passes on a local Postgres+pgvector; review follow-ups open (see item 1) |
+| [staleness-metrics](staleness-metrics/01-spec.md) | SPEC-2026-10-01-staleness-metrics | PR A (staleness) implemented and reviewed; PR B (events + stats) **not started**; manual latency/Azure checks open |
+| [install-doctor](install-doctor/01-spec.md) | SPEC-2026-10-01-install-doctor | v0.2; slice 1 (`doctor` + plumbing) implemented; its Fable review is FAIL (1 high, 5 medium — see item 8), fixes pending; slice 2 (`install`/`uninstall`) not started; slice 3 (Docker) deferred |
 
 ## Backlog (next, in order)
 
-### 1. namespaces — start right after memory-mvp ships
+### 1. namespaces — IMPLEMENTED (2026-10-01); follow-ups open
+
+**Done:** namespace on every record, scoped search/dedup/list/lock/by-id,
+`global` fallback and explicit writes, `namespaces.yaml` resolver wired into
+serve/hook/extract/ingest-pr, `namespaces init|add|which`, install docs,
+migration 0002, reviews `namespaces/03` and `04`. The integration isolation
+tests pass on a local Postgres+pgvector (`make test-integration`).
+**Open (from `namespaces/04-implementation-review.md`):** tests for migration
+backfill/idempotency and cross-namespace lock; ingest-pr routing test (two
+repos → two writers) and per-subcommand namespace tests; warn when
+`extract --run` has no `cwd`; `eval-retrieval` ignores `MEMORY_NAMESPACE`;
+glob validation in `namespaces init|add`; `SupersededBy` not checked for
+namespace accessibility; per-namespace `pr_ingest` config (item 4).
+
 
 Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
 
@@ -32,35 +48,18 @@ Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
 - Rough size: ~1 day incl. tests; full SDD flow (next spec version → plan → plan
   review ×2 → implementation).
 
-### 2. portable install: any host, any user — right after namespaces
+### 2. staleness check + usage metrics — PART A DONE, PART B NOT STARTED
 
-Today the install is tied to the owner's setup (checked 2026-10-01): client
-is macOS-only (Homebrew Ollama, launchd), Windows doesn't build
-(`cmd/claude-memory/extract.go` uses `syscall.SysProcAttr.Setsid`), the
-server path assumes Tailscale (`pg_hba` allows only `100.64.0.0/10`), there is
-no all-local variant (compose uses `network_mode: host`, which Docker Desktop
-on macOS doesn't handle well), seed/snippet/skills are Acme-specific, and
-installation is 9 manual steps. Goal: someone else can install it on their
-own machine(s) in minutes.
-- **Topologies documented and supported:** (a) all-local — Postgres on the
-  laptop, port published on `127.0.0.1`, no Tailscale (separate compose
-  file / profile, `pg_hba` for the Docker bridge + localhost); (b) remote
-  server over Tailscale (current); (c) remote server over another VPN/LAN —
-  configurable allowed subnet in `pg_hba` instead of hardcoded CGNAT.
-- **Linux client:** Ollama as a systemd service, systemd user timers instead
-  of launchd for ingest-pr/cleanup.
-- **Idempotent `install.sh`:** checks prerequisites (go or prebuilt binary,
-  ollama, claude CLI), installs the binary, creates the env file with a hidden
-  password prompt, registers the MCP server, merges hooks into
-  `~/.claude/settings.json` with a backup, copies skills, optional
-  scheduling; every step confirmable; `--uninstall`.
-- **Neutral defaults for other users:** `seed/facts.example.yaml` without
-  Acme facts; CLAUDE.md snippet and skills worded for any `CLAUDE.md`.
-- **Windows:** either a Windows-specific detached-process path for
-  `extract`, or WSL as the documented supported route.
-- Rough size: S–M.
+**Done (PR A):** staleness hint on cards/search/get (tree-compare detector,
+cached, deadline-bounded), commit-baseline stamping, PR merge-commit
+baseline, extraction repo from checkout, docs; spec v0.2, plan, reviews
+`staleness-metrics/03`, `04`. **Not done:** PR B — `events` table
+(migration 0003), hook spool file, service events, `stats`, cleanup pruning
+(plan WI-7..12); optional WI-15 (PR changed paths). **Manual/open:** hook
+latency baseline and re-measure (WI-0/WI-14); `merge-base --is-ancestor`
+check of the Azure DevOps merge commit on a real squash PR (AC-11); known gap:
+write-path UPDATE with no `files` never re-baselines.
 
-### 3. staleness check + usage metrics — after portable install
 
 - **Staleness check on retrieval.** Records already carry `files[]` and
   `commit_sha`. When a record is returned (hook card, `memory_search`,
@@ -78,7 +77,7 @@ own machine(s) in minutes.
   stale-flag rate. No content in events — ids and enums only.
 - Rough size: S each.
 
-### 4. management CLI (`review`) + import of existing knowledge — after 3
+### 3. management CLI (`review`) + import of existing knowledge — NOT STARTED
 
 - **CLI:** `claude-memory ls|show|rm|edit|promote` and an interactive
   `claude-memory review` that walks `candidate` records (newest first, with
@@ -93,7 +92,7 @@ own machine(s) in minutes.
   `CLAUDE.md`/`MEMORY.md` index files.
 - Rough size: S–M.
 
-### 5. PR ingest: GitHub + GitLab providers, per-namespace config — after namespaces
+### 4. PR ingest: GitHub + GitLab providers, per-namespace config — NOT STARTED
 
 MVP already has the provider-neutral `PRSource` port, auto-detection from the
 repo's git `origin`, and per-provider cursors (spec AC-58); only Azure DevOps
@@ -109,7 +108,9 @@ is implemented. This item adds:
 - Repos to ingest = git repos under the namespace's `paths`.
 - Rough size: S per provider + S for config.
 
-### 6. full-text search for natural-language queries — small, can go first
+### 5. full-text search for natural-language queries — implemented; review fixes applied; eval pending
+
+Implemented: the tsquery is built inside SQL from Postgres' own parser (`to_tsvector('simple', prompt)` lexemes; identifier-like tokens through `phraseto_tsquery`), so identifiers the index keeps whole (`db.withtx`, `pg_hba.conf`, `100.64.0.0` + `/10`) match and survive long prompts. OR-noise guard: identifier matches always count; others must reach 25% of the best flat-weight ts_rank (an absolute floor cannot work: ts_rank scales with the number of OR terms). Eval category `long_prompt_identifier` (4 cases) + integration tests; review: `fts-and-service-tests-review.md`. **Not verified:** "no paraphrase regression" needs `claude-memory eval-retrieval` against real Ollama.
 
 Measured 2026-10-01 (eval harness): `plainto_tsquery` ANDs every word of
 the query, so any natural-language prompt (hook, `memory_search`) gets **no**
@@ -125,7 +126,9 @@ matches help only for short, identifier-style queries.
   sentence; require identifier recall@3 = 100% and no paraphrase regression.
 - Rough size: S.
 
-### 7. integration tests for UPDATE / SUPERSEDE through the service — small
+### 6. integration tests for UPDATE / SUPERSEDE through the service — DONE (2026-10-01)
+
+Implemented in `internal/postgres/service_integration_test.go` (NOOP promotion, ExtractionDecision UPDATE, SUPERSEDE + rollback, UpdateRecord reindex, judgment band); runnable locally via `MEMORY_TEST_PG_ADMIN_DSN` / `make test-integration`.
 
 `writepath.go` sent `updated_at` in UPDATE / SUPERSEDE / NOOP update maps and
 every such write failed on real Postgres; it was caught only by the eval's
@@ -140,7 +143,7 @@ call the adapter directly).
   content).
 - Rough size: S.
 
-### 8. hook latency: skip migrations on the hot path — tiny
+### 7. hook latency: skip migrations on the hot path — DONE in code (re-measure p95 on the real setup)
 
 Measured 2026-10-01 on the real setup (laptop → tailnet Postgres): hook
 round-trip 215–343 ms, at/over the AC-30 p95 budget of 300 ms. Every
@@ -148,3 +151,62 @@ round-trip 215–343 ms, at/over the AC-30 p95 budget of 300 ms. Every
 Run migrations only from `serve` / `seed` / `cleanup` / `ingest-pr` (or an
 explicit `migrate` subcommand) and open the hook's pool without them; then
 re-measure p95 over ~50 prompts.
+
+### 8. `claude-memory install` + `doctor` — interactive, re-runnable setup
+
+**Status (2026-10-02):** specified in `install-doctor/` (spec v0.2, plan,
+architecture review `03`, slice-1 implementation review `04`). **Slice 1 implemented**: `claude-memory doctor` (23
+read-only checks, `--json`, `--strict`, `--timeout`/`--deadline`, exit codes
+0–3), `version`, `migrate`, early dispatch, `config.ParseEnvFile`, the
+`integration`/`deploy` embed packages, the `internal/setup` ports, redactor,
+settings.json merge, CLAUDE.md block, `.claude.json` reader, manifest reader
+and launchd detection, and the DEPLOY.md env-file fix. **Slice 2**
+(`install`, `--upgrade`, `uninstall`) is next; slice 3 (Docker topology) and
+the §12.1 follow-ups (latency probe, cron, purge, …) are deferred. **Slice-1 review (`04-slice-1-review.md`): gate FAIL — 1 high, 5 medium, 9
+low.** Open before slice 1 is marked done: (1) `claude-memory migrate` can
+print a password fragment for a DSN whose password contains `/` — route it
+through `postgres.Prober{}.Migrate`; (2) record the manual `doctor` run on the
+owner's live Mac (WI-S1-12) and tick spec §14 S1. Also recommended: ignore
+CLAUDE.md markers inside fenced code blocks; let doctor read a `settings.json`
+symlinked outside HOME; make a shell-env `MEMORY_PG_DSN` override a `fail`
+when the env file's own line is unusable; tighten hook identity to the first
+argv word; CRLF-preserving settings writer. **Not verifiable here:** anything
+launchd/macOS. The text below is the original request, kept for the record.
+
+Added 2026-10-01 at the owner's request. Today installation is ~10 manual steps
+across `integration/INSTALL.md` and `DEPLOY.md` (only `namespaces init` is a
+command). Goal: one guided, safe, repeatable setup plus a health check.
+
+- **`claude-memory install`** — interactive wizard (prompts with sensible
+  defaults; `--yes`/flags and `--dry-run` for non-interactive use).
+  - Detects the OS/arch (macOS, Linux; say clearly what is unsupported) and
+    picks the matching service manager (launchd vs systemd user timers vs
+    cron) and package hints (brew/apt).
+  - Asks the **topology**: (a) everything local on this machine (local Postgres
+    + pgvector + Ollama), (b) Postgres on a remote server (e.g. over Tailscale)
+    with Ollama local, (c) Postgres in Docker (local or on a server — generate
+    the compose file/run it on request); embeddings via local Ollama or a
+    remote Ollama URL.
+  - Steps, each shown before it runs and individually skippable: env file
+    (0600, DSN + Ollama), database reachable + extensions + migrations,
+    Ollama model pull, `namespaces init` (interactive: add projects), MCP
+    registration (`claude mcp add`), hooks merged into `~/.claude/settings.json`
+    (backup + idempotent JSON merge, never clobber), CLAUDE.md snippet between
+    markers, skills copy, scheduled jobs (PR ingest, cleanup), optional seed.
+  - **Re-runnable**: detects what is already done (idempotent steps, marker
+    blocks, hash/diff of installed files), shows a status table, offers
+    repair/upgrade/reconfigure per step, never duplicates or overwrites
+    user edits without asking; `install --upgrade` after a new binary.
+  - `claude-memory uninstall` reverses everything it installed (keeps data
+    unless asked).
+- **`claude-memory doctor`** — read-only health check with actionable output:
+  binary/version, env file perms, Postgres reachable + pgvector + schema
+  version, Ollama up + model present + embed round-trip, MCP registered,
+  hooks present and valid, `git` on PATH, namespace resolution for the cwd,
+  scheduled jobs loaded, spool/cache dirs, optional hook latency probe
+  (p50/p95 over N synthetic prompts). Exit code non-zero on failures;
+  `--json` for scripting; `install` runs it at the end.
+- Open design points for the spec: which platforms to support first, how to
+  drive Docker safely, secrets handling for the DSN prompt, how much of
+  `DEPLOY.md` (server side) the wizard should automate vs. print.
+- Rough size: M–L.

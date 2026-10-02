@@ -27,7 +27,7 @@ func (s *Service) Feedback(ctx context.Context, req *FeedbackRequest) (*Feedback
 	}
 
 	// Fetch the current record.
-	rec, err := s.store.Get(ctx, req.ID)
+	rec, err := s.getAccessible(ctx, req.ID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, ErrNotFound

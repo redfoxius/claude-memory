@@ -53,6 +53,23 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 		return nil, fmt.Errorf("embedding provider unavailable: %w", err)
 	}
 
+	// Resolve the target namespace: the service's own, or "global" when the
+	// caller explicitly asks for it (never automatic).
+	ns := s.namespace
+	if req.Namespace == record.GlobalNamespace {
+		ns = record.GlobalNamespace
+	}
+
+	// Commit baseline (staleness): an explicit commit_sha wins; otherwise
+	// inline/session records get HEAD when their files are clean. Computed
+	// before the transaction so no git process runs under the advisory lock.
+	commitSHA := req.CommitSHA
+	if commitSHA == nil && (req.Source == record.SourceInline || req.Source == record.SourceSession) {
+		if sha := s.baselineSHA(ctx, req.Repo, req.Files); sha != "" {
+			commitSHA = &sha
+		}
+	}
+
 	// Compute the advisory lock key: repo + hash(normalized title) (AC-16).
 	lockKey := computeLockKey(req.Repo, scrubbedTitle)
 
@@ -65,13 +82,13 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 
 	err = s.store.WithTx(ctx, func(tx TxStore) error {
 		// Acquire advisory lock before fetching candidates (AC-16).
-		if err := tx.AcquireLock(ctx, req.Repo, lockKey); err != nil {
+		if err := tx.AcquireLock(ctx, ns, req.Repo, lockKey); err != nil {
 			return fmt.Errorf("acquire lock: %w", err)
 		}
 
 		// Fetch top-5 candidates (AC-13).
 		var fetchErr error
-		candidates, fetchErr = tx.FindCandidates(ctx, embedding, req.Repo, 5)
+		candidates, fetchErr = tx.FindCandidates(ctx, embedding, ns, req.Repo, 5)
 		if fetchErr != nil {
 			return fmt.Errorf("find candidates: %w", fetchErr)
 		}
@@ -108,12 +125,14 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 				defaultConfidenceForSource(req.Source, req.Confidence),
 			)
 
+			newRec.Namespace = ns
+
 			// Set optional fields.
 			if len(req.Files) > 0 {
 				newRec.Files = req.Files
 			}
-			if req.CommitSHA != nil {
-				newRec.CommitSHA = req.CommitSHA
+			if commitSHA != nil {
+				newRec.CommitSHA = commitSHA
 			}
 			if req.Ticket != nil {
 				newRec.Ticket = req.Ticket
@@ -164,6 +183,13 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			}
 			if len(req.Files) > 0 {
 				updates["files"] = req.Files
+				// New files re-baseline the record; without them the
+				// baseline is unchanged.
+				if commitSHA != nil {
+					updates["commit_sha"] = *commitSHA
+				}
+			} else if req.CommitSHA != nil {
+				updates["commit_sha"] = *req.CommitSHA
 			}
 
 			// Update without changing status; the old record stays as-is.
@@ -185,7 +211,8 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 			deprecateUpdates := map[string]interface{}{
 				"status":             record.StatusDeprecated,
 				"deprecation_reason": reason,
-				"superseded_by":      "", // Will be filled with the new record's ID after creation.
+				// superseded_by is set below, once the new record's ID exists
+				// (an empty string is not a valid UUID for that column).
 			}
 
 			_, deprecateErr := tx.Update(ctx, *targetID, deprecateUpdates)
@@ -203,13 +230,14 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 				req.Source,
 				defaultConfidenceForSource(req.Source, req.Confidence),
 			)
+			newRec.Namespace = ns
 
 			// Set optional fields.
 			if len(req.Files) > 0 {
 				newRec.Files = req.Files
 			}
-			if req.CommitSHA != nil {
-				newRec.CommitSHA = req.CommitSHA
+			if commitSHA != nil {
+				newRec.CommitSHA = commitSHA
 			}
 			if req.Ticket != nil {
 				newRec.Ticket = req.Ticket
@@ -292,6 +320,7 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 	// The caller should re-call Store with an ExtractionDecision to proceed (AC-15).
 	if inJudgmentRange {
 		return &StoreResponse{
+			Namespace:            ns,
 			ID:                   "",        // No record created; caller will decide.
 			Decision:             ActionAdd, // Default decision (caller may override).
 			CandidatesConsidered: candidates,
@@ -299,6 +328,7 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 	}
 
 	return &StoreResponse{
+		Namespace:            ns,
 		ID:                   recordID,
 		Decision:             decision,
 		CandidatesConsidered: candidates,
@@ -428,6 +458,10 @@ func (req *StoreRequest) validate(maxContentChars int) error {
 
 	if req.Repo == "" {
 		return fmt.Errorf("repo is required")
+	}
+
+	if req.Namespace != "" && req.Namespace != record.GlobalNamespace {
+		return fmt.Errorf("namespace may only be %q (or empty for the current namespace)", record.GlobalNamespace)
 	}
 
 	if req.Source == "" || !req.Source.IsValid() {

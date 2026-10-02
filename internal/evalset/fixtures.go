@@ -43,7 +43,7 @@ func (sr *SeedRecord) ToRecord(id string) *record.Record {
 type QueryCase struct {
 	ID                string `json:"id"`
 	Query             string `json:"query"`
-	Category          string `json:"category"` // paraphrase, exact_identifier, negative, near_duplicate_store
+	Category          string `json:"category"` // paraphrase, exact_identifier, long_prompt_identifier, negative, near_duplicate_store
 	ExpectedRecordIdx *int   `json:"expectedRecordIdx,omitempty"`
 	// Repo is the repo scope the search runs under (store semantics:
 	// `repo = Repo OR repo = '*'`). Empty means global ('*') records only.

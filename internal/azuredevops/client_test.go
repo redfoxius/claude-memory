@@ -119,3 +119,23 @@ func TestGetFetchesReviewComments(t *testing.T) {
 		t.Errorf("expected exactly one non-deleted text comment, got %v", pr.ReviewComments)
 	}
 }
+
+func TestMergeCommitParsedFromListAndShow(t *testing.T) {
+	list := `[{"pullRequestId":7,"title":"t","description":"d","closedDate":"2026-09-20T10:00:00Z","status":"completed","url":"u","lastMergeCommit":{"commitId":"abcdef1234567"}},
+	         {"pullRequestId":8,"title":"t2","description":"d","closedDate":"2026-09-21T10:00:00Z","status":"completed","url":"u"}]`
+	c := New(&fakeRunner{responses: map[string]fakeResponse{"repos pr": {output: []byte(list)}}})
+	prs, err := c.ListCompleted(context.Background(), prsource.RepoRef{Name: "r", LocalPath: "/x"}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 2 || prs[0].MergeCommit != "abcdef1234567" || prs[1].MergeCommit != "" {
+		t.Errorf("list merge commits: %+v", prs)
+	}
+
+	show := `{"pullRequestId":7,"title":"t","description":"d","closedDate":"2026-09-20T10:00:00Z","url":"u","lastMergeCommit":{"commitId":"abcdef1234567"}}`
+	c = New(&fakeRunner{responses: map[string]fakeResponse{"repos pr": {output: []byte(show)}}})
+	pr, err := c.Get(context.Background(), prsource.RepoRef{Name: "r", LocalPath: "/x"}, "7")
+	if err != nil || pr.MergeCommit != "abcdef1234567" {
+		t.Errorf("show: %+v %v", pr, err)
+	}
+}

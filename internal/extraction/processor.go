@@ -21,6 +21,11 @@ type Config struct {
 
 	// HaikuTimeout is the timeout for haiku subprocess calls.
 	HaikuTimeout time.Duration
+
+	// Repo, when set, is the repo name every extracted draft is stored
+	// under (the resolved git checkout's name). Empty falls back to the
+	// transcript's own inference (basename of the session cwd).
+	Repo string
 }
 
 // Result summarizes the outcome of an extraction run.
@@ -44,6 +49,9 @@ type PRInput struct {
 	Description string
 	Repo        string
 	URL         string
+	// CommitSHA is the PR's provider merge commit, recorded as the
+	// staleness baseline (empty = none).
+	CommitSHA string
 }
 
 // StoreWriter is the interface extraction needs against the memory service:
@@ -106,7 +114,11 @@ func ProcessSession(
 		return result, nil
 	}
 
-	processDrafts(ctx, writer, runner, drafts, tr.Repo, record.SourceSession, result)
+	repo := tr.Repo
+	if cfg.Repo != "" {
+		repo = cfg.Repo // the resolved checkout's name beats basename(cwd)
+	}
+	processDrafts(ctx, writer, runner, drafts, repo, record.SourceSession, "", result)
 
 	return result, nil
 }
@@ -137,7 +149,7 @@ func ProcessPR(
 		return result, nil
 	}
 
-	processDrafts(ctx, writer, runner, drafts, pr.Repo, record.SourcePR, result)
+	processDrafts(ctx, writer, runner, drafts, pr.Repo, record.SourcePR, pr.CommitSHA, result)
 
 	return result, nil
 }
@@ -182,6 +194,7 @@ func processDrafts(
 	drafts []*DraftRecord,
 	repo string,
 	source record.Source,
+	commitSHA string,
 	result *Result,
 ) {
 	for _, draft := range drafts {
@@ -191,6 +204,9 @@ func processDrafts(
 
 		storeReq := ConvertDraftToStoreRequest(draft, repo, action, targetID)
 		storeReq.Source = source
+		if commitSHA != "" {
+			storeReq.CommitSHA = &commitSHA
+		}
 
 		resp, err := writer.Store(ctx, storeReq)
 		if err != nil {

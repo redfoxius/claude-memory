@@ -1,0 +1,244 @@
+package setup
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"claude-memory/internal/namespace"
+)
+
+// Doctor checks binary.version, tools.*, namespaces, jobs, dirs.state,
+// manifest (AC-44, AC-49, AC-58).
+
+// ---- binary.version --------------------------------------------------------------
+
+func (d *doctor) checkBinary(context.Context) (Status, string, string) {
+	self := d.Paths.Self
+	detail := "claude-memory " + orDash(d.Version)
+	if self != "" {
+		detail += " at " + self
+	}
+	// Another claude-memory earlier on PATH. Its version is not asked for:
+	// running it could be running the registered MCP command (AC-67), so
+	// only the paths are compared.
+	if found, err := d.Runner.LookPath(BinaryName); err == nil && self != "" {
+		resolved := found
+		if r, err := d.FS.EvalSymlinks(found); err == nil {
+			resolved = r
+		}
+		if filepath.Clean(resolved) != filepath.Clean(self) {
+			return StatusWarn, detail + "; `" + BinaryName + "` on PATH is another file, " + found + " (possibly another version)",
+				"remove or update " + found + ", or put " + filepath.Dir(self) + " first on PATH"
+		}
+	}
+	if !slices.Contains(filepath.SplitList(d.Env.Get("PATH")), d.Paths.BinDir) {
+		return StatusInfo, detail + "; " + d.Paths.BinDir + " is not on PATH (hooks, MCP and jobs use absolute paths, so only your shell is affected)",
+			"add " + d.Paths.BinDir + " to PATH in your shell profile"
+	}
+	return pass(detail)
+}
+
+// ---- tools.* ----------------------------------------------------------------------
+
+func (d *doctor) lookTool(name string) (string, bool) {
+	p, err := d.Runner.LookPath(name)
+	return p, err == nil && p != ""
+}
+
+func (d *doctor) checkToolGit(context.Context) (Status, string, string) {
+	if p, ok := d.lookTool("git"); ok {
+		return pass(p)
+	}
+	return StatusWarn, "git is not on PATH: staleness checks are off and ingest-pr cannot read repositories",
+		"install git (macOS: xcode-select --install; Linux: your package manager)"
+}
+
+func (d *doctor) checkToolClaude(context.Context) (Status, string, string) {
+	if p, ok := d.lookTool("claude"); ok {
+		return pass(p)
+	}
+	return StatusWarn, "claude is not on PATH: session extraction (SessionEnd hook) and `claude mcp add` do not work",
+		"install the Claude Code CLI and put it on PATH"
+}
+
+func (d *doctor) checkToolAz(context.Context) (Status, string, string) {
+	if !d.prRepos() {
+		return StatusInfo, "not needed: MEMORY_PR_INGEST_REPOS is not set", ""
+	}
+	if p, ok := d.lookTool("az"); ok {
+		return pass(p)
+	}
+	return StatusWarn, "az is not on PATH but MEMORY_PR_INGEST_REPOS is set: ingest-pr cannot fetch Azure DevOps PRs",
+		"install the Azure CLI (az) with the azure-devops extension and run `az login`"
+}
+
+// ---- namespaces -----------------------------------------------------------------
+
+func (d *doctor) checkNamespaces(context.Context) (Status, string, string) {
+	p := d.Paths.NamespacesFile()
+	b, err := d.FS.ReadFile(p)
+	var cfg *namespace.Config
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		cfg = &namespace.Config{}
+	case err != nil:
+		return StatusWarn, "cannot read " + p + ": " + err.Error(), "check the file's permissions"
+	default:
+		cfg, err = namespace.Parse(b, p, d.Paths.Home)
+		if err != nil {
+			return StatusWarn, err.Error() + " (every subcommand falls back to the global namespace)",
+				"fix " + p + " (format: integration/namespaces.example.yaml), or recreate it with `claude-memory namespaces init`"
+		}
+	}
+	resolution := ""
+	if d.Paths.Cwd != "" {
+		ns, why := cfg.Explain(d.Paths.Cwd)
+		resolution = fmt.Sprintf("%s → %s (%s)", d.Paths.Cwd, ns, why)
+	}
+	if ov := d.Env.Get("MEMORY_NAMESPACE"); ov != "" {
+		if !namespace.ValidName(ov) {
+			return StatusWarn, fmt.Sprintf("MEMORY_NAMESPACE=%q is not a valid namespace name", ov),
+				"use lowercase letters, digits, - and _ (or unset it)"
+		}
+		resolution = fmt.Sprintf("MEMORY_NAMESPACE=%s overrides the file", ov)
+	}
+	if errors.Is(err, fs.ErrNotExist) || b == nil {
+		return StatusInfo, joinDetail("no "+p+": every directory uses the global namespace", nonEmpty(resolution)),
+			"map your projects: claude-memory namespaces init NAME='~/path/**'"
+	}
+	return pass(joinDetail(fmt.Sprintf("%d mapping(s), default %s", len(cfg.Namespaces), orDash(cfg.Default)), nonEmpty(resolution)))
+}
+
+func nonEmpty(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return []string{s}
+}
+
+// ---- jobs -------------------------------------------------------------------------
+
+const jobsRemedyLegacy = "re-install the jobs with `claude-memory install` once slice 2 ships; until then see integration/INSTALL.md step 8"
+
+func (d *doctor) checkJobs(ctx context.Context) (Status, string, string) {
+	switch d.Platform.OS {
+	case OSDarwin:
+	case OSLinux:
+		return StatusInfo, "not checked yet: systemd user timers are detected from slice 2 on", ""
+	default:
+		return StatusInfo, "not checked: unsupported OS " + orDash(d.Platform.OS), ""
+	}
+	lj := LaunchdJobs{FS: d.FS, Runner: d.Runner, Paths: d.Paths}
+	var warns, oks []string
+	remedy := ""
+	for _, j := range DefaultJobSpecs(d.Paths) {
+		s, err := lj.Inspect(ctx, j)
+		switch {
+		case err != nil:
+			warns = append(warns, j.Name+": "+d.redact(err.Error()))
+		case s.State == StateAbsent && j.Name == JobIngestPR && !d.prRepos():
+			oks = append(oks, j.Name+" not installed (MEMORY_PR_INGEST_REPOS is not set)")
+		case s.State == StateAbsent:
+			warns = append(warns, j.Name+": not installed ("+s.Detail+")")
+			if remedy == "" {
+				remedy = "load the job per integration/INSTALL.md step 8"
+			}
+		case s.State == StateOK:
+			oks = append(oks, j.Name+": "+s.Detail)
+		default:
+			warns = append(warns, j.Name+": "+s.Detail)
+			if s.Legacy || len(s.MissingPathDirs) > 0 || s.Program != j.Program {
+				remedy = jobsRemedyLegacy
+			} else if remedy == "" {
+				remedy = "launchctl bootstrap gui/" + fmt.Sprint(d.Paths.UID) + " " + s.PlistPath
+			}
+		}
+	}
+	if len(warns) > 0 {
+		return StatusWarn, joinDetail(strings.Join(warns, "; "), oks), remedy
+	}
+	return pass(strings.Join(oks, "; "))
+}
+
+// ---- dirs.state -------------------------------------------------------------------
+
+func (d *doctor) checkStateDir(context.Context) (Status, string, string) {
+	dir := d.Paths.StateDir
+	bootstrapNote := ""
+	if _, err := d.FS.Stat(d.Paths.Bootstrap()); err == nil {
+		bootstrapNote = d.Paths.Bootstrap() + " is present (it holds a password; delete it once the database works)"
+	}
+	info, err := d.FS.Stat(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		parent := filepath.Dir(dir)
+		for parent != filepath.Dir(parent) {
+			if _, err := d.FS.Stat(parent); err == nil {
+				break
+			}
+			parent = filepath.Dir(parent)
+		}
+		if !d.FS.Writable(parent) {
+			return StatusWarn, dir + " does not exist and " + parent + " is not writable: job logs and caches cannot be created",
+				"mkdir -p " + dir
+		}
+		return StatusInfo, dir + " does not exist yet (created on first use)", ""
+	case err != nil:
+		return StatusWarn, "cannot stat " + dir + ": " + err.Error(), "check the directory's permissions"
+	case !info.IsDir():
+		return StatusWarn, dir + " is not a directory", "move it away; claude-memory keeps job logs and caches there"
+	case !d.FS.Writable(dir):
+		return StatusWarn, dir + " is not writable: job logs, PR cursors and the staleness cache cannot be written",
+			"chmod u+w " + dir
+	case bootstrapNote != "":
+		return StatusInfo, dir + " writable; " + bootstrapNote, "rm " + d.Paths.Bootstrap()
+	}
+	return pass(dir + " writable")
+}
+
+// ---- manifest -------------------------------------------------------------------
+
+func (d *doctor) checkManifest(context.Context) (Status, string, string) {
+	l := d.manifest
+	switch {
+	case d.manifestEr != nil:
+		return StatusWarn, "cannot read " + l.Path + ": " + d.manifestEr.Error(), "check the file's permissions"
+	case l.Corrupt:
+		return StatusWarn, "corrupt manifest, treated as absent: " + d.redact(l.Err.Error()),
+			"move " + l.Path + " aside; `claude-memory install` (slice 2) rebuilds it"
+	case !l.Present():
+		return StatusInfo, "no " + l.Path + " (a manual install, or install has not run yet)", ""
+	}
+	m := l.Manifest
+	var warns []string
+	if m.ClaudeConfigDir != "" && filepath.Clean(m.ClaudeConfigDir) != filepath.Clean(d.Paths.ClaudeDir) {
+		warns = append(warns, "recorded for Claude config dir "+m.ClaudeConfigDir+", but the effective one is "+d.Paths.ClaudeDir+" (CLAUDE_CONFIG_DIR differs?)")
+	}
+	var missing []string
+	for _, a := range m.Artifacts {
+		switch a.Kind {
+		case KindMCP, KindEnvKey, KindDir:
+			continue // not a file of its own (mcp, env-key) or checked elsewhere
+		}
+		if a.Path == "" {
+			continue
+		}
+		if _, err := d.FS.Lstat(a.Path); err != nil {
+			missing = append(missing, a.Path)
+		}
+	}
+	slices.Sort(missing)
+	missing = slices.Compact(missing)
+	if len(missing) > 0 {
+		warns = append(warns, "recorded artifacts missing: "+strings.Join(capList(missing, 4), ", "))
+	}
+	if len(warns) > 0 {
+		return StatusWarn, strings.Join(warns, "; "), "re-run `claude-memory install` (slice 2), or restore the missing files"
+	}
+	return pass(fmt.Sprintf("%d artifacts recorded by %s, all present", len(m.Artifacts), orDash(m.BinaryVersion)))
+}

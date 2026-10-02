@@ -376,3 +376,103 @@ func TestMemoryFeedback_NotFound(t *testing.T) {
 		t.Errorf("expected 'not found' in error text, got %q", text)
 	}
 }
+
+// --- staleness and namespace fields (spec: AC-6, AC-12 input, namespaces AC-23) ---
+
+func TestMemorySearch_StaleAndNamespaceFields(t *testing.T) {
+	svc := &fakeService{
+		searchFn: func(context.Context, *memory.SearchRequest) (*memory.SearchResult, error) {
+			return &memory.SearchResult{Records: []*memory.SearchRecord{
+				{ID: "stale-n", Namespace: "pet-game", Stale: &memory.StaleHint{Commits: 3}},
+				{ID: "stale-unknown", Namespace: "global", Stale: &memory.StaleHint{}},
+				{ID: "fresh", Namespace: "pet-game"},
+			}}, nil
+		},
+	}
+	cs := newTestClient(t, svc)
+	raw := callTool[map[string]any](t, cs, "memory_search", map[string]any{"query": "q"})
+	results := raw["results"].([]any)
+	byID := map[string]map[string]any{}
+	for _, r := range results {
+		m := r.(map[string]any)
+		byID[m["id"].(string)] = m
+	}
+
+	if byID["stale-n"]["stale_hint"] != true || byID["stale-n"]["stale_commits"] != float64(3) {
+		t.Errorf("stale-n: %v", byID["stale-n"])
+	}
+	if byID["stale-unknown"]["stale_hint"] != true {
+		t.Errorf("stale-unknown: %v", byID["stale-unknown"])
+	}
+	if _, ok := byID["stale-unknown"]["stale_commits"]; ok {
+		t.Error("stale_commits must be omitted when the count is unknown")
+	}
+	for _, k := range []string{"stale_hint", "stale_commits"} {
+		if _, ok := byID["fresh"][k]; ok {
+			t.Errorf("fresh record has %s", k)
+		}
+	}
+	for id, ns := range map[string]string{"stale-n": "pet-game", "stale-unknown": "global", "fresh": "pet-game"} {
+		if byID[id]["namespace"] != ns {
+			t.Errorf("%s namespace = %v, want %s", id, byID[id]["namespace"], ns)
+		}
+	}
+}
+
+func TestMemoryGet_StaleHintAndNamespace(t *testing.T) {
+	svc := &fakeService{
+		getFn: func(_ context.Context, id string) (*record.Record, error) {
+			r := sampleRecord(id)
+			r.Namespace = "pet-game"
+			return r, nil
+		},
+		staleHint: func(r *record.Record) *memory.StaleHint {
+			if r.ID == "stale" {
+				return &memory.StaleHint{Commits: 1}
+			}
+			return nil
+		},
+	}
+	cs := newTestClient(t, svc)
+
+	stale := callTool[RecordOutput](t, cs, "memory_get", map[string]any{"id": "stale"})
+	if !stale.StaleHint || stale.StaleCommits != 1 || stale.Namespace != "pet-game" {
+		t.Errorf("stale get: %+v", stale)
+	}
+	fresh := callTool[RecordOutput](t, cs, "memory_get", map[string]any{"id": "fresh"})
+	if fresh.StaleHint || fresh.StaleCommits != 0 {
+		t.Errorf("fresh get flagged: %+v", fresh)
+	}
+}
+
+func TestMemoryUpdate_CommitSHAPassesThrough(t *testing.T) {
+	var got *string
+	svc := &fakeService{
+		updateFn: func(_ context.Context, req *memory.UpdateRequest) (*record.Record, error) {
+			got = req.CommitSHA
+			return sampleRecord(req.ID), nil
+		},
+	}
+	cs := newTestClient(t, svc)
+	callTool[RecordOutput](t, cs, "memory_update", map[string]any{"id": "rec-1", "commit_sha": "abcdef1234567"})
+	if got == nil || *got != "abcdef1234567" {
+		t.Errorf("CommitSHA = %v", got)
+	}
+}
+
+func TestMemoryStore_NamespaceInAndOut(t *testing.T) {
+	var gotNS string
+	svc := &fakeService{
+		storeFn: func(_ context.Context, req *memory.StoreRequest) (*memory.StoreResponse, error) {
+			gotNS = req.Namespace
+			return &memory.StoreResponse{ID: "new", Namespace: "global", Decision: memory.ActionAdd}, nil
+		},
+	}
+	cs := newTestClient(t, svc)
+	out := callTool[StoreOutput](t, cs, "memory_store", map[string]any{
+		"kind": "gotcha", "title": "t", "content": "c", "namespace": "global",
+	})
+	if gotNS != "global" || out.Namespace != "global" {
+		t.Errorf("namespace in=%q out=%q", gotNS, out.Namespace)
+	}
+}

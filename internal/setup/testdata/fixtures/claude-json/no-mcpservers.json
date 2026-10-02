@@ -1,0 +1,10 @@
+{
+  "numStartups": 12,
+  "installMethod": "native",
+  "projects": {
+    "/Users/owner/work": {
+      "allowedTools": [],
+      "mcpServers": {}
+    }
+  }
+}

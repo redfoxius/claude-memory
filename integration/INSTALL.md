@@ -6,6 +6,14 @@ into **user-level** config (`~/.local/bin`, `~/.config/claude-memory`,
 is applied automatically — every step below is something you run
 yourself. Follow them in order.
 
+**Check the result at any time with `claude-memory doctor`** (after step
+1): a read-only health check of every step below — env file, Postgres
+(connection, pgvector, schema), Ollama, MCP registration, hooks, skills,
+CLAUDE.md block, namespaces and the launchd jobs. It never changes
+anything, prints a `fix:` line under each failing check, exits 1 when a
+check fails (`--strict`: also on warnings) and has `--json` for scripts.
+A guided `claude-memory install` is planned (`docs/specs/install-doctor/`).
+
 ## 0. Prerequisites
 
 - The server Postgres is already deployed and reachable over Tailscale
@@ -46,6 +54,44 @@ Check it without revealing the password:
 ```bash
 sed -E 's#(claude_memory:)[^@]*@#\1****@#' ~/.config/claude-memory/env
 ```
+
+## 2a. Set up namespaces
+
+Records are partitioned by **namespace** (a company, a side project, ...), so
+facts from one project don't crowd out another's. This is a local,
+single-user database: namespaces are for relevance, not security, and an
+occasional cross-project memory is harmless. This step needs no database,
+DSN or Ollama — only the binary from step 1.
+
+Create the mapping file (`~/.config/claude-memory/namespaces.yaml`, mode
+0600) with one of:
+
+```bash
+# map project areas to namespaces right away (globs: ** = any depth, ~ = home)
+claude-memory namespaces init acme='~/work/acme/**' pet-game='~/src/pet-game/**'
+
+# or start with only the shared default and add projects later
+claude-memory namespaces init
+```
+
+Directories matching no mapping use `default:` — `global` unless you pass
+`--default NAME` (e.g. `init --default acme` to make one project the
+catch-all). Nothing is special-cased in code; any name works
+(lowercase letters, digits, `-`, `_`).
+
+**Upgrading from a pre-namespace install:** the migration backfilled
+existing records to `acme`. Map your Acme directories to it or those
+records stay invisible: `claude-memory namespaces add acme '<path>/**'`.
+
+Check the result:
+
+```bash
+claude-memory namespaces which ~/work/acme/billing-service   # -> acme
+claude-memory namespaces which /tmp                         # -> global (the default)
+```
+
+`integration/namespaces.example.yaml` shows the file format if you prefer to
+edit it by hand.
 
 ## 3. Install and configure Ollama
 
@@ -123,6 +169,9 @@ to the comma-separated local repo paths (or root directories) you want
 
 ## 9. Verify
 
+Start with `claude-memory doctor`: every check should be `pass` or
+`info`. The manual checks below exercise the same paths end to end.
+
 After verifying, see `USAGE.md` for day-to-day operation.
 
 **MCP tool list** (no Claude Code needed — talks to the binary directly):
@@ -184,11 +233,54 @@ rm -rf ~/.claude/skills/remember ~/.claude/skills/memory-digest
 
 # CLAUDE.md: manually remove the pasted section from acme/CLAUDE.md
 
-# binary + config (keep ~/.config/claude-memory/env if you plan to
-# reinstall later; otherwise remove it too)
+# binary + config (keep ~/.config/claude-memory/env and namespaces.yaml if
+# you plan to reinstall later; otherwise remove them too)
 rm ~/.local/bin/claude-memory ~/.local/bin/claude-memory-run-with-env.sh
 ```
 
 Ollama itself (`brew services stop ollama`, `brew uninstall ollama`) is
 left running by design — other tools on the laptop may depend on it;
 stop it manually if you're sure nothing else uses it.
+
+## Using namespaces
+
+Day to day you don't think about them: the namespace is resolved
+automatically from the project directory each time — by the MCP server (the
+directory Claude Code was started in), the prompt hook (the prompt's
+directory), session extraction (the session's directory) and `ingest-pr`
+(each repo's path). Search covers the current namespace **plus `global`**;
+listing, dedup and lookups by id never leave the current namespace.
+
+| I want to... | Do this |
+|---|---|
+| see what a directory maps to | `claude-memory namespaces which [DIR]` |
+| add a project / more paths | `claude-memory namespaces add NAME 'GLOB' ['GLOB'...]` |
+| force a namespace for one repo | set `MEMORY_NAMESPACE` in that repo's `.claude/settings.json` under `env` (beats the file) |
+| share a stack-generic fact everywhere | `memory_store` with `namespace: "global"` (e.g. a Go or Docker gotcha) |
+| start over | `claude-memory namespaces init --force ...` |
+
+The most specific matching path wins (`~/work/acme/infra/**` beats
+`~/work/acme/**`). When no namespace can be chosen — no file, no match,
+an unreadable file — work lands in `global` instead of failing.
+
+## Staleness warnings
+
+A record remembers the commit it was written at (`commit_sha`) and the files
+it is about. When a card, `memory_search` result or `memory_get` result is for
+the repo you are standing in and any of those files differ at the current
+`HEAD`, it is marked: the hook card ends with
+`⚠ code changed since this was recorded (N commits)`, and search/get carry
+`stale_hint` (+ `stale_commits`). Verify the record against the code, then
+`memory_update` it (a content/files change re-baselines it; or pass
+`commit_sha` alone) or `memory_feedback(outdated)`.
+
+- Needs `git` on `PATH`. No `commit_sha`, no files, another repo, or an unknown
+  commit means "unchecked": no marker, no error.
+- Inline and session records get `commit_sha = HEAD` only when their files
+  have no uncommitted changes at write time; otherwise they stay unchecked
+  until a clean `memory_update`. PR records use the PR's merge commit.
+- The check is capped: `MEMORY_STALE_TIMEOUT_HOOK` (default 50ms, hook) and
+  `MEMORY_STALE_TIMEOUT` (default 500ms, MCP server) in
+  `~/.config/claude-memory/env`. The hook also stops at its own latency
+  budget. Per-session verdicts are cached under
+  `~/.local/state/claude-memory/stale-cache/`.

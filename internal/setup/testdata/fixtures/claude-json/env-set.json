@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "claude-memory": {
+      "type": "stdio",
+      "command": "/Users/owner/.local/bin/claude-memory",
+      "args": ["serve"],
+      "env": {
+        "MEMORY_PG_DSN": "postgresql://claude_memory:S3ntinel-pw-x@db:5432/claude_memory"
+      }
+    }
+  }
+}

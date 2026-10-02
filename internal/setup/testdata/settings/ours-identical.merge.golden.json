@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/owner/.claude/hooks/claude-memory/user-prompt-submit.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "timeout": 5,
+            "command": "/Users/owner/.claude/hooks/claude-memory/session-end.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

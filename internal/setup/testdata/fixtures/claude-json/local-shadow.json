@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "claude-memory": {
+      "type": "stdio",
+      "command": "/Users/owner/.local/bin/claude-memory",
+      "args": ["serve"],
+      "env": {}
+    }
+  },
+  "projects": {
+    "/Users/owner/acme": {
+      "mcpServers": {
+        "claude-memory": {
+          "type": "stdio",
+          "command": "/Users/owner/src/claude-memory/bin/claude-memory",
+          "args": ["serve"],
+          "env": {}
+        }
+      }
+    },
+    "/Users/owner/work": {
+      "mcpServers": {}
+    },
+    "/Users/owner/broken": "not an object"
+  }
+}

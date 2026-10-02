@@ -1,0 +1,205 @@
+{
+  "schema": 1,
+  "version": "test",
+  "platform": {
+    "os": "linux",
+    "arch": "amd64",
+    "jobs": "none",
+    "config_dir": "$ROOT/home/.claude",
+    "bin": "$ROOT/home/.local/bin/claude-memory"
+  },
+  "ok": false,
+  "summary": {
+    "pass": 1,
+    "fail": 5,
+    "warn": 3,
+    "info": 6,
+    "skip": 8
+  },
+  "checks": [
+    {
+      "id": "binary.version",
+      "title": "claude-memory binary",
+      "status": "pass",
+      "detail": "claude-memory test at $ROOT/home/.local/bin/claude-memory",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "env.file",
+      "title": "env file exists",
+      "status": "fail",
+      "detail": "no env file $ROOT/home/.config/claude-memory/env and MEMORY_PG_DSN is not set",
+      "remedy": "create $ROOT/home/.config/claude-memory/env (mode 0600) with plain KEY=VALUE lines, no `export`, e.g. MEMORY_PG_DSN=postgresql://claude_memory:***@<host>:5432/claude_memory (see DEPLOY.md \"Laptop Side Configuration\")",
+      "duration_ms": 0
+    },
+    {
+      "id": "env.perms",
+      "title": "env file permissions",
+      "status": "skip",
+      "detail": "because env.file failed",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "env.format",
+      "title": "env file format and DSN",
+      "status": "skip",
+      "detail": "because env.file failed",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "pg.connect",
+      "title": "Postgres connection",
+      "status": "skip",
+      "detail": "because env.format was skipped",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "pg.latency",
+      "title": "Postgres round trip",
+      "status": "skip",
+      "detail": "because pg.connect was skipped",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "pg.vector",
+      "title": "pgvector extension",
+      "status": "skip",
+      "detail": "because pg.connect was skipped",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "pg.schema",
+      "title": "schema migrations",
+      "status": "skip",
+      "detail": "because pg.connect was skipped",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "ollama.reachable",
+      "title": "Ollama reachable",
+      "status": "fail",
+      "detail": "no Ollama at http://127.0.0.1:11434: dial tcp 127.0.0.1:11434: connect: connection refused",
+      "remedy": "start Ollama (macOS: `brew services start ollama`; Linux: `systemctl start ollama` or `ollama serve`), or set MEMORY_OLLAMA_URL",
+      "duration_ms": 0
+    },
+    {
+      "id": "ollama.model",
+      "title": "embedding model pulled",
+      "status": "skip",
+      "detail": "because ollama.reachable failed",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "ollama.embed",
+      "title": "embedding round trip",
+      "status": "skip",
+      "detail": "because ollama.model was skipped",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "tools.git",
+      "title": "git on PATH",
+      "status": "warn",
+      "detail": "git is not on PATH: staleness checks are off and ingest-pr cannot read repositories",
+      "remedy": "install git (macOS: xcode-select --install; Linux: your package manager)",
+      "duration_ms": 0
+    },
+    {
+      "id": "tools.claude",
+      "title": "claude CLI on PATH",
+      "status": "warn",
+      "detail": "claude is not on PATH: session extraction (SessionEnd hook) and `claude mcp add` do not work",
+      "remedy": "install the Claude Code CLI and put it on PATH",
+      "duration_ms": 0
+    },
+    {
+      "id": "tools.az",
+      "title": "az CLI on PATH",
+      "status": "info",
+      "detail": "not needed: MEMORY_PR_INGEST_REPOS is not set",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "mcp.registered",
+      "title": "MCP server registered",
+      "status": "fail",
+      "detail": "$ROOT/home/.claude.json does not exist",
+      "remedy": "claude mcp add --scope user claude-memory -- $ROOT/home/.local/bin/claude-memory serve",
+      "duration_ms": 0
+    },
+    {
+      "id": "hooks.scripts",
+      "title": "hook scripts",
+      "status": "fail",
+      "detail": "user-prompt-submit.sh missing; session-end.sh missing",
+      "remedy": "mkdir -p $ROOT/home/.claude/hooks/claude-memory && cp integration/hooks/*.sh $ROOT/home/.claude/hooks/claude-memory/ && chmod 755 $ROOT/home/.claude/hooks/claude-memory/*.sh (integration/INSTALL.md step 5)",
+      "duration_ms": 0
+    },
+    {
+      "id": "hooks.settings",
+      "title": "hooks in settings.json",
+      "status": "fail",
+      "detail": "$ROOT/home/.claude/settings.json does not exist: no hooks are wired",
+      "remedy": "merge integration/settings.snippet.json into $ROOT/home/.claude/settings.json by hand (integration/INSTALL.md step 5)",
+      "duration_ms": 0
+    },
+    {
+      "id": "skills",
+      "title": "skills",
+      "status": "warn",
+      "detail": "remember: not installed; memory-digest: not installed",
+      "remedy": "copy integration/skills/<name> to $ROOT/home/.claude/skills/ (integration/INSTALL.md step 6), unless you edited them on purpose",
+      "duration_ms": 0
+    },
+    {
+      "id": "claude-md",
+      "title": "CLAUDE.md memory block",
+      "status": "info",
+      "detail": "$ROOT/home/.claude/CLAUDE.md: file does not exist",
+      "remedy": "add integration/claude-md-section.md to $ROOT/home/.claude/CLAUDE.md between the lines <!-- BEGIN claude-memory --> and <!-- END claude-memory --> (or keep your section in a project CLAUDE.md)",
+      "duration_ms": 0
+    },
+    {
+      "id": "namespaces",
+      "title": "namespaces.yaml",
+      "status": "info",
+      "detail": "no $ROOT/home/.config/claude-memory/namespaces.yaml: every directory uses the global namespace; $ROOT/work → global (fallback)",
+      "remedy": "map your projects: claude-memory namespaces init NAME='~/path/**'",
+      "duration_ms": 0
+    },
+    {
+      "id": "jobs",
+      "title": "scheduled jobs",
+      "status": "info",
+      "detail": "not checked yet: systemd user timers are detected from slice 2 on",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "dirs.state",
+      "title": "state directory",
+      "status": "info",
+      "detail": "$ROOT/home/.local/state/claude-memory does not exist yet (created on first use)",
+      "remedy": "",
+      "duration_ms": 0
+    },
+    {
+      "id": "manifest",
+      "title": "install manifest",
+      "status": "info",
+      "detail": "no $ROOT/home/.config/claude-memory/install.json (a manual install, or install has not run yet)",
+      "remedy": "",
+      "duration_ms": 0
+    }
+  ]
+}

@@ -29,6 +29,10 @@ type Service interface {
 	// GetRecord backs memory_get (AC-10).
 	GetRecord(ctx context.Context, id string) (*record.Record, error)
 
+	// StaleHint reports whether rec's files changed since it was recorded
+	// (nil = fresh or unchecked); memory_get shows it.
+	StaleHint(ctx context.Context, rec *record.Record) *memory.StaleHint
+
 	// UpdateRecord backs memory_update (AC-8, AC-10).
 	UpdateRecord(ctx context.Context, req *memory.UpdateRequest) (*record.Record, error)
 

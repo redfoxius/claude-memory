@@ -35,7 +35,7 @@ func (f *fakeHookStore) Get(ctx context.Context, id string) (*record.Record, err
 func (f *fakeHookStore) Update(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 	panic("Update should not be called by the hook (read-only path)")
 }
-func (f *fakeHookStore) FindCandidates(ctx context.Context, embedding []float32, repo string, limit int) ([]*memory.Candidate, error) {
+func (f *fakeHookStore) FindCandidates(ctx context.Context, embedding []float32, namespace, repo string, limit int) ([]*memory.Candidate, error) {
 	panic("FindCandidates should not be called by the hook (read-only path)")
 }
 func (f *fakeHookStore) List(ctx context.Context, filters memory.ListFilters) ([]*record.Record, error) {
@@ -80,6 +80,11 @@ func hookTestCfg() *config.Config {
 // and returns whatever was written to stdout plus hookCmd's own error.
 func runHookCmd(t *testing.T, ctx context.Context, cfg *config.Config, svc *memory.Service, stdinJSON string) (string, error) {
 	t.Helper()
+	return runHookCmdDeps(t, ctx, cfg, svc, stdinJSON, hookDeps{})
+}
+
+func runHookCmdDeps(t *testing.T, ctx context.Context, cfg *config.Config, svc *memory.Service, stdinJSON string, deps hookDeps) (string, error) {
+	t.Helper()
 
 	origStdin, origStdout := os.Stdin, os.Stdout
 
@@ -112,7 +117,7 @@ func runHookCmd(t *testing.T, ctx context.Context, cfg *config.Config, svc *memo
 		outCh <- string(data)
 	}()
 
-	hookErr := hookCmd(ctx, cfg, svc)
+	hookErr := hookCmd(ctx, cfg, svc, deps, time.Now())
 
 	if err := outW.Close(); err != nil {
 		t.Fatalf("failed to close stdout pipe writer: %v", err)
@@ -321,5 +326,159 @@ func TestHookCmd_OutputMatchesClaudeCodeUserPromptSubmitContract(t *testing.T) {
 	}
 	if contract.HookSpecificOutput.AdditionalContext == "" {
 		t.Errorf("expected a non-empty hookSpecificOutput.additionalContext string containing the card(s), got stdout: %s", stdout)
+	}
+}
+
+// --- staleness (AC-5, AC-7, AC-9) ---
+
+func TestRenderAdditionalContext_StaleSuffixGolden(t *testing.T) {
+	const base = "- [memory] T (repo: r, id: i)"
+	cases := []struct {
+		name  string
+		stale *memory.StaleHint
+		want  string
+	}{
+		{"fresh", nil, base},
+		{"one commit", &memory.StaleHint{Commits: 1}, base + " ⚠ code changed since this was recorded (1 commit)"},
+		{"two commits", &memory.StaleHint{Commits: 2}, base + " ⚠ code changed since this was recorded (2 commits)"},
+		{"cap", &memory.StaleHint{Commits: 100}, base + " ⚠ code changed since this was recorded (100+ commits)"},
+		{"unknown count", &memory.StaleHint{}, base + " ⚠ code changed since this was recorded"},
+	}
+	for _, c := range cases {
+		got := renderAdditionalContext([]card{{Title: "T", Repo: "r", ID: "i", Stale: c.stale}})
+		lines := strings.Split(got, "\n")
+		if len(lines) != 2 || lines[0] != additionalContextHeader || lines[1] != c.want {
+			t.Errorf("%s: got %q, want card line %q", c.name, got, c.want)
+		}
+	}
+}
+
+type fakeHookHistory struct {
+	resolveCalls, headCalls, changedCalls, dirtyCalls int
+	co                                                memory.Checkout
+	head                                              string
+	notCheckout                                       bool
+	changed                                           bool
+	commits                                           int
+	sawDeadline                                       time.Time
+}
+
+func (f *fakeHookHistory) Resolve(context.Context, string) (memory.Checkout, string, bool, error) {
+	f.resolveCalls++
+	return f.co, f.head, !f.notCheckout, nil
+}
+func (f *fakeHookHistory) Head(context.Context, string) (string, error) {
+	f.headCalls++
+	return f.head, nil
+}
+func (f *fakeHookHistory) Changed(ctx context.Context, _, _, _ string, _ []string) (bool, int, error) {
+	f.changedCalls++
+	f.sawDeadline, _ = ctx.Deadline()
+	if err := ctx.Err(); err != nil {
+		return false, 0, err
+	}
+	return f.changed, f.commits, nil
+}
+func (f *fakeHookHistory) Dirty(context.Context, string, []string) (bool, error) {
+	f.dirtyCalls++
+	return false, nil
+}
+
+func staleHookSvc(recs []*memory.SearchRecord) *memory.Service {
+	store := &fakeHookStore{searchFn: func(context.Context, string, []float32, string, memory.SearchOptions) (*memory.SearchResult, error) {
+		return &memory.SearchResult{Records: recs}, nil
+	}}
+	return memory.New(store, &fakeHookEmbedder{}, fakeHookScrubber{}, fakeHookClock{}, hookTestCfg())
+}
+
+func staleRec() *memory.SearchRecord {
+	return &memory.SearchRecord{
+		ID: "id1", Title: "Retry policy", Repo: "myrepo", Similarity: 0.9,
+		CommitSHA: "abcdef1234567", Files: []string{"svc/retry.go"},
+	}
+}
+
+func hookCfgWithStale() *config.Config {
+	cfg := hookTestCfg()
+	cfg.StaleTimeoutHook = 50 * time.Millisecond
+	return cfg
+}
+
+func TestHook_StaleCardRendered_OneResolveZeroHead(t *testing.T) {
+	h := &fakeHookHistory{co: memory.Checkout{Dir: "/w/myrepo", Repo: "myrepo"}, head: "H1", changed: true, commits: 2}
+	var gotSID string
+	deps := hookDeps{History: func(sid string) memory.CodeHistory { gotSID = sid; return h }}
+
+	out, err := runHookCmdDeps(t, context.Background(), hookCfgWithStale(), staleHookSvc([]*memory.SearchRecord{staleRec()}),
+		`{"prompt":"retry","cwd":"/w/myrepo/src","session_id":"sess-1"}`, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "⚠ code changed since this was recorded (2 commits)") {
+		t.Errorf("stale suffix missing from output: %s", out)
+	}
+	if gotSID != "sess-1" {
+		t.Errorf("session id passed to factory = %q", gotSID)
+	}
+	if h.resolveCalls != 1 || h.headCalls != 0 || h.dirtyCalls != 0 {
+		t.Errorf("resolve=%d head=%d dirty=%d, want 1/0/0 (HEAD is pinned; Dirty is write-path only)", h.resolveCalls, h.headCalls, h.dirtyCalls)
+	}
+	// the stale deadline must respect the hook's overall budget
+	if h.sawDeadline.IsZero() || time.Until(h.sawDeadline) > 60*time.Millisecond {
+		t.Errorf("stale check deadline = %v", h.sawDeadline)
+	}
+}
+
+func TestHook_NoCardNoChangedCalls(t *testing.T) {
+	h := &fakeHookHistory{co: memory.Checkout{Dir: "/w/myrepo", Repo: "myrepo"}, head: "H1", changed: true}
+	deps := hookDeps{History: func(string) memory.CodeHistory { return h }}
+	rec := staleRec()
+	rec.Similarity = 0.1 // below the hook threshold
+	out, _ := runHookCmdDeps(t, context.Background(), hookCfgWithStale(), staleHookSvc([]*memory.SearchRecord{rec}),
+		`{"prompt":"x","cwd":"/w/myrepo","session_id":"s"}`, deps)
+	_ = out
+	if h.resolveCalls != 1 || h.headCalls != 0 || h.changedCalls != 0 {
+		t.Errorf("resolve=%d head=%d changed=%d, want 1/0/0 (no card -> no git beyond Resolve)", h.resolveCalls, h.headCalls, h.changedCalls)
+	}
+}
+
+func TestHook_NotACheckoutStillShowsCardsUnflagged(t *testing.T) {
+	h := &fakeHookHistory{notCheckout: true, changed: true}
+	deps := hookDeps{History: func(string) memory.CodeHistory { return h }}
+	rec := staleRec()
+	rec.Repo = "src" // basename of cwd
+	out, err := runHookCmdDeps(t, context.Background(), hookCfgWithStale(), staleHookSvc([]*memory.SearchRecord{rec}),
+		`{"prompt":"x","cwd":"/not/a/repo/src","session_id":"s"}`, deps)
+	if err != nil || !strings.Contains(out, "Retry policy") {
+		t.Fatalf("card missing: %v %s", err, out)
+	}
+	if strings.Contains(out, "⚠") || h.changedCalls != 0 {
+		t.Errorf("flagged outside a checkout: %s (changed calls %d)", out, h.changedCalls)
+	}
+}
+
+func TestHook_BudgetAlreadySpentStillRendersCards(t *testing.T) {
+	h := &fakeHookHistory{co: memory.Checkout{Dir: "/w/myrepo", Repo: "myrepo"}, head: "H1", changed: true}
+	deps := hookDeps{History: func(string) memory.CodeHistory { return h }}
+
+	origStdin, origStdout := os.Stdin, os.Stdout
+	defer func() { os.Stdin, os.Stdout = origStdin, origStdout }()
+	inR, inW, _ := os.Pipe()
+	outR, outW, _ := os.Pipe()
+	os.Stdin, os.Stdout = inR, outW
+	inW.WriteString(`{"prompt":"x","cwd":"/w/myrepo","session_id":"s"}`)
+	inW.Close()
+	done := make(chan string, 1)
+	go func() { b, _ := io.ReadAll(outR); done <- string(b) }()
+
+	// hookStart 10s ago => the stale budget is long gone
+	err := hookCmd(context.Background(), hookCfgWithStale(), staleHookSvc([]*memory.SearchRecord{staleRec()}), deps, time.Now().Add(-10*time.Second))
+	outW.Close()
+	out := <-done
+	if err != nil || !strings.Contains(out, "Retry policy") {
+		t.Fatalf("cards must still render: %v %s", err, out)
+	}
+	if strings.Contains(out, "⚠") {
+		t.Errorf("flagged although the budget was spent: %s", out)
 	}
 }

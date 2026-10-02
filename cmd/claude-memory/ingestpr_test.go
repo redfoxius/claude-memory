@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"claude-memory/internal/config"
+	"claude-memory/internal/extraction"
 	"claude-memory/internal/memory/mock"
 	"claude-memory/internal/prcursor"
 	"claude-memory/internal/prsource"
@@ -133,7 +134,7 @@ func TestIngestOneRepoFirstRunUsesLookbackAndPersistsCursor(t *testing.T) {
 	cfg := testConfig()
 
 	repoPath := setupGitRepoWithRemote(t, azureRemote)
-	ingestOneRepo(context.Background(), svc, src, cursorStore, cfg, repoPath, false, emptyHaikuRunner{})
+	ingestOneRepo(context.Background(), svc, src, cursorStore, cfg, repoPath, nil, false, emptyHaikuRunner{})
 
 	if src.listCalls != 1 {
 		t.Errorf("expected ListCompleted called once, got %d", src.listCalls)
@@ -165,7 +166,7 @@ func TestIngestOneRepoListFailureLeavesCursorUnchanged(t *testing.T) {
 	svc := mock.NewMemoryService()
 	cfg := testConfig()
 
-	ingestOneRepo(context.Background(), svc, src, cursorStore, cfg, repoPath, false, emptyHaikuRunner{})
+	ingestOneRepo(context.Background(), svc, src, cursorStore, cfg, repoPath, nil, false, emptyHaikuRunner{})
 
 	cur, ok := cursorStore.Load("azuredevops", repoName)
 	if !ok {
@@ -193,7 +194,7 @@ func TestIngestOneRepoGetFailureAbortsBatchWithoutAdvancingCursor(t *testing.T) 
 	svc := mock.NewMemoryService()
 	cfg := testConfig()
 
-	ingestOneRepo(context.Background(), svc, src, cursorStore, cfg, repoPath, false, emptyHaikuRunner{})
+	ingestOneRepo(context.Background(), svc, src, cursorStore, cfg, repoPath, nil, false, emptyHaikuRunner{})
 
 	cur, ok := cursorStore.Load("azuredevops", repoName)
 	if !ok || !cur.Since.Equal(existing) {
@@ -212,7 +213,7 @@ func TestIngestOneRepoDryRunDoesNotWriteOrCallStore(t *testing.T) {
 	cfg := testConfig()
 
 	// svc is nil: dry-run must never touch it.
-	ingestOneRepo(context.Background(), nil, src, cursorStore, cfg, repoPath, true, emptyHaikuRunner{})
+	ingestOneRepo(context.Background(), nil, src, cursorStore, cfg, repoPath, nil, true, emptyHaikuRunner{})
 
 	if len(src.getCalls) != 0 {
 		t.Errorf("expected no Get calls in dry-run mode, got %d", len(src.getCalls))
@@ -231,7 +232,7 @@ func TestIngestOneRepoUnsupportedProviderIsSkipped(t *testing.T) {
 	svc := mock.NewMemoryService()
 	cfg := testConfig()
 
-	ingestOneRepo(context.Background(), svc, src, cursorStore, cfg, repoPath, false, emptyHaikuRunner{})
+	ingestOneRepo(context.Background(), svc, src, cursorStore, cfg, repoPath, nil, false, emptyHaikuRunner{})
 
 	if src.listCalls != 0 {
 		t.Errorf("expected ListCompleted never called for an unsupported provider, got %d calls", src.listCalls)
@@ -246,5 +247,27 @@ func testConfig() *config.Config {
 		ExtractMinMessages: 20,
 		MaxContentChars:    20000,
 		PRIngestLookback:   30 * 24 * time.Hour,
+	}
+}
+
+// AC-13: each repo is ingested through the writer the composition root's
+// scope function returns for that repo's path.
+func TestIngestOneRepoUsesScopedWriter(t *testing.T) {
+	cursorStore := prcursor.NewStore(t.TempDir())
+	completedAt := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	src := &fakeSource{
+		listResult: []prsource.PR{{ID: "1", Title: "t", CompletedAt: completedAt}},
+		getResults: map[string]*prsource.PR{"1": {ID: "1", Title: "t", Description: "d", CompletedAt: completedAt}},
+	}
+	unscoped := mock.NewMemoryService()
+	scoped := mock.NewMemoryService()
+	var gotPath string
+	scope := func(p string) extraction.StoreWriter { gotPath = p; return scoped }
+
+	repoPath := setupGitRepoWithRemote(t, azureRemote)
+	ingestOneRepo(context.Background(), unscoped, src, cursorStore, testConfig(), repoPath, scope, false, emptyHaikuRunner{})
+
+	if gotPath != repoPath {
+		t.Errorf("scope called with %q, want %q", gotPath, repoPath)
 	}
 }

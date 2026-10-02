@@ -2,7 +2,7 @@
 
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-01-memory-mvp
-- Status: clarifying
+- Status: implemented and verified (07-verification.md); operational ACs outstanding
 - Version: 0.5
 - Owner: Oleksandr Kolomoiets (user@example.com)
 - Supersedes: none

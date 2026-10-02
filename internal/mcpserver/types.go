@@ -22,12 +22,17 @@ type SearchResultItem struct {
 	Kind       string   `json:"kind"`
 	Title      string   `json:"title"`
 	Repo       string   `json:"repo"`
+	Namespace  string   `json:"namespace"`
 	Tags       []string `json:"tags,omitempty"`
 	Status     string   `json:"status"`
 	Confidence float64  `json:"confidence"`
 	Score      float64  `json:"score"`
 	Similarity float64  `json:"similarity"`
 	Unverified bool     `json:"unverified"`
+	// StaleHint is true when the record's files changed since it was
+	// recorded; StaleCommits is the commit count when known.
+	StaleHint    bool `json:"stale_hint,omitempty"`
+	StaleCommits int  `json:"stale_commits,omitempty"`
 }
 
 // SearchOutput is the output of memory_search.
@@ -49,6 +54,7 @@ type StoreInput struct {
 	Title      string              `json:"title" jsonschema:"short title"`
 	Content    string              `json:"content" jsonschema:"markdown content"`
 	Repo       string              `json:"repo,omitempty" jsonschema:"repo name, or '*' for cross-repo; defaults to '*'"`
+	Namespace  string              `json:"namespace,omitempty" jsonschema:"omit to store in the current namespace; 'global' shares a stack-generic fact with every namespace (only when explicitly intended; never put company-specific content there)"`
 	Files      []string            `json:"files,omitempty"`
 	CommitSHA  string              `json:"commit_sha,omitempty"`
 	Ticket     string              `json:"ticket,omitempty"`
@@ -71,6 +77,7 @@ type StoreCandidate struct {
 // path's top candidate falls in the 0.80-0.92 band and is awaiting a
 // Decision on a follow-up call (AC-15).
 type StoreOutput struct {
+	Namespace            string           `json:"namespace,omitempty"`
 	ID                   string           `json:"id,omitempty"`
 	Decision             string           `json:"decision,omitempty"`
 	Status               string           `json:"status"`
@@ -88,6 +95,7 @@ type UpdateInput struct {
 	Ticket     *string  `json:"ticket,omitempty"`
 	Status     *string  `json:"status,omitempty" jsonschema:"candidate, active, or deprecated"`
 	Confidence *float64 `json:"confidence,omitempty"`
+	CommitSHA  *string  `json:"commit_sha,omitempty" jsonschema:"baseline commit for staleness checks; set it after verifying the record against current code"`
 }
 
 // DeprecateInput is the input to memory_deprecate.
@@ -132,11 +140,15 @@ type FeedbackOutput struct {
 // memory_update, memory_deprecate, and memory_list. The embedding vector
 // is intentionally omitted — it is never useful to a calling session.
 type RecordOutput struct {
-	ID                string   `json:"id"`
-	Kind              string   `json:"kind"`
-	Title             string   `json:"title"`
-	Content           string   `json:"content"`
-	Repo              string   `json:"repo"`
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	Repo      string `json:"repo"`
+	Namespace string `json:"namespace"`
+	// StaleHint / StaleCommits: see SearchResultItem (memory_get only).
+	StaleHint         bool     `json:"stale_hint,omitempty"`
+	StaleCommits      int      `json:"stale_commits,omitempty"`
 	Files             []string `json:"files,omitempty"`
 	CommitSHA         string   `json:"commit_sha,omitempty"`
 	Ticket            string   `json:"ticket,omitempty"`

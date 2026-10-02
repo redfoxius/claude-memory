@@ -15,6 +15,8 @@ import (
 
 	"claude-memory/internal/config"
 	"claude-memory/internal/extraction"
+	"claude-memory/internal/memory"
+	"claude-memory/internal/transcript"
 )
 
 // defaultHaikuTimeout bounds a single `claude -p` subprocess call made by
@@ -126,7 +128,7 @@ func launchDetached(executable, logPath string, args ...string) error {
 func runExtract(cfg *config.Config, transcriptPath string) error {
 	ctx := context.Background()
 
-	svc, cleanup, err := buildService(ctx, cfg)
+	svc, cleanup, err := buildService(ctx, cfg, true)
 	if err != nil {
 		// Best-effort background job: log and exit 0, never crash noisily.
 		slog.Error("extract --run: failed to build service", "error", err)
@@ -134,10 +136,21 @@ func runExtract(cfg *config.Config, transcriptPath string) error {
 	}
 	defer cleanup()
 
+	// The session's own working directory decides the namespace, repo and
+	// commit-baseline checkout; if the transcript can't be read here,
+	// ProcessSession reports it below.
+	extractionRepo := ""
+	if tr, perr := transcript.Parse(transcriptPath, transcript.Config{CharBudget: cfg.MaxContentChars}); perr == nil && tr.Cwd != "" {
+		svc, extractionRepo = scopeSessionService(ctx, svc, newCodeHistory(), cfg, tr.Cwd)
+	} else {
+		svc = svc.WithNamespace(resolveNamespace(""))
+	}
+
 	extractionCfg := extraction.Config{
 		MinMessages:  cfg.ExtractMinMessages,
 		CharBudget:   cfg.MaxContentChars,
 		HaikuTimeout: defaultHaikuTimeout,
+		Repo:         extractionRepo,
 	}
 
 	result, err := extraction.ProcessSession(ctx, svc, transcriptPath, extractionCfg, nil)
@@ -161,4 +174,26 @@ func runExtract(cfg *config.Config, transcriptPath string) error {
 func stateDir() string {
 	home := os.Getenv("HOME")
 	return filepath.Join(home, ".local", "state", "claude-memory")
+}
+
+// scopeSessionService scopes svc to a session's working directory: its
+// namespace, and — when cwd is inside a git checkout — the checkout, so the
+// repo is the checkout's top-level name (not basename(cwd), a sub-directory
+// name for sessions started below the top level) and commit baselines can be
+// stamped. HEAD is deliberately not pinned: extraction can run for minutes
+// and a commit landing meanwhile must not be stamped with a pre-commit sha.
+// repo is "" outside a checkout (extraction then falls back to its own
+// inference).
+func scopeSessionService(ctx context.Context, svc *memory.Service, history memory.CodeHistory, cfg *config.Config, cwd string) (*memory.Service, string) {
+	ns := resolveNamespace(cwd)
+	warnIfFallback(cwd, ns)
+	svc = svc.WithNamespace(ns)
+
+	rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	co, _, ok, err := history.Resolve(rctx, cwd)
+	if err != nil || !ok {
+		return svc, ""
+	}
+	return svc.WithCheckout(co).WithCodeHistory(history, cfg.StaleTimeout), co.Repo
 }

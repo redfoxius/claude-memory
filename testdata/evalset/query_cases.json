@@ -119,5 +119,33 @@
     "category": "exact_identifier",
     "expectedRecordIdx": 10,
     "description": "Exact formula and acronym lookup"
+  },
+  {
+    "id": "long_identifier_001",
+    "query": "I'm writing a Go helper that serializes concurrent writes for the same record and I'm wondering which lock call is safe with pooled connections, something like pg_advisory_xact_lock versus the session-level variant, what should I do here",
+    "category": "long_prompt_identifier",
+    "expectedRecordIdx": 3,
+    "description": "Identifier buried in a long natural-language prompt (backlog item 5); AND-style full-text returned nothing for these"
+  },
+  {
+    "id": "long_identifier_002",
+    "query": "our embedding calls seem to silently drop the tail of long documents even though the model supports a much larger context window, could num_batch be the culprit in this setup",
+    "category": "long_prompt_identifier",
+    "expectedRecordIdx": 4,
+    "description": "Identifier buried in a long natural-language prompt (backlog item 5); AND-style full-text returned nothing for these"
+  },
+  {
+    "id": "long_identifier_003",
+    "query": "for the firewall rules on the database host which source range do I need to allow so that every machine on the tailnet can connect, I vaguely remember 100.64.0.0/10 but I am not sure it applies to all of them",
+    "category": "long_prompt_identifier",
+    "expectedRecordIdx": 7,
+    "description": "Identifier buried in a long natural-language prompt (backlog item 5); AND-style full-text returned nothing for these"
+  },
+  {
+    "id": "long_identifier_004",
+    "query": "in the dedup path where we check candidates before inserting, where exactly should the lock acquisition live, inside db.WithTx or can it sit outside the transaction block",
+    "category": "long_prompt_identifier",
+    "expectedRecordIdx": 3,
+    "description": "Identifier buried in a long natural-language prompt (backlog item 5); AND-style full-text returned nothing for these"
   }
 ]

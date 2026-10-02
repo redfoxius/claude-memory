@@ -19,12 +19,12 @@ func TestFeedback_Useful_PromotesCandidateToActive(t *testing.T) {
 	var capturedUpdates map[string]interface{}
 	store := &mockStore{
 		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
-			return &record.Record{ID: id, Status: record.StatusCandidate, UsedCount: 0}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusCandidate, UsedCount: 0}, nil
 		},
 		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 			capturedUpdates = updates
 			status, _ := updates["status"].(record.Status)
-			return &record.Record{ID: id, Status: status}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: status}, nil
 		},
 	}
 	svc := New(store, &mockEmbeddingProvider{}, &mockScrubber{}, &mockClock{}, lifecycleCfg())
@@ -44,11 +44,11 @@ func TestFeedback_Useful_PromotesCandidateToActive(t *testing.T) {
 func TestFeedback_Useful_OnActiveRecord_NoStatusChange(t *testing.T) {
 	store := &mockStore{
 		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
-			return &record.Record{ID: id, Status: record.StatusActive, UsedCount: 5}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusActive, UsedCount: 5}, nil
 		},
 		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 			status, _ := updates["status"].(record.Status)
-			return &record.Record{ID: id, Status: status}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: status}, nil
 		},
 	}
 	svc := New(store, &mockEmbeddingProvider{}, &mockScrubber{}, &mockClock{}, lifecycleCfg())
@@ -68,12 +68,12 @@ func TestFeedback_Outdated_DeprecatesWithReason(t *testing.T) {
 	var capturedUpdates map[string]interface{}
 	store := &mockStore{
 		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
-			return &record.Record{ID: id, Status: record.StatusActive}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusActive}, nil
 		},
 		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 			capturedUpdates = updates
 			status, _ := updates["status"].(record.Status)
-			return &record.Record{ID: id, Status: status}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: status}, nil
 		},
 	}
 	svc := New(store, &mockEmbeddingProvider{}, &mockScrubber{}, &mockClock{}, lifecycleCfg())
@@ -96,12 +96,12 @@ func TestFeedback_Wrong_DeprecatesWithReason(t *testing.T) {
 	var capturedUpdates map[string]interface{}
 	store := &mockStore{
 		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
-			return &record.Record{ID: id, Status: record.StatusActive}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusActive}, nil
 		},
 		UpdateFunc: func(ctx context.Context, id string, updates map[string]interface{}) (*record.Record, error) {
 			capturedUpdates = updates
 			status, _ := updates["status"].(record.Status)
-			return &record.Record{ID: id, Status: status}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: status}, nil
 		},
 	}
 	svc := New(store, &mockEmbeddingProvider{}, &mockScrubber{}, &mockClock{}, lifecycleCfg())
@@ -137,7 +137,7 @@ func TestFeedback_NotFound(t *testing.T) {
 func TestFeedback_UnknownOutcome_ReturnsError(t *testing.T) {
 	store := &mockStore{
 		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
-			return &record.Record{ID: id, Status: record.StatusActive}, nil
+			return &record.Record{ID: id, Namespace: DefaultNamespace, Status: record.StatusActive}, nil
 		},
 	}
 	svc := New(store, &mockEmbeddingProvider{}, &mockScrubber{}, &mockClock{}, lifecycleCfg())

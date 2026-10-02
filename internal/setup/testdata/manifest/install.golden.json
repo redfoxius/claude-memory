@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "binary_version": "v0.3.0-4-gabc1234",
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64"
+  },
+  "topology": "remote",
+  "jobs_backend": "launchd",
+  "claude_config_dir": "/ROOT/home/.claude",
+  "installed_at": "2026-10-01T10:15:00Z",
+  "updated_at": "2026-10-01T10:15:00Z",
+  "artifacts": [
+    {
+      "step": "hooks.scripts",
+      "kind": "file",
+      "path": "/ROOT/home/.claude/hooks/claude-memory/user-prompt-submit.sh",
+      "sha256": "abababababababababababababababababababababababababababababababab",
+      "version": "v0.3.0-4-gabc1234"
+    },
+    {
+      "step": "hooks.settings",
+      "kind": "settings-hook",
+      "path": "/ROOT/home/.claude/settings.json",
+      "identity": "UserPromptSubmit",
+      "version": "v0.3.0-4-gabc1234",
+      "entry": "{\"command\":\"/ROOT/home/.claude/hooks/claude-memory/user-prompt-submit.sh\",\"timeout\":5,\"type\":\"command\"}",
+      "created_container": true
+    },
+    {
+      "step": "hooks.settings",
+      "kind": "settings-hook",
+      "path": "/ROOT/home/.claude/settings.json",
+      "identity": "SessionEnd",
+      "version": "v0.3.0-4-gabc1234",
+      "entry": "{\"command\":\"/ROOT/home/.claude/hooks/claude-memory/session-end.sh\",\"timeout\":5,\"type\":\"command\"}"
+    },
+    {
+      "step": "mcp",
+      "kind": "mcp",
+      "identity": "claude-memory",
+      "version": "v0.3.0-4-gabc1234"
+    },
+    {
+      "step": "claude-md",
+      "kind": "md-block",
+      "path": "/ROOT/home/.claude/CLAUDE.md",
+      "sha256": "e7e13547d0e0bc5ba42a786bd7e0a495262e813b4341776f8d677395cc85fc89",
+      "version": "v0.3.0-4-gabc1234"
+    },
+    {
+      "step": "envfile",
+      "kind": "env-key",
+      "path": "/ROOT/home/.config/claude-memory/env",
+      "identity": "MEMORY_PG_DSN",
+      "version": "v0.3.0-4-gabc1234"
+    }
+  ]
+}

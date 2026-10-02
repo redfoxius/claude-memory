@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "claude-memory": {
+      "type": "stdio",
+      "command": "/Users/owner/go/bin/claude-memory",
+      "args": ["serve"],
+      "env": {}
+    }
+  }
+}

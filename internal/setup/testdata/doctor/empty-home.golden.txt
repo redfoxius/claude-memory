@@ -1,0 +1,38 @@
+claude-memory doctor · test · linux/amd64 (Ubuntu 24.04) · jobs: none
+claude config: $ROOT/home/.claude
+
+PASS  binary.version    claude-memory test at $ROOT/home/.local/bin/claude-memory
+FAIL  env.file          no env file $ROOT/home/.config/claude-memory/env and MEMORY_PG_DSN is not set
+                        fix: create $ROOT/home/.config/claude-memory/env (mode 0600) with plain KEY=VALUE lines, no `export`, e.g. MEMORY_PG_DSN=postgresql://claude_memory:***@<host>:5432/claude_memory (see DEPLOY.md "Laptop Side Configuration")
+SKIP  env.perms         because env.file failed
+SKIP  env.format        because env.file failed
+SKIP  pg.connect        because env.format was skipped
+SKIP  pg.latency        because pg.connect was skipped
+SKIP  pg.vector         because pg.connect was skipped
+SKIP  pg.schema         because pg.connect was skipped
+FAIL  ollama.reachable  no Ollama at http://127.0.0.1:11434: dial tcp 127.0.0.1:11434: connect: connection refused
+                        fix: start Ollama (macOS: `brew services start ollama`; Linux: `systemctl start ollama` or `ollama serve`), or set MEMORY_OLLAMA_URL
+SKIP  ollama.model      because ollama.reachable failed
+SKIP  ollama.embed      because ollama.model was skipped
+WARN  tools.git         git is not on PATH: staleness checks are off and ingest-pr cannot read repositories
+                        fix: install git (macOS: xcode-select --install; Linux: your package manager)
+WARN  tools.claude      claude is not on PATH: session extraction (SessionEnd hook) and `claude mcp add` do not work
+                        fix: install the Claude Code CLI and put it on PATH
+INFO  tools.az          not needed: MEMORY_PR_INGEST_REPOS is not set
+FAIL  mcp.registered    $ROOT/home/.claude.json does not exist
+                        fix: claude mcp add --scope user claude-memory -- $ROOT/home/.local/bin/claude-memory serve
+FAIL  hooks.scripts     user-prompt-submit.sh missing; session-end.sh missing
+                        fix: mkdir -p $ROOT/home/.claude/hooks/claude-memory && cp integration/hooks/*.sh $ROOT/home/.claude/hooks/claude-memory/ && chmod 755 $ROOT/home/.claude/hooks/claude-memory/*.sh (integration/INSTALL.md step 5)
+FAIL  hooks.settings    $ROOT/home/.claude/settings.json does not exist: no hooks are wired
+                        fix: merge integration/settings.snippet.json into $ROOT/home/.claude/settings.json by hand (integration/INSTALL.md step 5)
+WARN  skills            remember: not installed; memory-digest: not installed
+                        fix: copy integration/skills/<name> to $ROOT/home/.claude/skills/ (integration/INSTALL.md step 6), unless you edited them on purpose
+INFO  claude-md         $ROOT/home/.claude/CLAUDE.md: file does not exist
+                        fix: add integration/claude-md-section.md to $ROOT/home/.claude/CLAUDE.md between the lines <!-- BEGIN claude-memory --> and <!-- END claude-memory --> (or keep your section in a project CLAUDE.md)
+INFO  namespaces        no $ROOT/home/.config/claude-memory/namespaces.yaml: every directory uses the global namespace; $ROOT/work → global (fallback)
+                        fix: map your projects: claude-memory namespaces init NAME='~/path/**'
+INFO  jobs              not checked yet: systemd user timers are detected from slice 2 on
+INFO  dirs.state        $ROOT/home/.local/state/claude-memory does not exist yet (created on first use)
+INFO  manifest          no $ROOT/home/.config/claude-memory/install.json (a manual install, or install has not run yet)
+
+23 checks: 1 pass · 5 fail · 3 warn · 6 info · 8 skip
