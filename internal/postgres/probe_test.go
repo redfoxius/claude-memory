@@ -54,7 +54,7 @@ func TestSchemaObjectsCoverEveryMigration(t *testing.T) {
 	if got := strings.Join(all, ";\n"); got != migrationSQL {
 		t.Error("migrationSQL (store.go) is not the concatenation of migrations/*.sql: add the //go:embed line")
 	}
-	if got := MigrationIDs(); !slices.Equal(got, []string{"0001", "0002", "0003"}) {
+	if got := MigrationIDs(); !slices.Equal(got, []string{"0001", "0002", "0003", "0004"}) {
 		t.Errorf("MigrationIDs() = %v", got)
 	}
 }

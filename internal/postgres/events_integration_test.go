@@ -69,7 +69,7 @@ func TestEventsMigrationIdempotentAndShape(t *testing.T) {
 		t.Errorf("columns = %v, want exactly %v", cols, want)
 	}
 
-	for _, name := range []string{"events_type_check", "events_source_check", "events_status_check", "events_outcome_check", "events_via_check"} {
+	for _, name := range []string{"events_type_check", "events_source_check_v2", "events_status_check", "events_outcome_check", "events_via_check"} {
 		if n := countRows(t, ctx, s, `SELECT count(*) FROM pg_constraint WHERE conname = $1`, name); n != 1 {
 			t.Errorf("constraint %s present %d times", name, n)
 		}
@@ -79,7 +79,7 @@ func TestEventsMigrationIdempotentAndShape(t *testing.T) {
 			t.Errorf("index %s present %d times", name, n)
 		}
 	}
-	if !slices.Equal(MigrationIDs(), []string{"0001", "0002", "0003"}) {
+	if !slices.Equal(MigrationIDs(), []string{"0001", "0002", "0003", "0004"}) {
 		t.Errorf("MigrationIDs = %v", MigrationIDs())
 	}
 }
@@ -358,8 +358,8 @@ func TestStatsCounts(t *testing.T) {
 }
 
 // AC-40: imported candidates are counted apart from the promotion rate. The
-// 'import' event source only exists after the import migration, so this test
-// lifts the source CHECK to insert such events.
+// 'import' event source is accepted since migration 0004, so this test inserts
+// such events directly.
 func TestStatsCountsSeparateImports(t *testing.T) {
 	ctx := context.Background()
 	dsn, cleanup := startPostgresContainer(t, ctx)
@@ -369,9 +369,6 @@ func TestStatsCountsSeparateImports(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if _, err := s.pool.Exec(ctx, `ALTER TABLE events DROP CONSTRAINT IF EXISTS events_source_check`); err != nil {
-		t.Fatal(err)
-	}
 
 	inl, imp1, imp2 := uuid.New().String(), uuid.New().String(), uuid.New().String()
 	created := func(rec string, src memory.EventSource) memory.Event {

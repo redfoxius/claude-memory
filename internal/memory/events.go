@@ -57,6 +57,7 @@ const (
 	EventSourceInline  EventSource = EventSource(record.SourceInline)
 	EventSourceSession EventSource = EventSource(record.SourceSession)
 	EventSourcePR      EventSource = EventSource(record.SourcePR)
+	EventSourceImport  EventSource = EventSource(record.SourceImport)
 	EventSourceCleanup EventSource = "cleanup"
 )
 
@@ -135,7 +136,7 @@ func (e Event) Validate(now time.Time) error {
 		}
 	}
 	switch e.Source {
-	case "", EventSourceInline, EventSourceSession, EventSourcePR, EventSourceCleanup:
+	case "", EventSourceInline, EventSourceSession, EventSourcePR, EventSourceImport, EventSourceCleanup:
 	default:
 		return fmt.Errorf("unknown source %q", e.Source)
 	}

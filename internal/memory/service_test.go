@@ -40,6 +40,13 @@ func (m *mockTxStore) Get(ctx context.Context, id string) (*record.Record, error
 	return nil, ErrNotFound
 }
 
+func (m *mockTxStore) ImportKeyExists(ctx context.Context, namespace, key string) (bool, error) {
+	if m.store.ImportKeyExistsFunc != nil {
+		return m.store.ImportKeyExistsFunc(ctx, namespace, key)
+	}
+	return false, nil
+}
+
 func (m *mockTxStore) Create(ctx context.Context, r *record.Record) (*record.Record, error) {
 	if m.store.CreateFunc != nil {
 		return m.store.CreateFunc(ctx, r)
@@ -65,6 +72,7 @@ type mockStore struct {
 	AcquireLockFunc           func(ctx context.Context, repo string, titleHash string) error
 	DeleteCandidatesByTTLFunc func(ctx context.Context, ttlDays int) (int, error)
 	DeleteFunc                func(ctx context.Context, id string) error
+	ImportKeyExistsFunc       func(ctx context.Context, namespace, key string) (bool, error)
 
 	// Recorded by the mocks so namespace tests can assert scoping.
 	lockNamespace       string

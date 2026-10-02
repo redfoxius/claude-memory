@@ -359,6 +359,12 @@ Verify these rejection scenarios to confirm the setup is secure:
 
 All three should fail cleanly. If they succeed, the server security posture is compromised; re-check `pg_hba.conf`, UFW rules, and Tailscale status.
 
+### Import and migration 0004
+
+`claude-memory import automem|insights` (see `integration/USAGE.md`) needs migration 0004: `records.import_key`, a partial unique index and the `events_source_check_v2` constraint (adds source `import`). The new binary applies it automatically at the next session start (`serve`, `extract --run`, `ingest-pr`, `cleanup` and `migrate` all run the schema); there is no separate step, and it is a no-op on every later start. It takes short exclusive locks on `events` and `records`. The hook never migrates and never touches the new column, so old and new binaries and schemas keep working together in either order. **Rollback = reinstall the old binary**: it ignores the column, the index and the `_v2` constraint and never writes source `import`; there is no down migration. Run `claude-memory import ... --dry-run` first (no database needed). Unreviewed imported candidates are removed by the cleanup TTL and a later import re-creates them, so review them within the candidate TTL (`MEMORY_CANDIDATE_TTL`, default 180 days; the import prints it). Imported candidates are searchable and injected into sessions before review, and the database is shared, so run `--dry-run` first.
+
+Also: (a) `import`, `ls`, `show`, `stats`, `cleanup` and the other long-running commands apply the schema too, so the first command after upgrading applies 0004. (b) A concurrent first start used to be able to fail once on `CREATE`; migrations now run under a Postgres advisory lock on one connection, so starters are serialized. (c) After rolling back to the old binary, imported rows stay as ordinary candidates with source `import`; the old binary ignores the column.
+
 ### Management commands
 
 `claude-memory ls|show|rm|edit|promote|review` manage records from the terminal (see `integration/USAGE.md`). They need no schema change or migration; `rm --hard` deletes a row for good and refuses a record that another record's `superseded_by` points at. Short ids (8 hex) resolve only inside the namespace; use the full UUID for `global` records.

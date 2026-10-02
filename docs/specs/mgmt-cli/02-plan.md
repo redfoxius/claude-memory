@@ -205,7 +205,7 @@ Decoder move dropped (spec D5, AC-39 withdrawn); `cmd` wires
   then loads config and calls `buildServiceWithEvents` →
   `WithNamespace(target)` → `Store` per item: `ErrInvalidRequest` → skip
   with reason, other errors → stop, exit 1 (AC-28); summary + "N candidates
-  await `claude-memory review` within 30 days".
+  await `claude-memory review` before the candidate TTL expires".
 - Tests: discovery over `t.TempDir()` trees with fake toplevel/namespace
   (incl. `../` and symlink refs escaping the toplevel, non-git home → `*`);
   dry-run with no env file/DSN opens nothing; run loop with fake service
@@ -226,7 +226,7 @@ Decoder move dropped (spec D5, AC-39 withdrawn); `cmd` wires
 ### WI-11 — Docs (all ACs, documentation only)
 - `DEPLOY.md` / `integration/INSTALL.md`: the new commands; 0004 is
   auto-applied at the next session start (no manual `migrate`); rollback =
-  reinstall the old binary (AC-38); TTL re-import risk and the 30-day
+  reinstall the old binary (AC-38); TTL re-import risk and the TTL
   reminder; run `--dry-run` first; id prefix limits.
 - `docs/specs/README.md` item 3 status.
 

@@ -92,6 +92,19 @@ func (t *txStoreImpl) FindCandidates(ctx context.Context, embedding []float32, n
 	return candidates, nil
 }
 
+// ImportKeyExists reports whether a record of the namespace (any status)
+// already carries the import key.
+func (t *txStoreImpl) ImportKeyExists(ctx context.Context, namespace, key string) (bool, error) {
+	var exists bool
+	err := t.tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM records WHERE namespace = $1 AND import_key = $2)`,
+		namespace, key).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("query import key: %w", err)
+	}
+	return exists, nil
+}
+
 // Get is the transaction-scoped version of Store.Get.
 func (t *txStoreImpl) Get(ctx context.Context, id string) (*record.Record, error) {
 	r := &record.Record{}
@@ -152,28 +165,11 @@ func (t *txStoreImpl) Create(ctx context.Context, r *record.Record) (*record.Rec
 	const tsvecArgStart = 21
 	tsvec := tsvectorExpr(tsvecArgStart)
 
-	query := `
-		INSERT INTO records (
-			id, kind, title, content, repo, files, commit_sha, ticket, tags,
-			status, deprecation_reason, superseded_by, source, confidence,
-			seen_count, used_count, created_at, updated_at, last_used_at, embedding, tsvector_content, namespace
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9,
-			$10, $11, $12, $13, $14,
-			$15, $16, $17, $18, $19, $20,
-			` + tsvec + `, $24
-		) RETURNING id
-	`
-
-	err := t.tx.QueryRow(ctx, query,
-		r.ID, string(r.Kind), r.Title, r.Content, r.Repo, r.Files, r.CommitSHA, r.Ticket, r.Tags,
-		string(r.Status), r.DeprecationReason, r.SupersededBy, string(r.Source), r.Confidence,
-		r.SeenCount, r.UsedCount, r.CreatedAt, r.UpdatedAt, r.LastUsedAt, embeddingVec,
-		r.Title, tagsStr, r.Content, r.Namespace,
-	).Scan(&r.ID)
+	query, args := buildInsert(r, embeddingVec, tagsStr, tsvec)
+	err := t.tx.QueryRow(ctx, query, args...).Scan(&r.ID)
 
 	if err != nil {
-		return nil, fmt.Errorf("insert record: %w", err)
+		return nil, insertError(err)
 	}
 
 	return r, nil

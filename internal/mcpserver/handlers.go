@@ -82,6 +82,9 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 		if !src.IsValid() {
 			return nil, StoreOutput{}, fmt.Errorf("invalid source %q", in.Source)
 		}
+		if src == record.SourceImport {
+			return nil, StoreOutput{}, fmt.Errorf("source %q is reserved for the import command", in.Source)
+		}
 		source = src
 	}
 

@@ -60,6 +60,11 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 		ns = record.GlobalNamespace
 	}
 
+	// Imports have their own, simpler branch: ADD as candidate or SKIP.
+	if req.Source == record.SourceImport {
+		return s.storeImport(ctx, req, ns, scrubbedTitle, scrubbedContent, embedding)
+	}
+
 	// Commit baseline (staleness): an explicit commit_sha wins; otherwise
 	// inline/session records get HEAD when their files are clean. Computed
 	// before the transaction so no git process runs under the advisory lock.
@@ -464,34 +469,53 @@ func defaultConfidenceForSource(source record.Source, override *float64) float64
 	}
 }
 
-// validate checks that the StoreRequest is valid.
+// invalidRequest builds a validation error that wraps ErrInvalidRequest.
+func invalidRequest(format string, args ...any) error {
+	return fmt.Errorf("%w: "+format, append([]any{ErrInvalidRequest}, args...)...)
+}
+
+// validate checks that the StoreRequest is valid. Every error wraps
+// ErrInvalidRequest.
 func (req *StoreRequest) validate(maxContentChars int) error {
 	if req.Kind == "" || !req.Kind.IsValid() {
-		return fmt.Errorf("invalid or missing kind")
+		return invalidRequest("invalid or missing kind")
 	}
 
 	if req.Title == "" {
-		return fmt.Errorf("title is required")
+		return invalidRequest("title is required")
 	}
 
 	if req.Content == "" {
-		return fmt.Errorf("content is required")
+		return invalidRequest("content is required")
 	}
 
 	if len(req.Content) > maxContentChars {
-		return fmt.Errorf("content exceeds maximum size (%d > %d)", len(req.Content), maxContentChars)
+		return invalidRequest("content exceeds maximum size (%d > %d)", len(req.Content), maxContentChars)
 	}
 
 	if req.Repo == "" {
-		return fmt.Errorf("repo is required")
+		return invalidRequest("repo is required")
 	}
 
 	if req.Namespace != "" && req.Namespace != record.GlobalNamespace {
-		return fmt.Errorf("namespace may only be %q (or empty for the current namespace)", record.GlobalNamespace)
+		return invalidRequest("namespace may only be %q (or empty for the current namespace)", record.GlobalNamespace)
 	}
 
 	if req.Source == "" || !req.Source.IsValid() {
-		return fmt.Errorf("invalid or missing source")
+		return invalidRequest("invalid or missing source")
+	}
+
+	if (req.Source == record.SourceImport) != (req.ImportKey != "") {
+		return invalidRequest("import key is required for, and only valid with, source import")
+	}
+
+	if req.ExtractionDecision != nil {
+		if req.Source == record.SourceImport {
+			return invalidRequest("an import takes no extraction decision")
+		}
+		if req.ExtractionDecision.Action == ActionSkip {
+			return invalidRequest("SKIP is an outcome, not a decision")
+		}
 	}
 
 	return nil

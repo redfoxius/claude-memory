@@ -53,12 +53,14 @@ const (
 	SourceInline  Source = "inline"
 	SourceSession Source = "session"
 	SourcePR      Source = "pr"
+	// SourceImport marks records created by the one-off `import` command.
+	SourceImport Source = "import"
 )
 
 // IsValid returns true if the source is a recognized value.
 func (s Source) IsValid() bool {
 	switch s {
-	case SourceInline, SourceSession, SourcePR:
+	case SourceInline, SourceSession, SourcePR, SourceImport:
 		return true
 	}
 	return false
@@ -112,6 +114,10 @@ type Record struct {
 
 	// Source indicates where the record came from.
 	Source Source
+
+	// ImportKey is the dedup key of an imported record (nil otherwise). It is
+	// write-only: Create stores it, Get/List never select it.
+	ImportKey *string
 
 	// Confidence is a score from 0.0 to 1.0 indicating trust in the record.
 	Confidence float64

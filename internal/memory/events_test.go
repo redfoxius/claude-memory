@@ -335,3 +335,12 @@ func TestNoSinkIsFine(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestEventValidateAcceptsImportSource(t *testing.T) {
+	e := NewEvent(time.Now(), "acme", EventRecordCreated)
+	e.RecordID = uuid.New().String()
+	e.Source, e.Status = EventSourceImport, record.StatusCandidate
+	if err := e.Validate(time.Now()); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+}

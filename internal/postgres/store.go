@@ -29,9 +29,12 @@ var migrationNamespacesSQL string
 //go:embed migrations/0003_events.sql
 var migrationEventsSQL string
 
+//go:embed migrations/0004_mgmt_import.sql
+var migrationMgmtImportSQL string
+
 // migrationSQL is every migration, applied in order. Each statement is
 // idempotent, so re-running on an already-migrated database is a no-op.
-var migrationSQL = migrationInitSQL + ";\n" + migrationNamespacesSQL + ";\n" + migrationEventsSQL
+var migrationSQL = migrationInitSQL + ";\n" + migrationNamespacesSQL + ";\n" + migrationEventsSQL + ";\n" + migrationMgmtImportSQL
 
 // Store is the Postgres adapter implementing memory.Store.
 type Store struct {
@@ -83,21 +86,60 @@ func (s *Store) Close() {
 	s.pool.Close()
 }
 
-// runMigrations executes the migration SQL idempotently.
+// migrationLockKey is the session-level advisory lock that serializes
+// migrations across concurrently starting processes.
+const migrationLockKey int64 = 0x636c6d656d6d6967 // "clmemmig"
+
+// alreadyExists reports a "the object is already there" error, by SQLSTATE
+// (42710 duplicate_object, 42P07 duplicate_table, 42P06 duplicate_schema) so
+// it does not depend on the server's message language. The English text match
+// is only a fallback for errors that carry no PgError.
+func alreadyExists(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "42710", "42P07", "42P06":
+			return true
+		}
+		return false
+	}
+	return strings.Contains(err.Error(), "already exists")
+}
+
+// runMigrations executes the migration SQL idempotently. Every statement runs
+// on one dedicated connection holding an advisory lock, so several processes
+// starting at once apply the schema one after another instead of racing.
 func (s *Store) runMigrations(ctx context.Context) error {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	defer conn.Release()
+
+	// Waiting for another migrator is bounded by ctx only: it may be building
+	// an index. The DDL itself must not wait on a table lock for long.
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationLockKey); err != nil {
+		return fmt.Errorf("take migration lock: %w", err)
+	}
+	defer func() {
+		// Best effort, on a fresh context so a cancelled ctx still unlocks.
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", migrationLockKey)
+	}()
+	if _, err := conn.Exec(ctx, "SET lock_timeout = '5s'"); err != nil {
+		return fmt.Errorf("set lock_timeout: %w", err)
+	}
+	// The connection returns to the pool: do not leak the setting.
+	defer func() { _, _ = conn.Exec(context.Background(), "RESET lock_timeout") }()
+
 	// Split migration by ; to handle multiple statements
 	// Note: this is a simple approach; for complex migrations use a real migration library.
-	statements := strings.Split(migrationSQL, ";")
-	for _, stmt := range statements {
+	for _, stmt := range strings.Split(migrationSQL, ";") {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {
 			continue
 		}
-		if _, err := s.pool.Exec(ctx, stmt); err != nil {
-			// If the error is about the extension already existing, that's fine
-			if !strings.Contains(err.Error(), "already exists") {
-				return fmt.Errorf("execute migration statement: %w", err)
-			}
+		if _, err := conn.Exec(ctx, stmt); err != nil && !alreadyExists(err) {
+			return fmt.Errorf("execute migration statement: %w", err)
 		}
 	}
 	return nil
@@ -129,28 +171,11 @@ func (s *Store) Create(ctx context.Context, r *record.Record) (*record.Record, e
 	const tsvecArgStart = 21
 	tsvec := tsvectorExpr(tsvecArgStart)
 
-	query := `
-		INSERT INTO records (
-			id, kind, title, content, repo, files, commit_sha, ticket, tags,
-			status, deprecation_reason, superseded_by, source, confidence,
-			seen_count, used_count, created_at, updated_at, last_used_at, embedding, tsvector_content, namespace
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9,
-			$10, $11, $12, $13, $14,
-			$15, $16, $17, $18, $19, $20,
-			` + tsvec + `, $24
-		) RETURNING id
-	`
-
-	err := s.pool.QueryRow(ctx, query,
-		r.ID, string(r.Kind), r.Title, r.Content, r.Repo, r.Files, r.CommitSHA, r.Ticket, r.Tags,
-		string(r.Status), r.DeprecationReason, r.SupersededBy, string(r.Source), r.Confidence,
-		r.SeenCount, r.UsedCount, r.CreatedAt, r.UpdatedAt, r.LastUsedAt, embeddingVec,
-		r.Title, tagsStr, r.Content, r.Namespace,
-	).Scan(&r.ID)
+	query, args := buildInsert(r, embeddingVec, tagsStr, tsvec)
+	err := s.pool.QueryRow(ctx, query, args...).Scan(&r.ID)
 
 	if err != nil {
-		return nil, fmt.Errorf("insert record: %w", err)
+		return nil, insertError(err)
 	}
 
 	return r, nil
@@ -562,4 +587,45 @@ func (s *Store) DeleteCandidatesByTTL(ctx context.Context, ttlDays int) (int, er
 	}
 
 	return int(result.RowsAffected()), nil
+}
+
+// buildInsert builds the records INSERT shared by Store.Create and the
+// transaction store's Create. import_key joins the column list only when the
+// record carries one, so every non-import write still works on a database
+// that has not applied migration 0004 (old schema, or the hook path).
+func buildInsert(r *record.Record, embeddingVec pgvector.Vector, tagsStr, tsvec string) (string, []any) {
+	args := []any{
+		r.ID, string(r.Kind), r.Title, r.Content, r.Repo, r.Files, r.CommitSHA, r.Ticket, r.Tags,
+		string(r.Status), r.DeprecationReason, r.SupersededBy, string(r.Source), r.Confidence,
+		r.SeenCount, r.UsedCount, r.CreatedAt, r.UpdatedAt, r.LastUsedAt, embeddingVec,
+		r.Title, tagsStr, r.Content, r.Namespace,
+	}
+	extraCol, extraArg := "", ""
+	if r.ImportKey != nil {
+		args = append(args, *r.ImportKey)
+		extraCol, extraArg = ", import_key", fmt.Sprintf(", $%d", len(args))
+	}
+	query := `
+		INSERT INTO records (
+			id, kind, title, content, repo, files, commit_sha, ticket, tags,
+			status, deprecation_reason, superseded_by, source, confidence,
+			seen_count, used_count, created_at, updated_at, last_used_at, embedding, tsvector_content, namespace` + extraCol + `
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9,
+			$10, $11, $12, $13, $14,
+			$15, $16, $17, $18, $19, $20,
+			` + tsvec + `, $24` + extraArg + `
+		) RETURNING id
+	`
+	return query, args
+}
+
+// insertError wraps a records INSERT error; a unique violation on the import
+// key index becomes memory.ErrImportKeyExists.
+func insertError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_records_import_key" {
+		return fmt.Errorf("insert record: %w", memory.ErrImportKeyExists)
+	}
+	return fmt.Errorf("insert record: %w", err)
 }

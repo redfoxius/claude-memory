@@ -297,6 +297,19 @@ the repo you are standing in and any of those files differ at the current
   budget. Per-session verdicts are cached under
   `~/.local/state/claude-memory/stale-cache/`.
 
+## Importing existing knowledge
+
+`claude-memory import automem|insights` loads auto-memory files and
+`INSIGHTS.md` entries as candidates (`integration/USAGE.md`, "Importing
+existing knowledge"). Run it with `--dry-run` first (no database, Ollama or env
+file needed). It needs migration 0004, which the new binary applies by itself at
+the next session start (`serve`, `extract --run`, `ingest-pr`); you do not run
+`migrate` for it. Rolling back means reinstalling the old binary, which ignores
+the new column and index. Unreviewed imported candidates are deleted by the
+cleanup TTL and a later import re-creates them, so run `claude-memory review`
+within the candidate TTL (`MEMORY_CANDIDATE_TTL`, default 180 days; the
+import prints it).
+
 ## Usage events and `stats`
 
 The hook appends one `card_injected` event per card to
