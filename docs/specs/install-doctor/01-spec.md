@@ -2,7 +2,7 @@
 
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-01-install-doctor
-- Status: draft v0.2. The architecture review
+- Status: v0.2; slice 1 implemented (review 04: fixes pending); slice 2/3 not implemented. Original: draft v0.2. The architecture review
   (`03-architecture-review.md`, gate "revise before implementing") is
   applied, and every owner question (§13) is resolved. Ready for plan
   review. Implementation proceeds **slice by slice** (§0.2).

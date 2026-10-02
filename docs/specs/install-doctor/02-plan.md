@@ -1,6 +1,6 @@
 # Claude Memory — `install` / `doctor` Implementation Plan
 
-**Status:** not started. Plan v0.2 for spec v0.2. The architecture review
+**Status (2026-10-02):** slice 1 (WI-S1-1..12) implemented and reviewed (`04-slice-1-review.md`, gate FAIL: 1 high + 5 medium open — migrate password-fragment leak, plan/DoD bookkeeping incl. the manual Mac `doctor` run, fenced-marker handling, settings symlink outside HOME, shell-env DSN override severity, hook identity match). WI-S1-0 manual fixtures on a Mac not done. Slice 2 (WI-S2-1..16) and slice 3 not started. Plan v0.2 for spec v0.2. The architecture review
 (`03-architecture-review.md`) is applied and the owner's decisions are in
 spec §0.1; every spec §13 question is resolved. Needs plan review before
 implementation (SDD flow). Work proceeds **slice by slice**: slice 1 is

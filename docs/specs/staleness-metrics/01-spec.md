@@ -2,7 +2,7 @@
 
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-01-staleness-metrics
-- Status: ready for implementation (all §13 questions resolved in v0.2)
+- Status: PR A (staleness) implemented and reviewed; PR B (events + stats) not started. Original: ready for implementation (all §13 questions resolved in v0.2)
 - Version: 0.2
 - Owner: Oleksandr Kolomoiets (user@example.com)
 - Supersedes: none (extends SPEC-2026-10-01-memory-mvp and

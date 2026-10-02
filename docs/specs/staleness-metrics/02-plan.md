@@ -4,8 +4,8 @@
 (`04-pr-a-review.md`); its blockers are fixed. PR B (events + stats) not
 started. Plan revised for spec v0.2 after `03-architecture-review.md`.
 
-**PR A implementation status:** WI-1..6 and WI-13a DONE (unit-tested; SQL
-changes covered only by integration tests that need Docker/CI). WI-15 not
+**PR A implementation status:** WI-1..6 and WI-13a DONE (unit-tested; the SQL
+changes are covered by integration tests that pass on a local Postgres+pgvector). WI-15 not
 built (optional). Still manual/open: **WI-0** latency baseline (build
 `40a7fb7` for the "before" numbers), **WI-14** re-measure, and the
 **AC-11** check `git merge-base --is-ancestor <MergeCommit> origin/main`

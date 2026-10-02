@@ -2,7 +2,7 @@
 
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-01-namespaces
-- Status: draft (re-baselined after owner decisions; all clarifications resolved)
+- Status: implemented (code + docs); integration tests pass locally; review follow-ups open — see docs/specs/README.md item 1. Original: draft, re-baselined after owner decisions
 - Version: 0.2
 - Owner: Oleksandr Kolomoiets (user@example.com)
 - Supersedes: none (extends SPEC-2026-10-01-memory-mvp)

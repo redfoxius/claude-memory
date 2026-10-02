@@ -2,14 +2,27 @@
 
 | Feature | Spec ID | Status |
 |---|---|---|
-| [memory-mvp](memory-mvp/01-spec.md) | SPEC-2026-10-01-memory-mvp | clarifying |
-| [namespaces](namespaces/01-spec.md) | namespaces | implemented (integration tests pending a Docker run) |
-| [staleness-metrics](staleness-metrics/01-spec.md) | SPEC-2026-10-01-staleness-metrics | PR A (staleness) implemented; PR B (events + stats) not started |
-| [install-doctor](install-doctor/01-spec.md) | SPEC-2026-10-01-install-doctor | v0.2; slice 1 (`doctor` + plumbing: `version`, `migrate`, embedded assets, setup libraries) implemented; slice 2 (`install`/`uninstall`) not started; slice 3 (Docker) deferred |
+| [memory-mvp](memory-mvp/01-spec.md) | SPEC-2026-10-01-memory-mvp | implemented and verified (`memory-mvp/07-verification.md`); operational ACs (AC-30/48/49/50/51/53) still need runs on the real setup |
+| [namespaces](namespaces/01-spec.md) | namespaces | implemented; integration suite passes on a local Postgres+pgvector; review follow-ups open (see item 1) |
+| [staleness-metrics](staleness-metrics/01-spec.md) | SPEC-2026-10-01-staleness-metrics | PR A (staleness) implemented and reviewed; PR B (events + stats) **not started**; manual latency/Azure checks open |
+| [install-doctor](install-doctor/01-spec.md) | SPEC-2026-10-01-install-doctor | v0.2; slice 1 (`doctor` + plumbing) implemented; its Fable review is FAIL (1 high, 5 medium — see item 8), fixes pending; slice 2 (`install`/`uninstall`) not started; slice 3 (Docker) deferred |
 
 ## Backlog (next, in order)
 
-### 1. namespaces — start right after memory-mvp ships
+### 1. namespaces — IMPLEMENTED (2026-10-01); follow-ups open
+
+**Done:** namespace on every record, scoped search/dedup/list/lock/by-id,
+`global` fallback and explicit writes, `namespaces.yaml` resolver wired into
+serve/hook/extract/ingest-pr, `namespaces init|add|which`, install docs,
+migration 0002, reviews `namespaces/03` and `04`. The integration isolation
+tests pass on a local Postgres+pgvector (`make test-integration`).
+**Open (from `namespaces/04-implementation-review.md`):** tests for migration
+backfill/idempotency and cross-namespace lock; ingest-pr routing test (two
+repos → two writers) and per-subcommand namespace tests; warn when
+`extract --run` has no `cwd`; `eval-retrieval` ignores `MEMORY_NAMESPACE`;
+glob validation in `namespaces init|add`; `SupersededBy` not checked for
+namespace accessibility; per-namespace `pr_ingest` config (item 4).
+
 
 Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
 
@@ -35,7 +48,18 @@ Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
 - Rough size: ~1 day incl. tests; full SDD flow (next spec version → plan → plan
   review ×2 → implementation).
 
-### 2. staleness check + usage metrics — after namespaces
+### 2. staleness check + usage metrics — PART A DONE, PART B NOT STARTED
+
+**Done (PR A):** staleness hint on cards/search/get (tree-compare detector,
+cached, deadline-bounded), commit-baseline stamping, PR merge-commit
+baseline, extraction repo from checkout, docs; spec v0.2, plan, reviews
+`staleness-metrics/03`, `04`. **Not done:** PR B — `events` table
+(migration 0003), hook spool file, service events, `stats`, cleanup pruning
+(plan WI-7..12); optional WI-15 (PR changed paths). **Manual/open:** hook
+latency baseline and re-measure (WI-0/WI-14); `merge-base --is-ancestor`
+check of the Azure DevOps merge commit on a real squash PR (AC-11); known gap:
+write-path UPDATE with no `files` never re-baselines.
+
 
 - **Staleness check on retrieval.** Records already carry `files[]` and
   `commit_sha`. When a record is returned (hook card, `memory_search`,
@@ -53,7 +77,7 @@ Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
   stale-flag rate. No content in events — ids and enums only.
 - Rough size: S each.
 
-### 3. management CLI (`review`) + import of existing knowledge — after 2
+### 3. management CLI (`review`) + import of existing knowledge — NOT STARTED
 
 - **CLI:** `claude-memory ls|show|rm|edit|promote` and an interactive
   `claude-memory review` that walks `candidate` records (newest first, with
@@ -68,7 +92,7 @@ Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
   `CLAUDE.md`/`MEMORY.md` index files.
 - Rough size: S–M.
 
-### 4. PR ingest: GitHub + GitLab providers, per-namespace config — after namespaces
+### 4. PR ingest: GitHub + GitLab providers, per-namespace config — NOT STARTED
 
 MVP already has the provider-neutral `PRSource` port, auto-detection from the
 repo's git `origin`, and per-provider cursors (spec AC-58); only Azure DevOps
@@ -131,15 +155,23 @@ re-measure p95 over ~50 prompts.
 ### 8. `claude-memory install` + `doctor` — interactive, re-runnable setup
 
 **Status (2026-10-02):** specified in `install-doctor/` (spec v0.2, plan,
-architecture review). **Slice 1 implemented**: `claude-memory doctor` (23
+architecture review `03`, slice-1 implementation review `04`). **Slice 1 implemented**: `claude-memory doctor` (23
 read-only checks, `--json`, `--strict`, `--timeout`/`--deadline`, exit codes
 0–3), `version`, `migrate`, early dispatch, `config.ParseEnvFile`, the
 `integration`/`deploy` embed packages, the `internal/setup` ports, redactor,
 settings.json merge, CLAUDE.md block, `.claude.json` reader, manifest reader
 and launchd detection, and the DEPLOY.md env-file fix. **Slice 2**
 (`install`, `--upgrade`, `uninstall`) is next; slice 3 (Docker topology) and
-the §12.1 follow-ups (latency probe, cron, purge, …) are deferred. The text
-below is the original request, kept for the record.
+the §12.1 follow-ups (latency probe, cron, purge, …) are deferred. **Slice-1 review (`04-slice-1-review.md`): gate FAIL — 1 high, 5 medium, 9
+low.** Open before slice 1 is marked done: (1) `claude-memory migrate` can
+print a password fragment for a DSN whose password contains `/` — route it
+through `postgres.Prober{}.Migrate`; (2) record the manual `doctor` run on the
+owner's live Mac (WI-S1-12) and tick spec §14 S1. Also recommended: ignore
+CLAUDE.md markers inside fenced code blocks; let doctor read a `settings.json`
+symlinked outside HOME; make a shell-env `MEMORY_PG_DSN` override a `fail`
+when the env file's own line is unusable; tighten hook identity to the first
+argv word; CRLF-preserving settings writer. **Not verifiable here:** anything
+launchd/macOS. The text below is the original request, kept for the record.
 
 Added 2026-10-01 at the owner's request. Today installation is ~10 manual steps
 across `integration/INSTALL.md` and `DEPLOY.md` (only `namespaces init` is a

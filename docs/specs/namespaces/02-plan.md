@@ -1,12 +1,15 @@
 # Claude Memory — Namespaces
 
-**Status:** in progress. Core scoping, resolver wiring, the `global`
-fallback, the `namespaces init|add|which` subcommand, install docs and most
-architecture-review fixes are committed (`5f21cb7` … `6b6638b`). Still
-open: the integration suite has never run green (CI job just added), the
-`memory_store` output field and MCP server tests, per-subcommand `cmd`
-tests, the `serve` startup log, `eval-retrieval` scoping, and the
-INSTALL.md re-home note (see Work Items).
+**Status (2026-10-02):** implemented. Core scoping, resolver wiring, the
+`global` fallback, `namespaces init|add|which`, install/upgrade docs, store
+output `namespace`, `eval-retrieval` scoped to an `eval` namespace, the
+`serve` startup log, and the architecture-review blockers are done; the
+integration suite (including namespace isolation) passes on a local
+Postgres+pgvector (`make test-integration`). Still open (see
+`docs/specs/README.md` item 1): migration backfill/idempotency and
+cross-namespace lock tests, ingest-pr routing test, per-subcommand `cmd`
+tests, no-`cwd` warning in `extract --run`, glob validation,
+`SupersededBy` accessibility check, per-namespace `pr_ingest` config (item 4).
 
 ## Spec
 - `docs/specs/namespaces/01-spec.md` (SPEC-2026-10-01-namespaces, **v0.2**,
