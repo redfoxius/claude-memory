@@ -20,6 +20,10 @@ Reason: installer outgrew the product; keep it minimal; revisit if needed.
 - DROPPED from 2b: systemd (WI-S2-13b), uninstall (WI-S2-15), testcontainers e2e (16).
 - Done: WI-S2-11 (`skills`) and WI-S2-12 (`claude-md`) with review fixes (spec v0.8 §0.8).
 
+## Slice 2b minimal jobs (branch `feature/install-s2b-claude-steps`, uncommitted)
+Done: `jobs` step (launchd only) with the trimmed WI-S2-13a: `integration/launchd/job.plist.tmpl` replaces the two `__HOME__` plists; `LaunchdJobs.Render`, `LaunchdManager.Install` (bootout tolerates exit 3/113/"No such process"/"not loaded", then bootstrap), `Inspect`/`Detect` compare with the recorded hash and the rendering (`recordedJobHashes`, `ComputeJobPATH`); `--no-jobs` and `--pr-repos` are bound; `ReadPorts.Jobs`/`WritePorts.Jobs` wired; doctor `jobs` check compares against the rendering and names `claude-memory install`; `INSTALL.md`/`DEPLOY.md` point at `install`. `JobManager.Remove` is dropped (no uninstall).
+Not done (by the owner decision): systemd, uninstall, e2e, doctor deltas beyond `jobs` (no `tools.claude` recorded-PATH check, no backend-vs-manifest warning), stable-shim PATH preference (nvm/volta), a `jobs`-specific diff question for modified plists (generic overwrite Confirm only).
+
 ## Open follow-ups
 - If uninstall is ever revived: skill backups (`SKILL.md.bak.claude-memory.*`) live inside `skills/<name>`, so that owned dir is not empty after removing our files and stays; an `md-block` with `CreatedFile` is removed with its file only when our block is the only content; nested skill subdirs are recorded as owned `dir` artifacts; an empty unrecorded `skills/<name>` left by a failed Apply is the same gap as for `hooks/claude-memory`.
 - Uninstall (WI-S2-15) must handle an owned `hooks/claude-memory` dir that is not in the manifest: a failed `hooks.scripts` Apply (AC-8: nothing recorded) can leave the directory created but unrecorded. Treat an empty, unrecorded dir under `<ClaudeDir>/hooks/claude-memory` as removable, or record it before the first write.
@@ -27,8 +31,6 @@ Reason: installer outgrew the product; keep it minimal; revisit if needed.
 - MCP `outdated` (other command/args) still drops any user env on replace; the plan names the env keys. `modified` (env only) needs the overwrite Confirm.
 - Engine prompt for a `modified` unparseable `namespaces.yaml` says "a backup is kept", which is misleading; it needs an engine flag per artifact.
 - `LinePrompter` has no ctx: `Select`/`Text` wait for Enter after the first Ctrl-C.
-- `--no-jobs` and `--pr-repos` still exit 2 (`deferredInstallFlags`) until the jobs step lands; `--claude-md` is bound (WI-S2-12).
-- WI-S2-13a must tolerate `launchctl bootout` exit 3 (not loaded), see the WI-S1-0 fixtures above.
 - 14a review carried-over items 10-12: AC-34 child test with `MEMORY_PG_DSN` set; duplicate remote-Ollama warning in the dry-run golden.
 - `manifest` and `dirs.state` doctor checks have no owning step (`unownedChecks`), so their fails are never exempt; decide in 2b whether an owner is wanted.
 - Kept from earlier: ParseDBTarget refuses DSN query options other than `sslmode`; the Await-wait Select maps ErrTooManyAttempts to exit 2.

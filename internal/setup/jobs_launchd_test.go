@@ -7,7 +7,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"claude-memory/integration"
 )
+
+// testJobPATH is the PATH of the jobs in these tests.
+const testJobPATH = "/opt/homebrew/bin:/usr/bin:/bin"
 
 // launchctlNotFoundExit is the exit status of `launchctl print` for a
 // service that is not loaded (113 on macOS 11+; to be re-confirmed on the
@@ -20,7 +25,8 @@ func TestLaunchdInspect(t *testing.T) {
 	loaded := Result{Stdout: nil}
 	cases := []struct {
 		name     string
-		plist    string // fixture ("" = none)
+		plist    string // fixture ("" = none, "@rendered" = what Render returns)
+		recorded func(path string, fixture []byte) map[string]string
 		print    *Result
 		printErr error
 		paths    map[string]string // LookPath results
@@ -34,21 +40,21 @@ func TestLaunchdInspect(t *testing.T) {
 					t.Errorf("status %+v, want legacy flagged", s)
 				}
 			}},
-		{name: "direct loaded", plist: "direct-cleanup", print: &loaded, state: StateOK,
+		{name: "rendered loaded", plist: "@rendered", print: &loaded, state: StateOK,
 			paths: map[string]string{"claude": "/opt/homebrew/bin/claude", "git": "/usr/bin/git"},
 			check: func(t *testing.T, s LaunchdJobStatus) {
 				if !s.Loaded || s.LastExit != "0" || !strings.Contains(s.Detail, "last exit code 0") {
 					t.Errorf("status %+v", s)
 				}
 			}},
-		{name: "not loaded", plist: "direct-cleanup",
+		{name: "rendered not loaded", plist: "@rendered",
 			print: &Result{ExitCode: launchctlNotFoundExit}, state: StateOutdated,
 			check: func(t *testing.T, s LaunchdJobStatus) {
 				if !s.LoadedKnown || s.Loaded || !strings.Contains(s.Detail, "not loaded") {
 					t.Errorf("status %+v", s)
 				}
 			}},
-		{name: "PATH lacks tool dirs", plist: "direct-cleanup", print: &loaded, state: StateOutdated,
+		{name: "PATH lacks tool dirs", plist: "@rendered", print: &loaded, state: StateOutdated,
 			paths: map[string]string{"claude": "/Users/owner/.volta/bin/claude", "az": "/usr/local/bin/az", "git": "/usr/bin/git"},
 			check: func(t *testing.T, s LaunchdJobStatus) {
 				want := []string{"/Users/owner/.volta/bin", "/usr/local/bin"}
@@ -56,6 +62,21 @@ func TestLaunchdInspect(t *testing.T) {
 					t.Errorf("missing = %v, want %v", s.MissingPathDirs, want)
 				}
 			}},
+		{name: "hand-written direct plist, unrecorded", plist: "direct-cleanup", print: &loaded, state: StateModified,
+			paths: map[string]string{"claude": "/opt/homebrew/bin/claude"},
+			check: func(t *testing.T, s LaunchdJobStatus) {
+				if !strings.Contains(s.Detail, "differs from the plist this version renders") {
+					t.Errorf("detail %q", s.Detail)
+				}
+			}},
+		{name: "recorded and unedited but differs from the rendering", plist: "direct-cleanup", print: &loaded, state: StateOutdated,
+			paths: map[string]string{"claude": "/opt/homebrew/bin/claude"},
+			recorded: func(path string, fixture []byte) map[string]string {
+				return map[string]string{path: sha256Hex(fixture)}
+			}},
+		{name: "recorded and edited", plist: "direct-cleanup", print: &loaded, state: StateModified,
+			paths:    map[string]string{"claude": "/opt/homebrew/bin/claude"},
+			recorded: func(path string, _ []byte) map[string]string { return map[string]string{path: "0123abcd"} }},
 		{name: "foreign program", plist: "foreign-program", print: &loaded, state: StateModified},
 		{name: "unparseable", plist: "unparseable", state: StateModified,
 			check: func(t *testing.T, s LaunchdJobStatus) {
@@ -63,7 +84,7 @@ func TestLaunchdInspect(t *testing.T) {
 					t.Error("ParseErr not set")
 				}
 			}},
-		{name: "launchctl unavailable", plist: "direct-cleanup", printErr: errors.New("launchctl: not found"), state: StateOK,
+		{name: "launchctl unavailable", plist: "@rendered", printErr: errors.New("launchctl: not found"), state: StateOK,
 			check: func(t *testing.T, s LaunchdJobStatus) {
 				if s.LoadedKnown || !strings.Contains(s.Detail, "load state unknown") {
 					t.Errorf("status %+v", s)
@@ -76,15 +97,30 @@ func TestLaunchdInspect(t *testing.T) {
 			p := testPaths(t)
 			fsys := NewFakeFS(t, filepath.Dir(p.Home))
 			fsys.ReadOnly = true
-			job := DefaultJobSpecs(p, p.InstalledBinary())[0]
+			job := DefaultJobSpecs(p, p.InstalledBinary(), testJobPATH)[0]
 			if job.Name != JobCleanup {
 				t.Fatalf("first default job = %s", job.Name)
 			}
-			l := LaunchdJobs{FS: fsys, Paths: p}
-			if tc.plist != "" {
-				b := readTestdata(t, filepath.Join("testdata", "fixtures", "launchd", tc.plist+".plist"))
-				b = []byte(strings.ReplaceAll(string(b), "__HOME__", p.Home))
-				writeTestFile(t, l.PlistPath(job), b, 0o644)
+			l := LaunchdJobs{FS: fsys, Paths: p, Assets: integration.FS}
+			var fixture []byte
+			switch tc.plist {
+			case "":
+			case "@rendered":
+				files, err := l.Render(job)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fixture = files[l.PlistPath(job)]
+			default:
+				fixture = readTestdata(t, filepath.Join("testdata", "fixtures", "launchd", tc.plist+".plist"))
+				fixture = []byte(strings.ReplaceAll(string(fixture), "__HOME__", p.Home))
+			}
+			if fixture != nil {
+				writeTestFile(t, l.PlistPath(job), fixture, 0o644)
+			}
+			var recorded map[string]string
+			if tc.recorded != nil {
+				recorded = tc.recorded(l.PlistPath(job), fixture)
 			}
 			argv := []string{"launchctl", "print", "gui/501/" + job.Label}
 			runner := NewFakeRunner(t)
@@ -106,7 +142,7 @@ func TestLaunchdInspect(t *testing.T) {
 			}
 			l.Runner = runner
 
-			s, err := l.Inspect(context.Background(), job)
+			s, err := l.Inspect(context.Background(), job, recorded)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,7 +152,7 @@ func TestLaunchdInspect(t *testing.T) {
 			if tc.check != nil {
 				tc.check(t, s)
 			}
-			st, detail, err := l.Detect(context.Background(), job)
+			st, detail, err := l.Detect(context.Background(), job, recorded)
 			if err != nil || st != s.State || detail != s.Detail {
 				t.Errorf("Detect = %s, %q, %v; Inspect = %s, %q", st, detail, err, s.State, s.Detail)
 			}
@@ -130,7 +166,7 @@ func TestLaunchdInspect(t *testing.T) {
 func TestDefaultJobSpecs(t *testing.T) {
 	t.Parallel()
 	p := testPaths(t)
-	jobs := DefaultJobSpecs(p, p.InstalledBinary())
+	jobs := DefaultJobSpecs(p, p.InstalledBinary(), testJobPATH)
 	if len(jobs) != 2 {
 		t.Fatalf("jobs = %+v", jobs)
 	}
@@ -139,7 +175,7 @@ func TestDefaultJobSpecs(t *testing.T) {
 		w := want[j.Name]
 		if j.Label != LaunchdLabelPrefix+j.Name || j.Program != p.InstalledBinary() ||
 			!slices.Equal(j.Args, []string{j.Name}) || j.Hour != w[0] || j.Minute != w[1] ||
-			j.LogPath != filepath.Join(p.StateDir, j.Name+".log") {
+			j.PATH != testJobPATH || j.LogPath != filepath.Join(p.StateDir, j.Name+".log") {
 			t.Errorf("job %+v", j)
 		}
 	}

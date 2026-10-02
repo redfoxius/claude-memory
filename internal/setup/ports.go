@@ -198,7 +198,7 @@ type OllamaProber interface {
 // JobSpec describes one scheduled job (AC-43).
 type JobSpec struct {
 	Name    string   // "cleanup" | "ingest-pr"
-	Label   string   // launchd label (io.github.claude-memory.<name>) or systemd unit base name
+	Label   string   // launchd label (io.github.claude-memory.<name>)
 	Program string   // absolute path of the installed binary
 	Args    []string // subcommand arguments, e.g. ["cleanup"]
 	Hour    int      // daily start time, local
@@ -213,16 +213,17 @@ type JobDetector interface {
 	// Render returns the unit/plist files for j, keyed by absolute path.
 	Render(j JobSpec) (map[string][]byte, error)
 	// Detect reports the job's state read-only (file read plus one
-	// launchctl print / systemctl --user show) with a one-line detail.
-	Detect(ctx context.Context, j JobSpec) (State, string, error)
+	// launchctl print) with a one-line detail. recorded maps a plist path to
+	// the sha256 the manifest recorded (nil without a manifest).
+	Detect(ctx context.Context, j JobSpec, recorded map[string]string) (State, string, error)
 }
 
-// JobManager manages scheduled jobs for one backend: launchd (Detect in
-// slice 1, the rest in slice 2) or systemd (slice 2).
+// JobManager manages scheduled jobs for one backend. Only launchd exists in
+// this build; removal arrives with uninstall.
 type JobManager interface {
 	JobDetector
+	// Install writes the unit and (re)loads it.
 	Install(ctx context.Context, j JobSpec) error
-	Remove(ctx context.Context, j JobSpec) error
 }
 
 // ClaudeCLI is the claude CLI, writers only [S2]: `claude mcp add|remove
@@ -256,7 +257,7 @@ type Check struct {
 // (Design 20). Its port fields are the narrowed read interfaces, so a file
 // write, a migration, a model pull or a job install from those phases does
 // not compile. The one runtime guard left is Runner (Cmd.Mutating ->
-// ErrReadOnly). Jobs is nil when no step reads it (2a).
+// ErrReadOnly). Jobs is the launchd detector.
 type ReadPorts struct {
 	FS       ReadFS
 	Runner   Runner // read-only adapter
@@ -272,7 +273,7 @@ type ReadPorts struct {
 
 // WritePorts is what Apply (and uninstall) receives: the read ports plus the
 // writable counterparts (Design 20). Under --dry-run its FS and Runner are
-// the read-only adapters. ClaudeCLI and Jobs are nil in 2a.
+// the read-only adapters.
 type WritePorts struct {
 	ReadPorts // embedded read view: its FS/Runner/DB/Ollama/Jobs are the same adapters
 

@@ -4,19 +4,16 @@
 <dict>
 	<key>Label</key>
 	<string>io.github.claude-memory.cleanup</string>
-
-	<!--
-	__HOME__ is a placeholder: INSTALL.md's install step substitutes the
-	real $HOME (e.g. with `sed`) before copying this file into
-	~/Library/LaunchAgents/ — launchd plists do not expand shell
-	variables themselves.
-	-->
 	<key>ProgramArguments</key>
 	<array>
-		<string>__HOME__/.local/bin/claude-memory-run-with-env.sh</string>
+		<string>/Users/test/.local/bin/claude-memory</string>
 		<string>cleanup</string>
 	</array>
-
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/Users/test/.volta/bin:/usr/bin:/bin</string>
+	</dict>
 	<key>StartCalendarInterval</key>
 	<dict>
 		<key>Hour</key>
@@ -24,13 +21,11 @@
 		<key>Minute</key>
 		<integer>15</integer>
 	</dict>
-
 	<key>RunAtLoad</key>
 	<false/>
-
 	<key>StandardOutPath</key>
-	<string>__HOME__/.local/state/claude-memory/cleanup.log</string>
+	<string>/Users/test/.local/state/claude-memory/cleanup.log</string>
 	<key>StandardErrorPath</key>
-	<string>__HOME__/.local/state/claude-memory/cleanup.log</string>
+	<string>/Users/test/.local/state/claude-memory/cleanup.log</string>
 </dict>
 </plist>

@@ -6,9 +6,7 @@ import (
 )
 
 // TestInstallStepsRegistry is the registry in AC-7 order, ending in the final
-// doctor: the exact order, every Requires pointing at an earlier step, and no
-// jobs step yet. WritePorts.Jobs (and ReadPorts.Jobs) are
-// still nil, so a registered step that used them would dereference nil.
+// doctor: the exact order and every Requires pointing at an earlier step.
 func TestInstallStepsRegistry(t *testing.T) {
 	t.Parallel()
 	steps := InstallSteps("v1.0.0", NewRedactor())
@@ -27,18 +25,13 @@ func TestInstallStepsRegistry(t *testing.T) {
 		ids = append(ids, s.ID())
 	}
 	want := []string{"platform", "binary", "prereqs", "topology", "envfile", "database", "migrate", "ollama", "namespaces",
-		"hooks.scripts", "hooks.settings", "mcp", "skills", "claude-md", "doctor"}
+		"hooks.scripts", "hooks.settings", "mcp", "skills", "claude-md", "jobs", "doctor"}
 	if !slices.Equal(ids, want) {
 		t.Errorf("registry = %v, want %v", ids, want)
 	}
 	hs := steps[slices.IndexFunc(steps, func(s Step) bool { return s.ID() == "hooks.settings" })].Requires()
 	if !slices.Contains(hs, "migrate") || !slices.Contains(hs, "hooks.scripts") {
 		t.Errorf("hooks.settings must require migrate and hooks.scripts (AC-7), has %v", hs)
-	}
-	for _, banned := range []string{"jobs"} {
-		if seen[banned] {
-			t.Errorf("%q arrives in a later work item and must not be registered yet", banned)
-		}
 	}
 }
 

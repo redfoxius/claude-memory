@@ -89,8 +89,18 @@ func TestParseInstallFlags(t *testing.T) {
 				t.Errorf("ClaudeMD = %q", o.Inputs.ClaudeMD)
 			}
 		}},
-		{"--pr-repos is 2b", []string{"--pr-repos", "/a"}, "slice 2b", nil},
-		{"--no-jobs is 2b", []string{"--no-jobs"}, "slice 2b", nil},
+		{"--pr-repos empty", []string{"--pr-repos="}, "--pr-repos needs", nil},
+		{"--pr-repos relative", []string{"--pr-repos", "repo"}, "absolute", nil},
+		{"--pr-repos", []string{"--pr-repos", "/a, /b"}, "", func(t *testing.T, o installOptions) {
+			if o.Inputs.PRRepos != "/a, /b" {
+				t.Errorf("PRRepos = %q", o.Inputs.PRRepos)
+			}
+		}},
+		{"--no-jobs", []string{"--no-jobs"}, "", func(t *testing.T, o installOptions) {
+			if !o.Inputs.NoJobs {
+				t.Error("NoJobs not set")
+			}
+		}},
 		{"pg-sslmode junk", []string{"--pg-sslmode", "verify-full"}, "want prefer, require or disable", nil},
 		{"pg-dsn with a password", []string{"--pg-dsn", "postgresql://u:pw@h/db"}, "--pg-dsn", nil},
 		{"ollama-url junk", []string{"--ollama-url", "ftp://h"}, "--ollama-url", nil},

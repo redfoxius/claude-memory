@@ -8,10 +8,8 @@ import (
 // InstallSteps is the step registry of `claude-memory install` (AC-7), in
 // execution order: platform, binary, prereqs, topology, envfile, database,
 // migrate, ollama, namespaces, hooks.scripts, hooks.settings, mcp, skills,
-// claude-md, doctor. The remaining slice-2b step (jobs) arrives with its own
-// work item; until then WritePorts.Jobs (and ReadPorts.Jobs) are nil, so the
-// registry must not contain a jobs step (registry test). The mcp step
-// needs WritePorts.ClaudeCLI, which the composition root sets.
+// claude-md, jobs, doctor. The mcp step needs WritePorts.ClaudeCLI and the
+// jobs step ReadPorts.Jobs / WritePorts.Jobs, which the composition root sets.
 //
 // version is the running binary's version; red is the run's Redactor, which
 // the steps that handle passwords or error text from the network need.
@@ -35,6 +33,7 @@ func InstallSteps(version string, red *Redactor) []Step {
 		MCPStep{Version: version},
 		SkillsStep{Version: version},
 		ClaudeMDStep{Version: version},
+		JobsStep{Version: version},
 		DoctorStep{Version: version, Redactor: red},
 	}
 }

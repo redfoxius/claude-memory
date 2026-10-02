@@ -192,8 +192,8 @@ func TestPortBuilders(t *testing.T) {
 	p := filepath.Join(dir, "f")
 
 	ro := readOnlyPorts(d)
-	if ro.Jobs != nil {
-		t.Error("ReadPorts.Jobs must be nil in 2a")
+	if ro.Jobs == nil {
+		t.Error("ReadPorts.Jobs must be set for the jobs step")
 	}
 	if _, ok := ro.FS.(setup.FS); ok {
 		// readOnlyFS carries write methods, but they all refuse; the
@@ -214,8 +214,8 @@ func TestPortBuilders(t *testing.T) {
 	if fmt.Sprintf("%T/%v", wp.ReadPorts.Runner, wp.ReadPorts.Runner) != fmt.Sprintf("%T/%v", wp.Runner, wp.Runner) {
 		t.Errorf("WritePorts.ReadPorts.Runner is %v, want the same adapter as Runner (%v)", wp.ReadPorts.Runner, wp.Runner)
 	}
-	if wp.Jobs != nil {
-		t.Error("WritePorts.Jobs must stay nil until the jobs step (WI-S2-13a)")
+	if wp.Jobs == nil {
+		t.Error("WritePorts.Jobs must be set for the jobs step")
 	}
 	if wp.ClaudeCLI == nil {
 		t.Error("WritePorts.ClaudeCLI must be set for the mcp step")

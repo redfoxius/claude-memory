@@ -46,10 +46,6 @@ var deferredInstallFlags = map[string]string{
 	"seed-file": "--seed-file is deferred (spec §12.1)",
 	"purge":     "--purge-* is deferred (spec §12.1)",
 	"latency":   "--latency is a doctor flag and is deferred (spec §12.1, AC-61)",
-	// Flags of steps that arrive in slice 2b: accepting them in 2a would
-	// silently ignore them.
-	"pr-repos": "--pr-repos needs the jobs step, which is not part of this build (slice 2b)",
-	"no-jobs":  "--no-jobs needs the jobs step, which is not part of this build (slice 2b); there is no job to skip",
 }
 
 // listFlag is a repeatable string flag.
@@ -104,6 +100,8 @@ func parseInstallFlags(args []string, stderr io.Writer) (installOptions, error) 
 	fs.Var(listFlag{&in.Namespaces}, "namespace", "NAME=GLOB namespace mapping (repeatable)")
 	fs.StringVar(&in.ClaudeMD, "claude-md", "", "CLAUDE.md file for the memory section (default ~/.claude/CLAUDE.md)")
 	fs.StringVar(&in.JobsBackend, "jobs-backend", "", "launchd|systemd|none")
+	fs.StringVar(&in.PRRepos, "pr-repos", "", "comma-separated absolute paths of repositories for ingest-pr")
+	fs.BoolVar(&in.NoJobs, "no-jobs", false, "do not install the scheduled jobs")
 	fs.BoolVar(&in.NoDoctor, "no-doctor", false, "do not run doctor at the end")
 	fs.BoolVar(&o.AllowRoot, "allow-root", false, "allow running as root")
 	if err := fs.Parse(args); err != nil {
@@ -120,14 +118,13 @@ func parseInstallFlags(args []string, stderr io.Writer) (installOptions, error) 
 
 	// An empty value would silently mean "the default", which is the opposite
 	// of what a script passing an unset variable intends.
-	claudeMDGiven := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "claude-md" {
-			claudeMDGiven = true
-		}
-	})
-	if claudeMDGiven && strings.TrimSpace(in.ClaudeMD) == "" {
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	if given["claude-md"] && strings.TrimSpace(in.ClaudeMD) == "" {
 		return installOptions{}, usageError(errors.New("--claude-md needs a path"))
+	}
+	if given["pr-repos"] && strings.TrimSpace(in.PRRepos) == "" {
+		return installOptions{}, usageError(errors.New("--pr-repos needs at least one repository path"))
 	}
 
 	// --upgrade is exactly --yes: one code path (AC-52).
@@ -188,6 +185,11 @@ func validateInstallValues(in *setup.Inputs) error {
 	if in.OllamaURL != "" {
 		if err := setup.ValidateOllamaURL(in.OllamaURL); err != nil {
 			return fmt.Errorf("--ollama-url: %w", err)
+		}
+	}
+	if in.PRRepos != "" {
+		if err := setup.ValidatePRRepos(in.PRRepos); err != nil {
+			return fmt.Errorf("--pr-repos: %w", err)
 		}
 	}
 	for _, v := range in.Namespaces {

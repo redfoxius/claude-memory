@@ -237,15 +237,25 @@ func (f *doctorFixture) run() DoctorReport {
 // darwin switches the fixture to macOS with both launchd jobs loaded.
 func (f *doctorFixture) darwin(prRepos bool) {
 	f.plat = PlatformInfo{OS: OSDarwin, Arch: "arm64", OSVersion: "macOS 15.1", JobsBackend: JobsLaunchd}
-	plist := strings.ReplaceAll(string(readTestdata(f.t, "testdata/fixtures/launchd/direct-cleanup.plist")), "__HOME__", f.p.Home)
-	writeFile(f.t, filepath.Join(f.p.LaunchAgentsDir, LaunchdLabelPrefix+JobCleanup+".plist"), []byte(plist), 0o644)
+	f.runner.SetPath("git", "/usr/bin/git")
 	if prRepos {
-		ing := strings.ReplaceAll(plist, "cleanup", "ingest-pr")
-		writeFile(f.t, filepath.Join(f.p.LaunchAgentsDir, LaunchdLabelPrefix+JobIngestPR+".plist"), []byte(ing), 0o644)
 		f.appendEnv("MEMORY_PR_INGEST_REPOS=" + f.p.Home + "/work\n")
 		f.runner.SetPath("az", "/usr/bin/az")
 	}
-	f.runner.SetPath("git", "/usr/bin/git")
+	// The plists install renders: the doctor compares against the rendering.
+	lj := LaunchdJobs{FS: f.fs, Runner: f.runner, Paths: f.p, Assets: integration.FS}
+	for _, j := range DefaultJobSpecs(f.p, f.p.InstalledBinary(), ComputeJobPATH(f.runner)) {
+		if j.Name == JobIngestPR && !prRepos {
+			continue
+		}
+		files, err := lj.Render(j)
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		for path, b := range files {
+			writeFile(f.t, path, b, 0o644)
+		}
+	}
 	loaded := readTestdata(f.t, "testdata/fixtures/launchd/launchctl-print-loaded.txt")
 	f.runner.Script(ArgvPrefix("launchctl", "print"), Result{Stdout: loaded})
 }
@@ -558,7 +568,7 @@ func TestDoctorBranches(t *testing.T) {
 			f.darwin(false)
 			legacy := strings.ReplaceAll(string(readTestdata(f.t, "testdata/fixtures/launchd/legacy-cleanup.plist")), "__HOME__", f.p.Home)
 			writeFile(f.t, filepath.Join(f.p.LaunchAgentsDir, LaunchdLabelPrefix+JobCleanup+".plist"), []byte(legacy), 0o644)
-		}, want: map[string]Status{"jobs": StatusWarn}, detail: map[string]string{"jobs": "run-with-env.sh"}, remedy: map[string]string{"jobs": "once slice 2 ships"}},
+		}, want: map[string]Status{"jobs": StatusWarn}, detail: map[string]string{"jobs": "run-with-env.sh"}, remedy: map[string]string{"jobs": "claude-memory install --upgrade"}},
 		{name: "jobs: darwin cleanup missing", mutate: func(f *doctorFixture) {
 			f.darwin(false)
 			rm(f, f.p.LaunchAgentsDir)
@@ -568,7 +578,24 @@ func TestDoctorBranches(t *testing.T) {
 			plist := strings.ReplaceAll(string(readTestdata(f.t, "testdata/fixtures/launchd/direct-cleanup.plist")), "__HOME__", f.p.Home)
 			writeFile(f.t, filepath.Join(f.p.LaunchAgentsDir, LaunchdLabelPrefix+JobCleanup+".plist"), []byte(plist), 0o644)
 			f.runner.Script(ArgvPrefix("launchctl", "print"), Result{ExitCode: 113, Stderr: readTestdata(f.t, "testdata/fixtures/launchd/launchctl-print-not-found.txt")})
-		}, want: map[string]Status{"jobs": StatusWarn}, detail: map[string]string{"jobs": "not loaded"}, remedy: map[string]string{"jobs": "launchctl bootstrap gui/501"}},
+		}, want: map[string]Status{"jobs": StatusWarn}, detail: map[string]string{"jobs": "not loaded"}, remedy: map[string]string{"jobs": "claude-memory install --upgrade"}},
+		{name: "jobs: darwin rendered plists are ok", mutate: func(f *doctorFixture) { f.darwin(true) },
+			want: map[string]Status{"jobs": StatusPass}},
+		{name: "jobs: darwin hand-written plist differs from the rendering", mutate: func(f *doctorFixture) {
+			f.darwin(false)
+			plist := strings.ReplaceAll(string(readTestdata(f.t, "testdata/fixtures/launchd/direct-cleanup.plist")), "__HOME__", f.p.Home)
+			writeFile(f.t, filepath.Join(f.p.LaunchAgentsDir, LaunchdLabelPrefix+JobCleanup+".plist"), []byte(plist), 0o644)
+		}, want: map[string]Status{"jobs": StatusWarn}, detail: map[string]string{"jobs": "differs from the plist this version renders"},
+			remedy: map[string]string{"jobs": "claude-memory install --upgrade"}},
+		{name: "jobs: darwin recorded unedited plist differs from the rendering", mutate: func(f *doctorFixture) {
+			f.darwin(false)
+			path := filepath.Join(f.p.LaunchAgentsDir, LaunchdLabelPrefix+JobCleanup+".plist")
+			old, _ := os.ReadFile(path)
+			old = bytes.Replace(old, []byte("<integer>15</integer>"), []byte("<integer>45</integer>"), 1)
+			writeFile(f.t, path, old, 0o644)
+			writeManifest(f, Artifact{Step: "jobs", Kind: KindLaunchd, Path: path, Identity: LaunchdLabelPrefix + JobCleanup, SHA256: sha256Hex(old), Version: "v0"})
+		}, want: map[string]Status{"jobs": StatusWarn}, detail: map[string]string{"jobs": "written by install, unedited"},
+			remedy: map[string]string{"jobs": "claude-memory install --upgrade"}},
 		{name: "jobs: unsupported OS", mutate: func(f *doctorFixture) { f.plat = PlatformInfo{OS: "windows", Arch: "amd64"} },
 			want: map[string]Status{"jobs": StatusInfo}},
 
@@ -850,9 +877,9 @@ func TestDoctorNeverRunsRegisteredMCPCommand(t *testing.T) {
 	if err != nil || !reg.Present || reg.Server.Command != sentinelCmd {
 		t.Fatalf("ReadMCPRegistration = %+v, %v", reg, err)
 	}
-	lj := LaunchdJobs{FS: f.fs, Runner: f.runner, Paths: f.p}
-	for _, j := range DefaultJobSpecs(f.p, f.p.InstalledBinary()) {
-		if _, _, err := lj.Detect(context.Background(), j); err != nil {
+	lj := LaunchdJobs{FS: f.fs, Runner: f.runner, Paths: f.p, Assets: integration.FS}
+	for _, j := range DefaultJobSpecs(f.p, f.p.InstalledBinary(), ComputeJobPATH(f.runner)) {
+		if _, _, err := lj.Detect(context.Background(), j, nil); err != nil {
 			t.Errorf("Detect %s: %v", j.Name, err)
 		}
 	}

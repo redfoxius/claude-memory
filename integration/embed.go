@@ -8,7 +8,6 @@ package integration
 import "embed"
 
 // FS holds the embedded assets, at their paths relative to this directory.
-// Slice 2 adds the systemd templates.
 //
 //go:embed hooks skills launchd claude-md-section.md settings.snippet.json
 var FS embed.FS
@@ -22,8 +21,7 @@ const (
 	SettingsSnippet      = "settings.snippet.json"
 	SkillsDir            = "skills"
 	LaunchdDir           = "launchd"
-	LaunchdCleanup       = "launchd/io.github.claude-memory.cleanup.plist"
-	LaunchdIngestPR      = "launchd/io.github.claude-memory.ingest-pr.plist"
+	LaunchdJobTemplate   = "launchd/job.plist.tmpl"
 )
 
 // HookScripts lists the hook wrapper scripts, in install order.

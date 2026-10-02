@@ -120,6 +120,8 @@ type Inputs struct {
 	OllamaURL   string
 	OllamaModel string
 	PRRepos     string
+	// NoJobs is --no-jobs: the jobs step is skipped.
+	NoJobs bool
 	// ClaudeMD is --claude-md PATH (AC-4, AC-42): the CLAUDE.md file that
 	// receives the managed block; "" = the default <ClaudeDir>/CLAUDE.md. It
 	// is resolved against Paths.Cwd by the claude-md step.

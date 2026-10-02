@@ -124,21 +124,25 @@ func nonEmpty(s string) []string {
 
 // ---- jobs -------------------------------------------------------------------------
 
-const jobsRemedyLegacy = "re-install the jobs with `claude-memory install` once slice 2 ships; until then see integration/INSTALL.md step 8"
+const (
+	jobsRemedyInstall = "run `claude-memory install` to install the jobs"
+	jobsRemedyUpgrade = "run `claude-memory install --upgrade` to re-install the jobs from this version"
+)
 
 func (d *doctor) checkJobs(ctx context.Context) (Status, string, string) {
 	switch d.Platform.OS {
 	case OSDarwin:
 	case OSLinux:
-		return StatusInfo, "not checked yet: systemd user timers are detected from slice 2 on", ""
+		return StatusInfo, "not checked: this build installs scheduled jobs on macOS (launchd) only", ""
 	default:
 		return StatusInfo, "not checked: unsupported OS " + orDash(d.Platform.OS), ""
 	}
-	lj := LaunchdJobs{FS: d.FS, Runner: d.Runner, Paths: d.Paths}
+	lj := LaunchdJobs{FS: d.FS, Runner: d.Runner, Paths: d.Paths, Assets: d.Assets}
+	recorded := recordedJobHashes(d.manifest.Manifest)
 	var warns, oks []string
 	remedy := ""
-	for _, j := range DefaultJobSpecs(d.Paths, d.binPath) {
-		s, err := lj.Inspect(ctx, j)
+	for _, j := range DefaultJobSpecs(d.Paths, d.binPath, ComputeJobPATH(d.Runner)) {
+		s, err := lj.Inspect(ctx, j, recorded)
 		switch {
 		case err != nil:
 			warns = append(warns, j.Name+": "+d.redact(err.Error()))
@@ -147,17 +151,13 @@ func (d *doctor) checkJobs(ctx context.Context) (Status, string, string) {
 		case s.State == StateAbsent:
 			warns = append(warns, j.Name+": not installed ("+s.Detail+")")
 			if remedy == "" {
-				remedy = "load the job per integration/INSTALL.md step 8"
+				remedy = jobsRemedyInstall
 			}
 		case s.State == StateOK:
 			oks = append(oks, j.Name+": "+s.Detail)
 		default:
 			warns = append(warns, j.Name+": "+s.Detail)
-			if s.Legacy || len(s.MissingPathDirs) > 0 || s.Program != j.Program {
-				remedy = jobsRemedyLegacy
-			} else if remedy == "" {
-				remedy = "launchctl bootstrap gui/" + fmt.Sprint(d.Paths.UID) + " " + s.PlistPath
-			}
+			remedy = jobsRemedyUpgrade
 		}
 	}
 	if len(warns) > 0 {

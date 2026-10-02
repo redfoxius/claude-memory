@@ -1,5 +1,12 @@
 # Claude Memory Deployment
 
+> **Laptop side: use `claude-memory install`** (and `claude-memory install --upgrade`
+> after a new build); `--dry-run` shows the plan first, `claude-memory doctor`
+> checks the result. It sets up the env file, database role, schema, Ollama model,
+> namespaces, hooks, MCP registration, skills, the CLAUDE.md block and, on macOS,
+> the scheduled jobs. The manual steps below (and in `integration/INSTALL.md`) are the
+> reference for what it does; the server side (Docker, Postgres, Tailscale) stays manual.
+
 ## Topology B (v0.2)
 
 **Laptop** (macOS, arm64): Ollama + `bge-m3` (Homebrew, Metal GPU), `claude-memory` MCP server (stdio), and all CLI subcommands. Embedding and extraction run locally; all data writes reach the server over Tailscale. **Server** (home Mac Mini/Ubuntu 26.04): Postgres 16 + pgvector only, bound to Tailscale IP, reachable only via password auth (scram-sha-256) and network-restricted to `100.64.0.0/10` CGNAT. No Ollama, no MCP listener on the server. This topology is why we measure acceptable performance on the laptop (12–60× faster than server's AVX-only CPU); see AC-44 baseline below.

@@ -13,13 +13,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"text/template"
 )
 
-// launchd jobs, read-only half (spec AC-44, AC-58 `jobs`; plan WI-S1-10).
-// Slice 1 only detects: one plist read plus one `launchctl print
-// gui/<uid>/<label>` per job, never a mutating launchctl call. Render,
-// Install and Remove (and therefore the full JobManager interface) arrive in
-// slice 2 (WI-S2-13).
+// launchd jobs (spec AC-44, AC-58 `jobs`; plan WI-S1-10, WI-S2-13a).
+// LaunchdJobs is the read-only half: Render, plus Inspect/Detect (one plist
+// read and one `launchctl print gui/<uid>/<label>` per job, never a mutating
+// launchctl call). LaunchdManager adds Install. There is no Remove: uninstall
+// is not part of this build.
 
 // LaunchdLabelPrefix is the label prefix of our jobs, kept from the manual
 // install so hand-installed jobs are recognized (§13 #6).
@@ -46,22 +47,154 @@ const launchdDefaultPATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 var JobTools = []string{"claude", "git", "az"}
 
 // DefaultJobSpecs returns the two jobs (AC-43) running binPath (from
-// ResolveBinPath) with the log paths filled in; PATH is computed by the jobs
-// step [S2].
-func DefaultJobSpecs(p Paths, binPath string) []JobSpec {
+// ResolveBinPath) with jobPATH as their PATH and the log paths filled in.
+func DefaultJobSpecs(p Paths, binPath, jobPATH string) []JobSpec {
 	mk := func(name string, hour, minute int) JobSpec {
 		return JobSpec{Name: name, Label: LaunchdLabelPrefix + name, Program: binPath,
-			Args: []string{name}, Hour: hour, Minute: minute, LogPath: filepath.Join(p.StateDir, name+".log")}
+			Args: []string{name}, Hour: hour, Minute: minute, PATH: jobPATH,
+			LogPath: filepath.Join(p.StateDir, name+".log")}
 	}
 	return []JobSpec{mk(JobCleanup, 7, 15), mk(JobIngestPR, 7, 0)}
 }
 
+// ComputeJobPATH is the PATH given to the jobs (AC-43): the directories of
+// JobTools as found on the user's PATH (Runner.LookPath), in JobTools order,
+// then /usr/bin and /bin. Preferring a stable shim directory over a versioned
+// one (nvm) is deferred.
+func ComputeJobPATH(r Runner) string {
+	var dirs []string
+	for _, tool := range JobTools {
+		if p, err := r.LookPath(tool); err == nil && p != "" {
+			if d := filepath.Dir(p); !slices.Contains(dirs, d) {
+				dirs = append(dirs, d)
+			}
+		}
+	}
+	for _, d := range []string{"/usr/bin", "/bin"} {
+		if !slices.Contains(dirs, d) {
+			dirs = append(dirs, d)
+		}
+	}
+	return strings.Join(dirs, string(filepath.ListSeparator))
+}
+
+// recordedJobHashes maps each launchd plist path the manifest recorded to its
+// sha256, the input of JobDetector.Detect. The jobs step and doctor both use
+// it, so they compare against the same record. nil without a manifest.
+func recordedJobHashes(m *Manifest) map[string]string {
+	var out map[string]string
+	for _, a := range m.Find(KindLaunchd) {
+		if a.Path == "" || a.SHA256 == "" {
+			continue
+		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[a.Path] = a.SHA256
+	}
+	return out
+}
+
+// assetLaunchdTemplate is the embedded plist template, relative to Assets.
+const assetLaunchdTemplate = "launchd/job.plist.tmpl"
+
 // LaunchdJobs inspects launchd jobs through the ports. Runner may be the
-// read-only adapter: every command it runs has Mutating unset.
+// read-only adapter: every command it runs has Mutating unset. Assets is the
+// embedded integration tree (the plist template).
 type LaunchdJobs struct {
 	FS     ReadFS
 	Runner Runner
 	Paths  Paths
+	Assets fs.FS
+}
+
+// LaunchdManager is LaunchdJobs plus the write half (Install). Write and the
+// embedded FS are the same adapter; under --dry-run both refuse every write
+// and the Runner refuses launchctl bootout/bootstrap.
+type LaunchdManager struct {
+	LaunchdJobs
+	Write FS
+}
+
+var (
+	_ JobDetector = LaunchdJobs{}
+	_ JobManager  = LaunchdManager{}
+)
+
+var plistTemplateFuncs = template.FuncMap{"xml": func(s string) (string, error) {
+	var b bytes.Buffer
+	if err := xml.EscapeText(&b, []byte(s)); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}}
+
+// Render implements JobDetector: the plist for j, keyed by its absolute path.
+func (l LaunchdJobs) Render(j JobSpec) (map[string][]byte, error) {
+	raw, err := fs.ReadFile(l.Assets, assetLaunchdTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("embedded %s: %w", assetLaunchdTemplate, err)
+	}
+	t, err := template.New("job").Funcs(plistTemplateFuncs).Parse(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", assetLaunchdTemplate, err)
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, j); err != nil {
+		return nil, fmt.Errorf("render %s for %s: %w", assetLaunchdTemplate, j.Name, err)
+	}
+	return map[string][]byte{l.PlistPath(j): buf.Bytes()}, nil
+}
+
+// launchctlNotLoaded reports whether a failed `launchctl bootout` only means
+// the job was not loaded: exit 3 (measured on macOS 26.2, WI-S1-0) or 113, or
+// stderr saying so.
+func launchctlNotLoaded(res Result) bool {
+	if res.ExitCode == 3 || res.ExitCode == 113 {
+		return true
+	}
+	e := strings.ToLower(string(res.Stderr))
+	return strings.Contains(e, "no such process") || strings.Contains(e, "not loaded") || strings.Contains(e, "could not find")
+}
+
+// Install implements JobManager: it writes the plist, boots out a loaded copy
+// (a not-loaded job is fine) and bootstraps the new one, so a changed plist is
+// always the one launchd runs.
+func (m LaunchdManager) Install(ctx context.Context, j JobSpec) error {
+	files, err := m.Render(j)
+	if err != nil {
+		return err
+	}
+	if dir := filepath.Dir(j.LogPath); dir != "." {
+		if err := m.Write.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create %s: %w", dir, err)
+		}
+	}
+	for p, b := range files {
+		if err := m.Write.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", filepath.Dir(p), err)
+		}
+		if err := m.Write.WriteFileAtomic(p, b, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", p, err)
+		}
+	}
+	domain := "gui/" + strconv.Itoa(m.Paths.UID)
+	res, err := m.Runner.Run(ctx, Cmd{Argv: []string{"launchctl", "bootout", domain + "/" + j.Label}, Mutating: true})
+	if err != nil {
+		return fmt.Errorf("launchctl bootout %s: %w", j.Label, err)
+	}
+	if res.ExitCode != 0 && !launchctlNotLoaded(res) {
+		return fmt.Errorf("launchctl bootout %s: exit %d: %s", j.Label, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
+	}
+	plist := m.PlistPath(j)
+	res, err = m.Runner.Run(ctx, Cmd{Argv: []string{"launchctl", "bootstrap", domain, plist}, Mutating: true})
+	if err != nil {
+		return fmt.Errorf("launchctl bootstrap %s: %w", j.Label, err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("launchctl bootstrap %s: exit %d: %s", j.Label, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
+	}
+	return nil
 }
 
 // PlistPath is <LaunchAgentsDir>/<label>.plist.
@@ -86,22 +219,27 @@ type LaunchdJobStatus struct {
 	LoadedKnown     bool   // launchctl print ran
 	Loaded          bool   // launchctl print found the service
 	LastExit        string // "last exit code" from launchctl print ("" unknown)
-	State           State
-	Detail          string
+	// Hash is the sha256 of the file on disk.
+	Hash   string
+	State  State
+	Detail string
 }
 
-// Detect implements the read-only half of JobManager.
-func (l LaunchdJobs) Detect(ctx context.Context, j JobSpec) (State, string, error) {
-	s, err := l.Inspect(ctx, j)
+// Detect implements JobDetector. recorded maps plist path to the sha256 the
+// manifest recorded (recordedJobHashes; nil without a manifest).
+func (l LaunchdJobs) Detect(ctx context.Context, j JobSpec, recorded map[string]string) (State, string, error) {
+	s, err := l.Inspect(ctx, j, recorded)
 	return s.State, s.Detail, err
 }
 
 // Inspect reads the job's plist and asks launchctl whether it is loaded.
 // State: absent (no plist); modified (unparseable, foreign label, another
-// program that is not the legacy wrapper, other arguments); outdated
-// (legacy run-with-env.sh wrapper, PATH lacking tool directories, or not
-// loaded: apply in slice 2 replaces/loads it); ok otherwise.
-func (l LaunchdJobs) Inspect(ctx context.Context, j JobSpec) (LaunchdJobStatus, error) {
+// program that is not the legacy wrapper, other arguments, or a plist that
+// differs from the rendering and is not one install recorded unedited);
+// outdated (legacy run-with-env.sh wrapper, a recorded unedited plist that
+// differs from the rendering, PATH lacking tool directories, or not loaded:
+// install replaces/loads it); ok otherwise.
+func (l LaunchdJobs) Inspect(ctx context.Context, j JobSpec, recorded map[string]string) (LaunchdJobStatus, error) {
 	s := LaunchdJobStatus{PlistPath: l.PlistPath(j)}
 	b, err := l.FS.ReadFile(s.PlistPath)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -112,6 +250,7 @@ func (l LaunchdJobs) Inspect(ctx context.Context, j JobSpec) (LaunchdJobStatus, 
 		return s, err
 	}
 	s.Exists = true
+	s.Hash = sha256Hex(b)
 	pl, err := parsePlist(b)
 	if err == nil && pl.kind != "dict" {
 		err = errors.New("top-level value is not a dict")
@@ -158,6 +297,18 @@ func (l LaunchdJobs) Inspect(ctx context.Context, j JobSpec) (LaunchdJobStatus, 
 	}
 	if len(s.MissingPathDirs) > 0 {
 		note(StateOutdated, "job PATH lacks "+strings.Join(s.MissingPathDirs, ", "))
+	}
+	rendered, err := l.Render(j)
+	if err != nil {
+		return s, err
+	}
+	if s.Hash != sha256Hex(rendered[s.PlistPath]) && !s.Legacy {
+		switch {
+		case recorded[s.PlistPath] == s.Hash:
+			note(StateOutdated, "differs from this version's plist (binary path, schedule or PATH changed); written by install, unedited")
+		case worst != StateModified:
+			note(StateModified, "differs from the plist this version renders (edited, or a manual install)")
+		}
 	}
 	if s.LoadedKnown && !s.Loaded {
 		note(StateOutdated, "plist present but not loaded")
