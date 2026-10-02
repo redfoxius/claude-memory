@@ -2,11 +2,14 @@
 
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-01-install-doctor
-- Status: v0.2; slice 1 implemented (review 04: fixes pending); slice 2/3 not implemented. Original: draft v0.2. The architecture review
-  (`03-architecture-review.md`, gate "revise before implementing") is
-  applied, and every owner question (§13) is resolved. Ready for plan
-  review. Implementation proceeds **slice by slice** (§0.2).
-- Version: 0.2 (v0.1 → v0.2 changes in §0.1)
+- Status: v0.5. Slice 1 is implemented and merged, with the review 04
+  fixes in. Slice 2 is re-planned after the slice-2 plan review
+  (`05-slice-2-plan-review.md`, v0.3 edits in §0.3) and its iteration-2
+  and iteration-3 re-reviews (`06-slice-2-plan-rereview.md`, v0.4 edits
+  in §0.4, v0.5 edits in §0.5). Slice 3 is not implemented.
+  Implementation proceeds **slice by slice** (§0.2).
+- Version: 0.5 (v0.1 → v0.2 changes in §0.1; v0.2 → v0.3 in §0.3; v0.3 →
+  v0.4 in §0.4; v0.4 → v0.5 in §0.5)
 - Owner: Oleksandr Kolomoiets (user@example.com)
 - Supersedes: none. Replaces the manual procedure in `integration/INSTALL.md`
   steps 1–9 and the laptop half of `DEPLOY.md` (they stay as reference).
@@ -60,6 +63,55 @@ Every AC and plan work item carries one label:
 
 An AC split across slices says which half lands where, e.g. `[S1 library /
 S2 step]`.
+
+### 0.3 Changes in v0.3 (slice-2 plan review, 2026-10-02)
+
+Only the slice-2 text changes. Each edit closes a
+`05-slice-2-plan-review.md` finding. Owner confirmation is pending for the
+rows marked *(owner Q)*. They are written with the planner's recommended
+default so implementation is not blocked (plan v0.3, "Open questions").
+
+| AC / § | Change | Finding |
+|---|---|---|
+| AC-5, §10 `Step` | Engine phases gain **Configure** (input questions, after choices, before Plan). Detect returns per-artifact states. Choices are per artifact. Apply returns `StepResult{Artifacts, Removed, Notes, Diffs, Await}`. A step succeeds when every artifact it chose to apply re-detects `ok` (a kept `modified` artifact is drift, not failure). | #1, #2, B-1 |
+| AC-7 | Order: `envfile` **before** `database` (the env file is written by one step only and holds the generated password before `bootstrap.sql` exists). | #3 |
+| AC-20 | The DSN builder percent-encodes every byte outside RFC 3986 unreserved in user and password (not `url.UserPassword`, which leaves `$` etc.). | B-2 |
+| AC-21 | `--yes` behaviour with no database is defined. `bootstrap.sql` renders only passwords in `[A-Za-z0-9_.~-]` *(owner Q)*. | #1, B-3 |
+| AC-36 | Doctor and Detect compare hook scripts with the **rendered** script. An unrecorded file equal to the raw embedded script is `outdated`. | #4 |
+| AC-44 | launchd Detect compares with the manifest-recorded hash and the rendered plist (moved `--bin-dir` / schedule / PATH → `outdated`). | #6 |
+| AC-54 | The binary is removed from its **recorded** path (no `--bin-dir`). `env-key`/`dir` are retained kinds, dropped from the manifest without reversal. A `settings.json` created by install is removed only when it unmerges to `{}`. The verify step excludes kept files, backups and `install.lock`. | #5 |
+| AC-62 | A doctor `fail` from a check whose step the user skipped or kept (or that this build does not install) is printed but does not make `install` exit 1 *(owner Q)*. | B-6 |
+| §10 | `Namespaces` port dropped (namespaces are written through `FS`). `Paths.EphemeralDirs` added. `detectPlatform` takes the uid. | #8, B-5 |
+
+### 0.4 Changes in v0.4 (slice-2 plan re-review, iteration 2, 2026-10-02)
+
+Slice-2 text only; each edit closes a `06-slice-2-plan-rereview.md`
+finding. No new owner question; the five v0.3 defaults stand.
+
+| AC / § | Change | Finding |
+|---|---|---|
+| AC-5 | Shared state is seeded from flags/`Env`/env file/manifest by each owning step **before** Detect; Configure only overrides; an unset value leaves its env key untouched. Step 5 re-Detects the steps that **read** a changed value (not "the steps after"). Step 4 includes the blocked-step `re-check / skip / quit`. | H1, H2, M1 |
+| AC-21 | A leftover `bootstrap.sql` while the probe says auth/nodb/no `vector` = `blocked: awaiting user action`, not a failure. Verify uses testcontainers `Exec` by default. | M2, L2 |
+| AC-28 | Managed keys are written only when their value is known in this run; otherwise the line is untouched. | H1 |
+| AC-35 | The binary path is sticky: explicit `--bin-dir`, else the manifest-recorded path, else `~/.local/bin`; `doctor` uses the same rule. `GOTMPDIR` added to the refusal. | H3, L4 |
+| AC-51 | For hook scripts "embedded version" = the rendered script (AC-36). | O5 |
+| AC-54 | Owned `dir` artifacts under the Claude config dir are removed when empty; `<ConfigDir>`/`<StateDir>`/`<BinDir>` are retained; tree-equality excludes them and unrecorded parents. | M3 |
+| AC-62 | "Kept" removed from the exit-code exemption: only user-skipped (or not-yet-installed) steps are exempt. | O4 |
+| §10 | Read/write port halves (`ReadFS`, `DBProbe`, `OllamaProbe`, `JobDetector`), `JobSpec` with `Unit`, `JobDetector.Detect` takes the recorded hashes, `Seeder`, `EphemeralDirs` + `GOTMPDIR`. | M4, M5, L7, H1, L4 |
+
+### 0.5 Changes in v0.5 (slice-2 plan re-review, iteration 3, 2026-10-02)
+
+Slice-2 text only; each edit closes a `06-slice-2-plan-rereview.md`
+§ Iteration 3 finding. No new owner question; all earlier defaults stand.
+
+| AC / § | Change | Finding |
+|---|---|---|
+| AC-5 | Seed order flag → env file → `Env` (only when the file has none; a differing shell value is a drift note) → the owner's documented default. Under `--yes` a missing value takes the owner's default and fails only when there is none. Unset → set counts as a change for step 5. An `Await` names the artifacts the user action must fix; the re-check passes on those, then the step's other artifacts are applied with their defaults. | N3, N10, N1 |
+| AC-6 | Names the AC-5 step-5 exception (an env key the user answered in this run is applied, even when `modified`). | N9 |
+| AC-21 | `bootstrap.sql` is deleted through the transient `bootstrap-file` artifact (`ok` when there is no file or while pending, `outdated` once the database is `ok`, never recorded in the manifest). | N1 |
+| AC-28 | A key is written when its owner set it in this run, including a documented default or a generated value. | N3 |
+| AC-50 | Verify adds: a differing shell `MEMORY_PG_DSN` does not make a no-op run write. | N10 |
+| §10 | `Detection` (with `Remedy`) listed; `Seed` returns `([]Note, error)`; `Await{Instructions, Artifacts}`. | N4, N6, N1 |
 
 ## 1. Overview & Problem
 
@@ -128,7 +180,7 @@ This feature adds four subcommands:
 | Slice | A delivery unit (§0.2): S1, S2, S3 or D. |
 | Step | One unit of installation (e.g. `hooks.settings`) with three phases: **Detect → Plan → Apply**; after Apply the engine runs Detect again and the step succeeds only if it reports `ok`. |
 | Step state | The result of Detect: `absent`, `ok`, `outdated` (we installed it, the user did not change it, the embedded version differs), `modified` (it differs from what we recorded, or it is ours by identity but we have no record of writing it in this form), `blocked` (a prerequisite is missing or the platform cannot run it; the detail says which). v0.1's `foreign` and `unsupported` are folded in: a byte-identical unrecorded artifact is `ok` (and recorded), a differing one is `modified`; unsupported is `blocked` with that reason. |
-| Choice | What the user picks per step: `apply` (install, refresh or repair to our version), `keep`, `skip`. Overwriting a `modified` artifact additionally needs an explicit `Confirm`. Re-asking a step's questions is the `--reconfigure` flag, not a choice. |
+| Choice | What the user picks per step, applied per artifact (v0.3: a step's artifacts, e.g. its two hook events, get their own defaults; `apply` on a step applies its absent/outdated artifacts and asks the overwrite `Confirm` per modified one): `apply` (install, refresh or repair to our version), `keep`, `skip`. Overwriting a `modified` artifact additionally needs an explicit `Confirm`. Re-asking a step's questions is the `--reconfigure` flag, not a choice. |
 | Topology | Where Postgres and Ollama run (§6.5): **A** local Postgres, **B** remote Postgres + local or remote Ollama, **C** Postgres in Docker (S3, deferred). |
 | Paths / Env | Value types computed once in `main.go` from `HOME`, `CLAUDE_CONFIG_DIR`, flags, `os.Getuid()` and an allow-listed snapshot of environment variables, and injected into every step and check (AC-68). |
 | PlatformInfo | Detected OS, arch, OS version, WSL flag, jobs backend and package managers; plain data handed to the engine and doctor. |
@@ -284,7 +336,7 @@ cmd/claude-memory/main.go  (composition root)
    ├─ adapters: osFS (read-only | dry-run | writable), execRunner (read-only | mutating),
    │            ttyPrompter (x/term) [S2], systemClock, pgProber (internal/postgres),
    │            ollamaProber (internal/ollama), claudeCLI (mcp add/remove only) [S2],
-   │            launchd | systemd JobManager [S2], nsStore (internal/namespace) [S2]
+   │            launchd | systemd JobManager [S2]   (v0.3: no nsStore; namespaces via FS)
    ▼
 internal/setup
    ├─ libraries [S1]: jsonobj + settings merge, mdblock, redact, mcpreg (.claude.json reader),
@@ -297,7 +349,7 @@ internal/setup
 internal/config   + ParseEnvFile(path) (pure parse + perm report; LoadFromFile uses it) [S1]
 internal/postgres + Probe (read-only), Migrate [S1]
 internal/ollama   + Prober (version, tags, embed dims [S1]; pull [S2])
-internal/namespace  (Init/Add/Load reused as-is) [S2]
+internal/namespace  (Parse reused; + Marshal, Config.Add exported, pure) [S2]
 ```
 
 ## 6. Functional Requirements
@@ -345,27 +397,81 @@ internal/namespace  (Init/Add/Load reused as-is) [S2]
   Unknown flags exit 2. Verify: flag parsing table test.
 
 ### 6.2 Engine (internal/setup) [S2]
-- AC-5 [S2] (Ubiquitous): Every step shall implement `Detect(ctx) (State,
-  Detail)`, `Plan(ctx, Choice) ([]Action, error)` and `Apply(ctx,
-  []Action) ([]Artifact, error)`. There is no separate `Verify`: after
-  Apply the engine runs the step's Detect again and marks the step failed
-  unless it reports `ok`. The engine shall run Detect for all steps
-  first, print a status table (step, state, default choice, one line of
-  detail), collect choices, show the combined plan, ask for one
-  confirmation, then Apply and re-Detect each step in order. Verify: an
-  engine test with fake steps asserts call order, that no Apply happens
-  before confirmation, and that a step whose post-Apply Detect is not
-  `ok` is reported failed.
+- AC-5 [S2] (Ubiquitous) — **revised in v0.3**: Every step shall
+  implement `Detect` (returning a step state plus **one state per
+  artifact**, e.g. per hook event, per skill file, per job), `Plan`
+  (actions, diffs, notes) and `Apply` (returning `StepResult{Artifacts,
+  Removed, Notes, Diffs, Await}`), and optionally `Configure` (its input
+  questions). Detect, Configure and Plan get read-only ports only. There
+  is no separate `Verify`: after Apply the engine runs the step's Detect
+  again and marks the step failed unless every artifact it chose to
+  apply reports `ok`. A kept `modified` artifact is reported as drift and
+  is not a failure. The engine shall:
+  1. (v0.4) let each step that owns a shared value (binary path,
+     topology, DSN, Ollama URL/model, PR repos, …) seed it from flags,
+     `Env`, the env file and the manifest, then run Detect for all steps.
+     Each value has one owner; Configure may only override it. (v0.5)
+     The source order is flag → env file → `Env` (used only when the env
+     file has no value for that key; a shell value that differs from
+     the file's is reported as drift and not used) → the owner's
+     documented default (e.g. AC-32's Ollama URL and model). A value
+     with no source and no default stays unset, and the env-file key it
+     feeds is left untouched;
+  2. print a status table (step, state, default choice, one line of
+     detail);
+  3. collect choices (per artifact; Choice in §2);
+  4. run Configure in step order; (v0.4) in the same walk, a step that
+     is `blocked` by an external condition (missing tool, no jobs
+     backend, Ollama absent) is offered `re-check / skip / quit`
+     interactively (AC-10, AC-18), and stays blocked under `--yes`.
+     (v0.5) Under `--yes`, a missing value takes its owner's documented
+     or detected default (AC-19, AC-21 create-path defaults) and the step
+     fails with the flag name (AC-12) only when there is none;
+  5. (v0.4) re-Detect every step that **reads** a shared value Configure
+     changed (v0.5: including unset → set) (wherever it sits in the order, e.g. `envfile` after a DSN
+     change), plus every step whose block was resolved and its
+     dependents. An artifact whose state changed takes its AC-6 default,
+     except that an env key whose value the user answered in this run is
+     applied;
+  6. show the combined plan and ask for one confirmation;
+  7. Apply in order. Before applying a step whose prerequisite was
+     applied in this run, Detect it again. After each Apply, re-Detect
+     the step.
+
+  A step may pause for a user action (`Await`: printed instructions, then
+  `re-check / skip / quit`, AC-10). (v0.5) The pause names the artifacts
+  the user action must turn `ok`; the re-check passes when those
+  re-detect `ok`, and the engine then applies the step's remaining
+  non-`ok` artifacts once with their AC-6 defaults (e.g. deleting
+  `bootstrap.sql`, AC-21). Under `--yes` it ends `blocked` with
+  the instructions as its remedy. Verify: an engine test with fake steps
+  asserts:
+  - the call order;
+  - that no Apply happens before confirmation;
+  - both re-Detect rules (v0.4: a DSN change re-detects the earlier
+    `envfile`);
+  - (v0.4) a no-op run seeds every shared value without Configure and
+    writes nothing; an unset value leaves its env line byte-identical;
+  - that a step whose post-Apply Detect leaves an applied artifact non-`ok`
+    is reported failed;
+  - that a step with one `modified` and one `absent` artifact under
+    `--yes` applies the absent one and succeeds with a drift note.
 - AC-6 [S2] (Ubiquitous): Default choices shall be: `absent → apply`, `ok
   → keep`, `outdated → apply`, `modified → keep`, `blocked → skip`.
   Choosing `apply` for a `modified` artifact requires a second explicit
   `Confirm("overwrite your modified <x>? a backup is kept")`, which is
-  never auto-answered (AC-12). Verify: table test over the 5 states × 3
-  choices.
+  never auto-answered (AC-12). (v0.5) One exception, from AC-5 step 5:
+  interactively, an env key whose value the user answered in this run's
+  Configure is applied even when it is `modified`, without the second
+  `Confirm`; the answer is the consent, the AC-26 warning was shown
+  before it, and the combined plan still shows the diff before the one
+  confirmation. Under `--yes` there is no exception. Verify: table test
+  over the 5 states × 3 choices, plus the exception row.
 - AC-7 [S2] (Ubiquitous): The steps are ordered, and a step whose
   prerequisite step was skipped or failed shall be `blocked` with that
-  reason, not attempted. The order is: `platform`, `binary`, `prereqs`,
-  `topology`, `database`, `envfile`, `migrate`, `ollama`, `namespaces`,
+  reason, not attempted. The order is (v0.3: `envfile` before
+  `database`): `platform`, `binary`, `prereqs`,
+  `topology`, `envfile`, `database`, `migrate`, `ollama`, `namespaces`,
   `hooks.scripts`, `hooks.settings`, `mcp`, `skills`, `claude-md`, `jobs`,
   `doctor`. `hooks.settings` requires `migrate`, so a failed migration
   never leaves a wired hook against an empty schema. Verify: a failing
@@ -481,9 +587,12 @@ internal/namespace  (Init/Add/Load reused as-is) [S2]
   the wizard shall ask for host, port (5432), database (`claude_memory`),
   user (`claude_memory`), TLS mode (`prefer` default / `require` /
   `disable`, with the note "Tailscale already encrypts the link"; written
-  as `?sslmode=`) and the password (no echo). It builds the DSN with
-  `net/url` (`url.UserPassword`), so characters such as `@ : / ? #` in the
-  password are encoded. It then probes the connection with a 5 s timeout.
+  as `?sslmode=`) and the password (no echo). It builds the DSN by
+  percent-encoding every byte of user, password and (v0.4) database name
+  outside RFC 3986 *unreserved* (`A-Za-z0-9-._~`), so `@ : / ? # $ & + ; =` and spaces are
+  all encoded and the written env line never trips the AC-27
+  `unparseable-value` rule (v0.3: `url.UserPassword` leaves `$` and other
+  sub-delims unencoded). It then probes the connection with a 5 s timeout.
   A failure is classified from `*pgconn.PgError` SQLSTATE and net errors:
   `28P01`/`28000` → `auth failed` (re-ask password, up to 3 times; also
   shown when the role does not exist, because Postgres does not
@@ -510,7 +619,11 @@ internal/namespace  (Init/Add/Load reused as-is) [S2]
     - macOS/Homebrew (the installing user is the superuser): `psql -v
       ON_ERROR_STOP=1 -d postgres -f <StateDir>/bootstrap.sql`.
   - It then waits at `re-check / skip / quit` (AC-10) and re-runs Detect.
-    When the step is `ok`, `bootstrap.sql` is deleted. If it is still not
+    When the database is `ok`, `bootstrap.sql` is deleted (v0.5: via
+    the step's transient `bootstrap-file` artifact, which is `ok` when
+    there is no file or while the bootstrap is pending, `outdated` once
+    the database is `ok` and the file still exists, and is never
+    recorded in the manifest). If it is still not
     `ok`, the step reports what is missing; for "auth failed after
     bootstrap" the detail says the role already existed with another
     password ("enter that password, or change it yourself with `ALTER
@@ -532,12 +645,41 @@ internal/namespace  (Init/Add/Load reused as-is) [S2]
     `\set` lines with the real values followed by the embedded body
     verbatim. Role and database names are validated against
     `^[a-z_][a-z0-9_]{0,62}$` before rendering; the generated password
-    alphabet needs no quoting.
+    alphabet needs no quoting. **v0.3:** only a password matching
+    `^[A-Za-z0-9_.~-]{8,256}$` is ever rendered into `bootstrap.sql`.
+    Generated passwords always match. For any other password (e.g. a
+    user-typed one for an existing role without `vector`) the create
+    path is `blocked` with "this password cannot be written into
+    bootstrap.sql safely: let the installer generate one, or run
+    deploy/initdb/app-role.psql yourself", because psql meta-command
+    arguments treat backslashes and backquotes specially.
+  - **`--yes` (v0.3).** Topology A with no DSN from `--pg-dsn`, `Env` or
+    the env file takes the create path with the defaults (`localhost`,
+    5432, `claude_memory`/`claude_memory`, `sslmode=disable` on
+    loopback, generated password): `envfile` writes the DSN, `database`
+    writes `bootstrap.sql`, prints the command, and ends `blocked:
+    awaiting user action`. Dependent steps are blocked, independent
+    ones run, and `install` exits 1. The next `install --yes` re-detects
+    and continues. With a DSN, Detect decides: `ok` → keep; `nodb` or no
+    `vector` → the create path with that DSN's password (alphabet rule
+    above); `auth`/unreachable → the step fails (no re-ask under `--yes`).
+    Topology B with no DSN fails the step with the flag name (AC-12).
+  - **Pending bootstrap (v0.4).** A role that does not exist yet probes
+    as `auth` (`28P01`). So while `<StateDir>/bootstrap.sql` exists and
+    the probe says `auth`, `database missing` or no `vector`, the step is
+    `blocked: awaiting user action` with the command printed again (exit
+    1 under `--yes`; nothing regenerated), not a failure. The detail also
+    names the "role already existed with another password" case. When
+    the probe is `ok` and the file still exists, the run deletes it.
   - Verify: golden `bootstrap.sql` (sentinel values); integration test
-    (tag `integration`, `MEMORY_TEST_PG_ADMIN_DSN`, skipped when `psql` is
-    not on PATH) runs the rendered file twice through `psql` as the
+    (tag `integration`; v0.4: by default `psql` runs **inside** the
+    testcontainers pgvector container via `Exec`; with
+    `MEMORY_TEST_PG_ADMIN_DSN` and host `psql`, on the host; skipped when
+    neither is available) runs the rendered file twice as the
     superuser on a throwaway database and role; afterwards the app role
-    can run `postgres.New`; a test asserts the `.sh` wrapper references
+    can run `postgres.New`; a unit test runs `--yes` twice before the
+    command is run (both `blocked`, same password) and once after (file
+    deleted); a test asserts the `.sh` wrapper references
     the `.psql` file; the call-log guard asserts no `sudo`/`psql` argv.
 - AC-22 [S2] (Ubiquitous): Generated passwords shall be 32 bytes from
   `crypto/rand`, base64url-encoded with no padding (alphabet
@@ -607,7 +749,13 @@ already runs `deploy/` from a clone.
   with no quotes and no `export`. It sets the managed keys
   (`MEMORY_PG_DSN`, `MEMORY_OLLAMA_URL`, `MEMORY_OLLAMA_MODEL`,
   `MEMORY_EMBED_MAX_TOKENS`, and `MEMORY_PR_INGEST_REPOS` when given) in
-  place. Every other line, comment and unknown key is preserved in its
+  place. (v0.4) A managed key is written only when its owner set its
+  value in this run (from a flag, the env file, `Env`, the manifest, a
+  prompt, or — v0.5 — the owner's documented default or a generated
+  value, e.g. the AC-32 Ollama defaults or the AC-21 `--yes` create-path
+  DSN); otherwise its line is left untouched, e.g. `MEMORY_PR_INGEST_REPOS` in
+  a build without the `jobs` step, or `MEMORY_EMBED_MAX_TOKENS`, which is
+  never prompted. Every other line, comment and unknown key is preserved in its
   order. A file with `export-prefix` / `quoted-whole-value` findings is
   `modified` and, with consent (interactive only), rewritten to the plain
   form; a line with `unparseable-value` is left untouched and reported.
@@ -695,9 +843,16 @@ Both are acceptable for a single-user tool.
 - AC-35 [S2] (Ubiquitous): The `binary` step shall install the running
   executable (`Paths.Self`: `os.Executable`, symlinks resolved, computed
   in `main.go`) to `--bin-dir` at mode 0755 by atomic copy and rename. If
-  the running binary already is the target, the step is `ok`. It refuses
+  the running binary already is the target, the step is `ok`. **v0.4:
+  the target is sticky:** an explicit `--bin-dir`, else the binary path
+  the manifest recorded, else `~/.local/bin`. `doctor` (which has no
+  `--bin-dir`) uses the same rule for every check that names the binary
+  (hook scripts, MCP command, jobs, `binary.version`), so after `install
+  --bin-dir X` neither a plain `install` re-run nor `doctor` falls back
+  to `~/.local/bin`. A new explicit `--bin-dir Y` installs to Y, records
+  Y and leaves the old file with an info note. It refuses
   (exit 2, "build to a stable path: `make install`") when `Paths.Self` is
-  under `os.TempDir()` or `GOCACHE` (a `go run` binary). It warns when
+  under `os.TempDir()`, `GOTMPDIR` (v0.4) or `GOCACHE` (a `go run` binary). It warns when
   `--bin-dir` is not on PATH, and on darwin when the file carries
   `com.apple.quarantine` (hint: `xattr -d com.apple.quarantine <path>`).
   Two facts, stated so nobody adds machinery: replacing the file by
@@ -710,7 +865,15 @@ Both are acceptable for a single-user tool.
   `user-prompt-submit.sh` and `session-end.sh` to
   `<ClaudeDir>/hooks/claude-memory/` at mode 0755, with the binary path
   rendered as the default of `CLAUDE_MEMORY_BIN`. Their sha256 goes in
-  the manifest. Verify: temp `Paths`; hash recorded.
+  the manifest. **v0.3:** "the embedded version" for hook scripts means
+  the embedded script **rendered** with the binary path (one shared
+  render function used by both `doctor` and Detect). An unrecorded
+  script that is byte-identical to the raw embedded script (a manual
+  install of this version, `$HOME/.local/bin` default) is `outdated` in
+  Detect, because its content is exactly ours. Doctor reports it `ok
+  (manual install)`. Verify: temp `Paths`; hash recorded; doctor right
+  after install reports `pass` for `hooks.scripts`, and a second
+  `--upgrade` writes nothing.
 - AC-37 [S1 library / S2 step] (Ubiquitous) — **rewritten in v0.2 (D4)**:
   The `hooks.settings` step shall ensure exactly one of our entries under
   `hooks.UserPromptSubmit` and `hooks.SessionEnd` in
@@ -858,8 +1021,15 @@ Both are acceptable for a single-user tool.
   one `launchctl print gui/<uid>/<label>` per job plus a read of the plist.
   A plist under our label whose `ProgramArguments[0]` is
   `…/run-with-env.sh` is a recognized legacy form → `outdated` → apply
-  replaces it; doctor (S1) already reports it (AC-58 `jobs`). Verify:
-  Runner fake argv; golden plists; legacy plist fixture → `outdated`.
+  replaces it; doctor (S1) already reports it (AC-58 `jobs`). **v0.3:**
+  Detect compares the plist with the manifest-recorded hash and with the
+  plist rendered for the current `JobSpec` (binary path, arguments,
+  schedule, PATH). Recorded, unedited and different from the rendering
+  (e.g. a moved `--bin-dir`) → `outdated`, so `--yes`/`--upgrade`
+  re-renders and reloads it. Unrecorded and different, or edited after
+  install → `modified`. Verify: Runner fake argv; golden plists; legacy
+  plist fixture → `outdated`; recorded plist with an old binary path →
+  `outdated` → reloaded under `--yes`.
 - AC-45 [S2] (Ubiquitous): On systemd, the step shall write
   `<SystemdUserDir>/claude-memory-{cleanup,ingest-pr}.{service,timer}`
   (`Type=oneshot`, `Environment=PATH=…`, `OnCalendar`,
@@ -910,13 +1080,18 @@ Both are acceptable for a single-user tool.
   zero writes (including the manifest) and zero mutating commands, and
   shall print a status table with every step `ok`. Verify: two
   consecutive `--yes` runs on a temp `Paths` with fakes; the second run's
-  FS write count and mutating Runner count are 0.
+  FS write count and mutating Runner count are 0. (v0.5) Also with a
+  shell `MEMORY_PG_DSN` that differs from the env file's: 0 writes and
+  one drift note (AC-5 step 1).
 - AC-51 [S2 identity rules; heuristics D] (Ubiquitous): Without a
   manifest, Detect shall not create duplicates of a hand install done per
   `integration/INSTALL.md`: our hook entries are recognized by identity
   (AC-37), launchd jobs by label (AC-44), MCP by name (AC-40); files
-  byte-identical to the embedded version are `ok` and recorded; anything
-  else is `modified` (kept unless the user confirms an overwrite).
+  byte-identical to the embedded version are `ok` and recorded (v0.4: for
+  hook scripts the embedded version is the **rendered** script, AC-36; a
+  hook script equal to the raw embedded script is `outdated` and
+  replaced); anything else is `modified` (kept unless the user confirms
+  an overwrite).
   Further adoption heuristics are deferred (§12.1). Verify: fixture HOME
   replicating INSTALL.md steps 2–8; no duplicate hook entry or job after
   `--yes`.
@@ -947,17 +1122,34 @@ Both are acceptable for a single-user tool.
   - remove the CLAUDE.md block (markers included);
   - delete hook scripts and skills whose hash still matches the
     manifest, listing any that differ (default keep);
-  - remove the installed binary last, only when it is the recorded one at
-    `--bin-dir` (a repo build running `uninstall` is skipped); unlinking
-    the running executable is safe on darwin and linux.
+  - remove the installed binary last, from the path the manifest
+    recorded and only when its hash still matches (v0.3: no `--bin-dir`
+    flag on `uninstall`; a repo build running `uninstall` is skipped);
+    unlinking the running executable is safe on darwin and linux.
 
   Each reversed artifact is removed from the manifest as it goes; kept
-  ones stay. When no artifact remains the manifest is deleted, so a later
-  `doctor` or `install` does not see a stale topology or artifacts that do
-  not exist. The env file, `namespaces.yaml`, `<StateDir>` and all DB
-  data are kept. Verify: golden after-uninstall `settings.json` equals the
-  pre-install golden for the "other hooks present" case; Runner argv;
-  manifest absent after a full uninstall, trimmed after a partial one.
+  ones stay. **v0.3:** `env-key` and `dir` artifacts are *retained*: never
+  reversed (the env file and our directories are kept), but dropped from
+  the manifest. When every other artifact has been reversed, the manifest
+  is deleted, so a later `doctor` or `install` does not see a stale
+  topology or artifacts that do not exist. A `settings.json` that install
+  created (recorded on its hook artifacts) is deleted only when the
+  unmerge leaves `{}`. Settings backups, `*.bak` files and `install.lock`
+  are left in place. The env file, `namespaces.yaml`, `<StateDir>` and all
+  DB data are kept. **v0.4 `dir` artifacts:** only directories install
+  created are recorded. Those under the Claude config dir
+  (`hooks/claude-memory`, `skills/<name>`) are removed after their
+  files, only when empty. `<ConfigDir>`, `<StateDir>` and `<BinDir>` are
+  retained (dropped from the manifest, never removed). Parent
+  directories created on the way are not recorded and stay. Verify:
+  - golden after-uninstall `settings.json` equals the pre-install golden
+    for the "other hooks present" case;
+  - Runner argv;
+  - manifest absent after a full uninstall, trimmed after a partial one;
+  - an install → uninstall run on a temp `Paths` leaves a tree equal to
+    the pre-install tree, excluding the kept files above and (v0.4) the
+    retained directories and unrecorded parents when empty;
+    `hooks/claude-memory` and `skills/<name>` are gone.
 - AC-55 [D] (Ubiquitous): *Deferred (§12.1).* `--purge-config` (also
   delete env file, `namespaces.yaml`, manifest, state dir) and
   `--purge-data` (C1 only, `docker compose -p claude-memory-local down -v`
@@ -1037,7 +1229,17 @@ Both are acceptable for a single-user tool.
   in-process as its final step (unless `--no-doctor`) and print its
   summary, followed by "restart Claude Code sessions to load the hooks"
   unless WI-0 shows that a running session reloads `settings.json`. If
-  doctor reports a fail, `install` exits 1. Verify: engine test.
+  doctor reports a fail, `install` exits 1. **v0.3 exception (narrowed
+  in v0.4):** a `fail` from a check whose owning step the user skipped
+  (`--skip`, choice `skip`, or `skip` at a blocked step's prompt), that
+  is blocked by such a skipped step, or that this build does not install
+  is printed as `fail (not installed: <step> skipped)` and does not
+  change the exit code. A step whose artifacts were **kept** is not
+  exempt: e.g. a kept hand-edited env file whose DSN fails `pg.connect`
+  exits 1. A step left blocked under `--yes` is not exempt either.
+  `doctor` run on its own is unaffected. Verify: engine test, incl.
+  `--skip mcp` → `mcp.registered` fail printed, exit 0; kept `modified`
+  env file + `pg.connect` fail → exit 1.
 
 ### 6.13 Verification infrastructure and documentation
 - AC-63 [S1] (Ubiquitous): `internal/setup` tests shall use only fakes
@@ -1224,6 +1426,7 @@ type Paths struct {
     Cwd             string // for project settings (AC-70) and `namespaces which`
     Self            string // os.Executable, symlinks resolved
     UID             int
+    EphemeralDirs   []string // [S2, v0.3] os.TempDir(), GOTMPDIR when set (v0.4), GOCACHE (else UserCacheDir/go-build): AC-35 refusal
 }
 type Env map[string]string // allow-listed snapshot (AC-68)
 
@@ -1269,26 +1472,59 @@ type OllamaProber interface {                  // [S1; Pull used from S2]
     Pull(ctx context.Context, url, model string, progress func(done, total int64)) error
     EmbedDims(ctx context.Context, url, model string) (dims int, latency time.Duration, err error)
 }
-type JobManager interface {                    // launchd [S1 Detect, S2 rest] | systemd [S2] | none
+type JobSpec struct {                          // [S2, v0.4]
+    Name          string   // "cleanup" | "ingest-pr"
+    Label         string   // launchd label io.github.claude-memory.<name>
+    Unit          string   // systemd unit base name claude-memory-<name>
+    Program       string   // absolute path of the installed binary (AC-35 sticky path)
+    Args          []string
+    Hour, Minute  int
+    PATH, LogPath string
+}
+type JobDetector interface {                   // [S2, v0.4] read half, in ReadPorts
     Render(j JobSpec) (map[string][]byte, error)   // path → content
-    Detect(ctx context.Context, j JobSpec) (State, string, error) // read-only
+    // recorded: unit/plist path → sha256 from the manifest (nil = no manifest), AC-44
+    Detect(ctx context.Context, j JobSpec, recorded map[string]string) (State, string, error)
+}
+type JobManager interface {                    // launchd | systemd [S2] | none; in WritePorts
+    JobDetector
     Install(ctx context.Context, j JobSpec) error; Remove(ctx context.Context, j JobSpec) error
 }
+// v0.4 read/write halves: ReadFS (the read methods of FS; FS embeds it),
+// DBProbe (Probe + LocalServerEvidence; DBProber adds Migrate),
+// OllamaProbe (Version + HasModel + EmbedDims; OllamaProber adds Pull).
+// ReadPorts holds only the read halves, so Detect/Seed/Configure/Plan
+// cannot write, migrate, pull or install; mutating commands are refused
+// at runtime by the read-only Runner.
 type ClaudeCLI interface {                     // [S2] writers only. No MCPGet: detection reads
     MCPAdd(ctx context.Context, name string, argv []string) error  // Paths.ClaudeJSON (AC-40, AC-67)
     MCPRemove(ctx context.Context, name string) error
 }
-type Namespaces interface {                    // [S2]
-    Load(path string) (*namespace.Config, error)
-    Init(path, def string, rules []namespace.Rule) error
-    Add(path, name string, globs ...string) error
-}
-type Step interface {                          // [S2] no Verify: the engine re-runs Detect after Apply
+// v0.3: no Namespaces port. The step reads with FS + namespace.Parse and
+// writes namespace.Marshal output with FS.WriteFileAtomic (dry-run safe).
+type Step interface {                          // [S2, v0.3] no Verify: the engine re-runs Detect after Apply
     ID() string; Title() string; Requires() []string
-    Detect(ctx context.Context) (State, string)
-    Plan(ctx context.Context, c Choice) ([]Action, error)
-    Apply(ctx context.Context, a []Action) ([]Artifact, error)
+    Detect(ctx context.Context, rp ReadPorts, st *RunState) Detection          // per-artifact states
+    Plan(ctx context.Context, rp ReadPorts, st *RunState, ch Choices) (Plan, error) // actions, diffs, notes
+    Apply(ctx context.Context, wp WritePorts, st *RunState, p Plan) (StepResult, error)
 }
+type Seeder interface {                        // [S2, v0.4] optional: owner of shared values, runs before any Detect
+    Seed(ctx context.Context, rp ReadPorts, st *RunState) ([]Note, error) // v0.5: error = invalid flag value → exit 2
+}
+type Detection struct {                        // [S2, v0.5 listed]
+    State State; Detail string
+    BlockedBy string                           // step id, when blocked only by a prerequisite
+    Remedy    string                           // external block (missing tool, no jobs backend, Ollama absent): keys re-check/skip/quit
+    Artifacts []ArtifactState; Notes []Note
+}
+type Await struct {                            // [S2, v0.5] pause for a user action (AC-5, AC-21)
+    Instructions []string
+    Artifacts    []string                      // artifact IDs the action must turn ok; the re-check passes on these
+}
+type Configurer interface {                    // [S2, v0.3] optional: input questions; may only override its own values
+    Configure(ctx context.Context, rp ReadPorts, ui Prompter, st *RunState) error
+}
+// StepResult{Artifacts, Removed, Notes, Diffs, Await}; RunState is typed, one writer per field (plan Design 16).
 type Check struct {                            // [S1]
     ID, Title string; Requires []string
     Run func(ctx context.Context) (Status, string /*detail*/, string /*remedy*/)
