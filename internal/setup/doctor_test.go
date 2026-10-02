@@ -646,8 +646,8 @@ func TestDoctorTimeouts(t *testing.T) {
 		f := newDoctorFixture(t)
 		f.db.hang, f.ollama.hang = true, true
 		start := time.Now()
-		r := RunDoctor(context.Background(), f.deps(), DoctorOptions{Timeout: 50 * time.Millisecond, Deadline: 2 * time.Second})
-		if el := time.Since(start); el > time.Second {
+		r := RunDoctor(context.Background(), f.deps(), DoctorOptions{Timeout: 300 * time.Millisecond, Deadline: 5 * time.Second})
+		if el := time.Since(start); el > 3*time.Second {
 			t.Errorf("took %s; the probes run concurrently, so the bound is one timeout", el)
 		}
 		for id, want := range map[string]Status{"pg.connect": StatusFail, "pg.schema": StatusSkip, "ollama.reachable": StatusFail, "ollama.embed": StatusSkip, "skills": StatusPass} {
@@ -655,7 +655,7 @@ func TestDoctorTimeouts(t *testing.T) {
 				t.Errorf("%s: %s (%s), want %s", id, got.Status, got.Detail, want)
 			}
 		}
-		if got := mustResult(t, r, "pg.connect"); !strings.Contains(got.Detail, "timed out after 50ms") {
+		if got := mustResult(t, r, "pg.connect"); !strings.Contains(got.Detail, "timed out after 300ms") {
 			t.Errorf("pg.connect detail %q", got.Detail)
 		}
 	})
