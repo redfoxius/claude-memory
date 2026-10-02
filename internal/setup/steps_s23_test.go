@@ -51,7 +51,7 @@ func (h *s23) write(path, content string, mode fs.FileMode) {
 }
 
 func (h *s23) rp() ReadPorts {
-	return ReadPorts{FS: h.fs, Runner: h.runner, Paths: h.p, Env: h.env, Platform: h.plat}
+	return ReadPorts{FS: h.fs, Runner: h.runner, Paths: h.p, Env: h.env, Platform: h.plat, Clock: NewFakeClock(time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC))}
 }
 
 func (h *s23) wp() WritePorts {

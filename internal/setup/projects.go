@@ -2,6 +2,7 @@ package setup
 
 import (
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -15,7 +16,8 @@ import (
 // filesystem through the read-only port: at each level it tries the longest
 // run of segments that names an existing directory first and backtracks when
 // the rest does not resolve. Only decodings in which every prefix exists are
-// returned, so a wrong guess can only hide a suggestion, never invent one.
+// returned, and a name with more than one such decoding is dropped, so a wrong
+// guess can only hide a suggestion, never invent one.
 
 // maxDecodeSteps bounds the filesystem probes for one name.
 const maxDecodeSteps = 512
@@ -24,7 +26,13 @@ const maxDecodeSteps = 512
 // is the directory the encoded path is anchored at: "/" in production; a
 // test passes its sandbox root, in which case name must begin with root's own
 // encoding and the walk never probes above root. ok is false when the name is
-// not an encoded path or no decoding exists.
+// not an encoded path, no decoding exists, or the decoding is ambiguous
+// (AC-47): the walk keeps searching after the first match and, if a second
+// distinct existing directory also fits the name (for example both
+// work/a-b and work/a/b exist), shows neither rather than guess. Exhausting
+// the maxDecodeSteps bound before the search is complete also yields false.
+// A "." or ".." segment is never accepted, and the result always stays under
+// root.
 func DecodeProjectName(fsys ReadFS, root, name string) (string, bool) {
 	root = filepath.Clean(root)
 	if !strings.HasPrefix(name, "-") || len(name) < 2 {
@@ -40,30 +48,51 @@ func DecodeProjectName(fsys ReadFS, root, name string) (string, bool) {
 	}
 	segs := strings.Split(rest, "-")
 	steps := 0
-	var walk func(dir string, i int) (string, bool)
-	walk = func(dir string, i int) (string, bool) {
+	exhausted := false
+	var found []string
+	// walk explores every decoding; it returns true to stop early (a second
+	// match was found or the step bound was hit).
+	var walk func(dir string, i int) bool
+	walk = func(dir string, i int) bool {
 		if i == len(segs) {
-			return dir, true
+			if !slices.Contains(found, dir) {
+				found = append(found, dir)
+			}
+			return len(found) > 1
 		}
 		for j := len(segs); j > i; j-- {
 			if steps++; steps > maxDecodeSteps {
-				return "", false
+				exhausted = true
+				return true
 			}
 			cand := strings.Join(segs[i:j], "-")
-			if cand == "" {
+			if cand == "" || cand == "." || cand == ".." {
 				continue
 			}
 			p := filepath.Join(dir, cand)
+			if !underRoot(root, p) {
+				continue
+			}
 			if fi, err := fsys.Stat(p); err != nil || !fi.IsDir() {
 				continue
 			}
-			if got, ok := walk(p, j); ok {
-				return got, true
+			if walk(p, j) {
+				return true
 			}
 		}
+		return false
+	}
+	walk(root, 0)
+	if exhausted || len(found) != 1 {
 		return "", false
 	}
-	return walk(root, 0)
+	return found[0], true
+}
+
+// underRoot reports whether p is strictly below root.
+func underRoot(root, p string) bool {
+	rel, err := filepath.Rel(root, p)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // ProjectDirs decodes every entry of projectsDir (<ClaudeDir>/projects), anchored at root, and
@@ -89,10 +118,10 @@ func ProjectDirs(fsys ReadFS, root, projectsDir string) []string {
 	return out
 }
 
-// SuggestParentDirs returns up to max distinct parent directories of dirs,
+// SuggestParentDirs returns up to limit distinct parent directories of dirs,
 // most frequent first (ties alphabetical). The home directory and the root
 // are never suggested: a mapping over them would swallow every project.
-func SuggestParentDirs(dirs []string, home string, max int) []string {
+func SuggestParentDirs(dirs []string, home string, limit int) []string {
 	count := map[string]int{}
 	for _, d := range dirs {
 		par := filepath.Dir(d)
@@ -111,8 +140,8 @@ func SuggestParentDirs(dirs []string, home string, max int) []string {
 		}
 		return out[i] < out[j]
 	})
-	if len(out) > max {
-		out = out[:max]
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	return out
 }

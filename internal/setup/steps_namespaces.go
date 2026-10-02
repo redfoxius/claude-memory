@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"claude-memory/internal/namespace"
 )
 
@@ -123,6 +125,7 @@ type nsAnalysis struct {
 	cfg        *namespace.Config // nil when unparseable
 	after      []byte            // rendered result; nil when nothing to write
 	added      []string          // "NAME=GLOB" mappings that will be added
+	lossy      string            // what re-rendering an existing file drops; "" when nothing
 }
 
 func analyzeNamespaces(rfs ReadFS, p Paths, st *RunState) (nsAnalysis, error) {
@@ -165,8 +168,73 @@ func analyzeNamespaces(rfs ReadFS, p Paths, st *RunState) (nsAnalysis, error) {
 		if a.after, err = namespace.Marshal(a.cfg); err != nil {
 			return a, err
 		}
+		if a.exists {
+			a.lossy = rerenderLoss(a.before, a.after)
+		}
 	}
 	return a, nil
+}
+
+// rerenderLoss describes what rewriting an existing, valid file with
+// namespace.Marshal would lose: comments other than the generated header, and
+// keys the Config struct does not know. "" means nothing is lost.
+func rerenderLoss(before, after []byte) string {
+	var doc yaml.Node
+	if yaml.Unmarshal(before, &doc) != nil {
+		return ""
+	}
+	var comments bool
+	unknown := false
+	var walk func(n *yaml.Node, depth int)
+	walk = func(n *yaml.Node, depth int) {
+		for _, c := range []string{n.HeadComment, n.LineComment, n.FootComment} {
+			for _, line := range strings.Split(c, "\n") {
+				if line = strings.TrimSpace(line); line != "" && !strings.Contains(string(after), line) {
+					comments = true
+				}
+			}
+		}
+		switch n.Kind {
+		case yaml.DocumentNode:
+			for _, c := range n.Content {
+				walk(c, depth)
+			}
+		case yaml.MappingNode:
+			known := map[string]bool{}
+			switch depth {
+			case 0:
+				known = map[string]bool{"default": true, "namespaces": true}
+			case 2:
+				known = map[string]bool{"namespace": true, "paths": true}
+			}
+			for i := 0; i+1 < len(n.Content); i += 2 {
+				k, v := n.Content[i], n.Content[i+1]
+				if (depth == 0 || depth == 2) && !known[k.Value] {
+					unknown = true
+				}
+				walk(k, depth+1)
+				walk(v, depth+1)
+			}
+		case yaml.SequenceNode:
+			for _, c := range n.Content {
+				walk(c, depth+1)
+			}
+		}
+	}
+	walk(&doc, 0)
+	switch {
+	case comments && unknown:
+		return "comments and unknown keys"
+	case comments:
+		return "comments"
+	case unknown:
+		return "unknown keys"
+	}
+	return ""
+}
+
+func lossyNote(a nsAnalysis) Note {
+	return Note{NoteWarn, a.path + ": rewriting it drops " + a.lossy + " (a backup of the current file is kept beside it)"}
 }
 
 func hasNSGlob(c *namespace.Config, name, glob string) bool {
@@ -224,6 +292,9 @@ func (NamespacesStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch Cho
 		desc += ", " + strings.Join(a.added, ", ")
 	}
 	p.Actions = append(p.Actions, Action{Artifact: NamespacesArtifact, Verb: "write", Path: a.path, Desc: desc})
+	if a.lossy != "" {
+		p.Notes = append(p.Notes, lossyNote(a))
+	}
 	old := a.path
 	if !a.exists {
 		old = ""
@@ -258,6 +329,13 @@ func (s NamespacesStep) Apply(_ context.Context, wc WritePorts, st *RunState, p 
 	if a.dirMissing {
 		res.Artifacts = append(res.Artifacts, Artifact{Step: NamespacesStepID, Kind: KindDir, Path: dir, Version: s.Version})
 	}
+	if a.lossy != "" {
+		bak := a.path + envBackupSuffix + wc.Clock.Now().UTC().Format("20060102T150405Z")
+		if err := wc.FS.WriteFileAtomic(bak, a.before, 0o600); err != nil {
+			return res, fmt.Errorf("back up %s: %w", a.path, err)
+		}
+		res.Notes = append(res.Notes, lossyNote(a), Note{NoteInfo, "backup of the previous namespaces file: " + bak})
+	}
 	if err := wc.FS.WriteFileAtomic(a.path, a.after, 0o600); err != nil {
 		return res, fmt.Errorf("write %s: %w", a.path, err)
 	}
@@ -267,7 +345,8 @@ func (s NamespacesStep) Apply(_ context.Context, wc WritePorts, st *RunState, p 
 	}
 	res.Diffs = append(res.Diffs, Diff{Artifact: NamespacesArtifact, Path: a.path, Unified: UnifiedDiff(old, a.path, a.before, a.after)})
 	for _, d := range s.suggestions(wc.ReadPorts.FS, wc.Paths) {
-		res.Notes = append(res.Notes, Note{NoteInfo, "check: claude-memory namespaces which " + d})
+		ns, why := a.cfg.Explain(d)
+		res.Notes = append(res.Notes, Note{NoteInfo, fmt.Sprintf("%s now resolves to namespace %q (%s); check: claude-memory namespaces which %s", d, ns, why, d)})
 	}
 	return res, nil
 }
@@ -322,10 +401,20 @@ func (s NamespacesStep) Configure(_ context.Context, rc ReadPorts, ui Prompter, 
 	if !ui.Interactive() || st.NSRules.Source() == SourceFlag {
 		return nil
 	}
+	// An unparseable file is never written, so nothing is offered for it; a
+	// directory an existing rule already covers is not suggested again.
+	a, err := analyzeNamespaces(rc.FS, rc.Paths, NewRunState(Inputs{}))
+	if err != nil || a.parseErr != nil {
+		return nil
+	}
 	var rules []NSRule
 	for _, d := range s.suggestions(rc.FS, rc.Paths) {
+		ns, why := a.cfg.Explain(d)
+		if strings.HasPrefix(why, namespace.WhyRule) {
+			continue
+		}
 		glob := tildeGlob(d, rc.Paths.Home)
-		yes, err := ui.Confirm("Map "+glob+" to its own namespace?", false)
+		yes, err := ui.Confirm(fmt.Sprintf("Map %s to its own namespace? (currently %q, %s)", glob, ns, why), false)
 		if err != nil {
 			return err
 		}

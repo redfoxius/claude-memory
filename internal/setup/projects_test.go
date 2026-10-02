@@ -21,9 +21,8 @@ func TestDecodeProjectName(t *testing.T) {
 	}{
 		{"work/Block-strike", "work/Block-strike", true}, // literal hyphen
 		{"work/acme/billing-service", "work/acme/billing-service", true},
-		{"work/a/b", "work/a-b", true}, // both exist: the longest join wins (documented)
+		{"work/a/b", "", false}, // both work/a-b and work/a/b exist: ambiguous, shown as neither (AC-47)
 		{"work/c/d", "work/c/d", true},
-		{"work/a-b", "work/a-b", true},
 		{"work/missing", "", false},
 		{"work/Block-strike-nope", "", false},
 	} {
@@ -36,7 +35,7 @@ func TestDecodeProjectName(t *testing.T) {
 			t.Errorf("%s: got %q %v, want %q %v", c.rel, got, ok, want, c.ok)
 		}
 	}
-	for _, bad := range []string{"", "-", "noprefix", "-nonexistent-dir", "-etc-passwd"} {
+	for _, bad := range []string{"", "-", "noprefix", "-" + replaceSlashes(h.root[1:]) + "-work-..-work-a-b", "-" + replaceSlashes(h.root[1:]) + "-.", "-" + replaceSlashes(h.root[1:]) + "-work-.-c-d", "-nonexistent-dir", "-etc-passwd"} {
 		if got, ok := DecodeProjectName(h.fs, h.root, bad); ok {
 			t.Errorf("%q decoded to %q", bad, got)
 		}
@@ -82,5 +81,21 @@ func TestProjectDirsAndSuggestions(t *testing.T) {
 	}
 	if got := ProjectDirs(h.fs, h.root, filepath.Join(h.root, "nope")); got != nil {
 		t.Errorf("missing dir: %v", got)
+	}
+}
+
+// "." and ".." never decode, and a result never leaves the root, even though
+// filepath.Join would clean "work/.." back to an existing directory.
+func TestDecodeProjectNameDotSegments(t *testing.T) {
+	h := newS23(t)
+	h.write(filepath.Join(h.root, "work", "c", "d", ".keep"), "", 0o600)
+	pre := "-" + replaceSlashes(h.root[1:])
+	for _, n := range []string{pre + "-work-..-work-c-d", pre + "-work-.-c-d", pre + "-..-", pre + "-.."} {
+		if got, ok := DecodeProjectName(h.fs, h.root, n); ok {
+			t.Errorf("%q decoded to %q", n, got)
+		}
+	}
+	if !underRoot("/r", "/r/a") || underRoot("/r", "/r") || underRoot("/r", "/x") || underRoot("/r", "/r/../x") {
+		t.Error("underRoot")
 	}
 }

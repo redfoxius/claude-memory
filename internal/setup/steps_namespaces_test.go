@@ -262,3 +262,70 @@ func TestNamespacesDetectPlanWriteNothing(t *testing.T) {
 		t.Errorf("writes: %v", w)
 	}
 }
+
+// Re-rendering an existing file that holds comments or unknown keys warns in
+// Plan and Apply and keeps a backup; a file without them does neither.
+func TestNamespacesRerenderLossWarnsAndBacksUp(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body  string
+		lossy bool
+	}{
+		"comment":      {"# my note\ndefault: scratch\nnamespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n", true},
+		"line comment": {"default: scratch # why\nnamespaces: []\n", true},
+		"unknown top":  {"default: scratch\nextra: 1\nnamespaces: []\n", true},
+		"unknown rule": {"namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    note: hi\n", true},
+		"clean":        {"default: scratch\nnamespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newS23(t)
+			h.write(h.p.NamespacesFile(), tc.body, 0o600)
+			r := h.nsRun(nsState(NSRule{"b", []string{"/y/**"}}))
+			warns := func(ns []Note) (n int) {
+				for _, x := range ns {
+					if x.Level == NoteWarn && strings.Contains(x.Text, "drops") {
+						n++
+					}
+				}
+				return
+			}
+			baks, _ := filepath.Glob(h.p.NamespacesFile() + envBackupSuffix + "*")
+			if tc.lossy {
+				if warns(r.plan.Notes) != 1 || warns(r.res.Notes) != 1 || len(baks) != 1 {
+					t.Fatalf("plan %+v apply %+v baks %v", r.plan.Notes, r.res.Notes, baks)
+				}
+				if got, _ := os.ReadFile(baks[0]); string(got) != tc.body {
+					t.Errorf("backup = %q", got)
+				}
+			} else if warns(r.plan.Notes)+warns(r.res.Notes) != 0 || len(baks) != 0 {
+				t.Errorf("unexpected warn/backup: %+v %+v %v", r.plan.Notes, r.res.Notes, baks)
+			}
+		})
+	}
+}
+
+// Configure offers nothing for an unparseable file and skips directories an
+// existing rule already covers; the prompt shows the current namespace.
+func TestNamespacesConfigureSkipsUnparseableAndCovered(t *testing.T) {
+	h := newS23(t)
+	home := h.p.Home
+	proj := filepath.Join(h.p.ClaudeDir, "projects")
+	for _, d := range []string{"work/acme/x", "src/game"} {
+		h.write(filepath.Join(home, d, ".keep"), "", 0o600)
+		h.write(filepath.Join(proj, "-"+replaceSlashes(filepath.Join(home, d)[1:]), "s.jsonl"), "{}", 0o600)
+	}
+	st := nsState()
+	st.NSRules.Clear()
+
+	h.write(h.p.NamespacesFile(), "default: [unclosed\n", 0o600)
+	if err := h.nsStep().Configure(context.Background(), h.rp(), newPW(t, true), st); err != nil || len(st.NSRules.Get()) != 0 {
+		t.Fatalf("unparseable: %v %+v", err, st.NSRules.Get())
+	}
+
+	h.write(h.p.NamespacesFile(), "namespaces:\n  - namespace: acme\n    paths: [\"~/work/acme/**\"]\n", 0o600)
+	ui := newPW(t, true).
+		conf("Map ~/src/** to its own namespace? (currently \"global\", fallback)", false).
+		text("Add another mapping", "")
+	if err := h.nsStep().Configure(context.Background(), h.rp(), ui, st); err != nil {
+		t.Fatal(err)
+	}
+}

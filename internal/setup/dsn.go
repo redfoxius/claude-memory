@@ -220,10 +220,24 @@ func (t DBTarget) String() string {
 // GoString keeps %#v from printing the password.
 func (t DBTarget) GoString() string { return "DBTarget(" + t.String() + ")" }
 
-var dsnOptionKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,31}$`)
+// knownLibpqOptions is the allowlist of libpq connection keywords whose name
+// may be echoed in the "unsupported option" error. Any other key, even one
+// shaped like a plain word, could be a pasted secret (`?Hunter2secret`) and is
+// never echoed.
+var knownLibpqOptions = map[string]bool{
+	"connect_timeout": true, "application_name": true, "fallback_application_name": true,
+	"sslcert": true, "sslkey": true, "sslrootcert": true, "sslcrl": true, "sslpassword": true,
+	"sslcompression": true, "sslsni": true, "ssl_min_protocol_version": true, "ssl_max_protocol_version": true,
+	"target_session_attrs": true, "options": true, "password": true, "user": true, "host": true,
+	"hostaddr": true, "port": true, "dbname": true, "passfile": true, "service": true, "servicefile": true,
+	"channel_binding": true, "krbsrvname": true, "gsslib": true, "gssencmode": true,
+	"keepalives": true, "keepalives_idle": true, "keepalives_interval": true, "keepalives_count": true,
+	"tcp_user_timeout": true, "client_encoding": true, "replication": true, "requirepeer": true,
+	"load_balance_hosts": true, "requiressl": true, "sslcertmode": true, "sslrootcert_dir": true,
+}
 
 func unsupportedDSNOption(k string) error {
-	if dsnOptionKeyRe.MatchString(k) {
+	if knownLibpqOptions[strings.ToLower(k)] {
 		return fmt.Errorf("DSN option %q is not supported by install (only sslmode); remove it from the DSN", k)
 	}
 	return errors.New("DSN has an unsupported query option (only sslmode is supported); remove it from the DSN")
@@ -253,6 +267,9 @@ func ParseDBTarget(dsn string) (DBTarget, error) {
 	// install rebuilds the DSN, so it is an explicit error (owner decision).
 	// The message names the key only, never a value; a key that does not look
 	// like a plain option name is not echoed at all.
+	if len(q["sslmode"]) > 1 {
+		return DBTarget{}, errors.New("DSN: sslmode is given more than once")
+	}
 	keys := make([]string, 0, len(q))
 	for k := range q {
 		if k != "sslmode" {
