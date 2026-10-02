@@ -45,11 +45,12 @@ const launchdDefaultPATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 // ingest-pr runs git and az.
 var JobTools = []string{"claude", "git", "az"}
 
-// DefaultJobSpecs returns the two jobs (AC-43) with the installed binary
-// and the log paths filled in; PATH is computed by the jobs step [S2].
-func DefaultJobSpecs(p Paths) []JobSpec {
+// DefaultJobSpecs returns the two jobs (AC-43) running binPath (from
+// ResolveBinPath) with the log paths filled in; PATH is computed by the jobs
+// step [S2].
+func DefaultJobSpecs(p Paths, binPath string) []JobSpec {
 	mk := func(name string, hour, minute int) JobSpec {
-		return JobSpec{Name: name, Label: LaunchdLabelPrefix + name, Program: p.InstalledBinary(),
+		return JobSpec{Name: name, Label: LaunchdLabelPrefix + name, Program: binPath,
 			Args: []string{name}, Hour: hour, Minute: minute, LogPath: filepath.Join(p.StateDir, name+".log")}
 	}
 	return []JobSpec{mk(JobCleanup, 7, 15), mk(JobIngestPR, 7, 0)}

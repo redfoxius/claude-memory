@@ -10,7 +10,6 @@ import (
 	"maps"
 	"path"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 )
@@ -73,7 +72,7 @@ func fileState(installed []byte, embedded []byte, recorded string) (State, strin
 
 func (d *doctor) checkMCP(context.Context) (Status, string, string) {
 	reg, err := ReadMCPRegistration(d.FS, d.Paths)
-	bin := d.Paths.InstalledBinary()
+	bin := d.binPath
 	addCmd := "claude mcp add --scope user " + MCPServerName + " -- " + bin + " serve"
 	if err != nil {
 		return StatusFail, "cannot read " + d.Paths.ClaudeJSON + ": " + d.redact(err.Error()), "check the file's permissions"
@@ -125,10 +124,6 @@ func (d *doctor) checkMCP(context.Context) (Status, string, string) {
 
 // ---- hooks.scripts -------------------------------------------------------------
 
-// hookBinRe finds the binary default in a hook wrapper script:
-// CLAUDE_MEMORY_BIN="${CLAUDE_MEMORY_BIN:-$HOME/.local/bin/claude-memory}".
-var hookBinRe = regexp.MustCompile(`CLAUDE_MEMORY_BIN:-([^}"]+)\}`)
-
 func (d *doctor) checkHookScripts(context.Context) (Status, string, string) {
 	dir := d.Paths.HookScriptsDir()
 	var fails, warns, oks []string
@@ -168,11 +163,21 @@ func (d *doctor) checkHookScripts(context.Context) (Status, string, string) {
 				}
 			}
 		}
-		embedded, _ := fs.ReadFile(d.Assets, s.asset)
+		raw, _ := fs.ReadFile(d.Assets, s.asset)
+		embedded, rerr := RenderHookScript(raw, d.binPath)
+		if rerr != nil {
+			warns = append(warns, s.name+": cannot render this version for "+d.binPath+": "+rerr.Error())
+			continue
+		}
 		st, why := fileState(b, embedded, d.recordedFileHash(p))
-		if st == StateOK {
+		switch {
+		case st == StateOK:
 			oks = append(oks, s.name)
-		} else {
+		case sha256Hex(b) == sha256Hex(raw):
+			// A manual install of this version: the raw script, which runs
+			// $HOME/.local/bin/claude-memory unless CLAUDE_MEMORY_BIN is set.
+			oks = append(oks, s.name+" (manual install)")
+		default:
 			warns = append(warns, s.name+": "+string(st)+", "+why)
 		}
 	}

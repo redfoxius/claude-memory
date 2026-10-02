@@ -36,6 +36,12 @@ func TestRedactorUserinfoPattern(t *testing.T) {
 		{"a postgres://u:one@h/db b postgresql://v:two@k/db",
 			"a postgres://u:***@h/db b postgresql://v:***@k/db"},
 		{"no url here", "no url here"},
+		// '@' inside the password: anchor on the last '@' before the first '/'.
+		{"dial postgres://u:p@ss$w@h:5432/db: refused", "dial postgres://u:***@h:5432/db: refused"},
+		// A later '@' in the path or query is not the userinfo end.
+		{"postgres://u:pw@h/db?x=a@b", "postgres://u:***@h/db?x=a@b"},
+		// The installer's own pctEncode form.
+		{"postgresql://u:" + pctEncode(sentinelPassword) + "@h/db", "postgresql://u:***@h/db"},
 	}
 	for _, tc := range cases {
 		if got := r.Redact(tc.in); got != tc.want {
@@ -84,6 +90,7 @@ func TestRedactorEscapedForms(t *testing.T) {
 		url.QueryEscape(sentinelPassword),
 		url.PathEscape(sentinelPassword),
 		userinfo,
+		pctEncode(sentinelPassword),
 	}
 	for _, f := range forms {
 		out := r.Redact("before " + f + " after")
@@ -164,10 +171,23 @@ func assertNoSentinel(t testing.TB, s string) {
 		url.QueryEscape(sentinelPassword),
 		url.PathEscape(sentinelPassword),
 		strings.TrimPrefix(url.UserPassword("", sentinelPassword).String(), ":"),
+		pctEncode(sentinelPassword),
 	}
 	for _, f := range forms {
 		if strings.Contains(s, f) {
 			t.Errorf("output contains the sentinel password (form %q): %q", f, s)
+		}
+	}
+}
+
+func TestRedactorRegistersPctEncodedForm(t *testing.T) {
+	t.Parallel()
+	r := NewRedactor()
+	r.Register("pa$$word-x")
+	// '$' stays raw in url.UserPassword but is %24 in pctEncode; both are masked.
+	for _, in := range []string{"pa$$word-x", "pa%24%24word-x"} {
+		if got := r.Redact("v=" + in + ";"); got != "v=***;" {
+			t.Errorf("Redact(%q) = %q", in, got)
 		}
 	}
 }

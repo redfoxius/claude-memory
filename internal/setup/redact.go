@@ -18,10 +18,11 @@ const MinSecretLen = 8
 // Mask replaces every redacted secret in output.
 const Mask = "***"
 
-// userinfoRe matches the password part of `scheme://user:password@`. The
-// password may hold anything but '@' and whitespace (an unencoded base64
-// password with '/' included).
-var userinfoRe = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^:@/\s]*):[^@\s]*@`)
+// userinfoRe matches the password part of `scheme://user:password@`. It
+// anchors on the last '@' before the first '/' (so a password holding '@'
+// is masked whole); when the password itself holds a '/' (unencoded base64)
+// it falls back to the first '@'. Whitespace ends the match either way.
+var userinfoRe = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^:@/\s]*):(?:[^\s/]*@|[^@\s]*@)`)
 
 // Redactor is the single output sink's filter (AC-30): every byte the
 // feature prints, in text and JSON, passes through it. It always masks the
@@ -39,7 +40,7 @@ type Redactor struct {
 func NewRedactor() *Redactor { return &Redactor{} }
 
 // Register adds secret (and its url.QueryEscape, url.PathEscape and
-// URL-userinfo forms) to the literals to mask. It returns false, and
+// URL-userinfo and pctEncode forms) to the literals to mask. It returns false, and
 // registers nothing, when the secret is shorter than MinSecretLen.
 func (r *Redactor) Register(secret string) bool {
 	if len(secret) < MinSecretLen {
@@ -50,6 +51,7 @@ func (r *Redactor) Register(secret string) bool {
 		url.QueryEscape(secret),
 		url.PathEscape(secret),
 		strings.TrimPrefix(url.UserPassword("", secret).String(), ":"),
+		pctEncode(secret), // the form dsn.go writes into the env file (Design 24)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -124,6 +124,7 @@ var settingsCases = []settingsCase{
 	{name: "unicode-escapes-unchanged-noop", in: "unicode-escapes-unchanged-noop", state: StateOK},
 	{name: "unicode-escapes-merge", in: "unicode-escapes-merge", state: StateAbsent, changed: true, roundTrip: true},
 	{name: "big-number-unchanged", in: "big-number-unchanged", state: StateAbsent, changed: true, roundTrip: true},
+	{name: "crlf", in: "crlf", state: StateAbsent, changed: true, roundTrip: true},
 	{name: "no-trailing-newline", in: "no-trailing-newline", state: StateAbsent, changed: true},
 }
 
@@ -165,6 +166,9 @@ func TestSettingsGolden(t *testing.T) {
 			if len(bytes.TrimSpace(in)) > 0 {
 				assertSameOutsideHooks(t, in, out)
 			}
+			if tc.name == "crlf" {
+				assertAllCRLF(t, "merge", out)
+			}
 			checkGolden(t, filepath.Join("testdata", "settings", tc.name+".merge.golden.json"), out)
 			if tc.check != nil {
 				tc.check(t, a, sum)
@@ -191,6 +195,9 @@ func TestSettingsGolden(t *testing.T) {
 			if !json.Valid(un) {
 				t.Fatalf("unmerge output is not valid JSON:\n%s", un)
 			}
+			if tc.name == "crlf" {
+				assertAllCRLF(t, "unmerge", un)
+			}
 			checkGolden(t, filepath.Join("testdata", "settings", tc.name+".unmerge.golden.json"), un)
 			if tc.roundTrip && !bytes.Equal(un, in) {
 				t.Errorf("unmerge(merge(in)) != in:\n--- got ---\n%s\n--- in ---\n%s", un, in)
@@ -200,6 +207,15 @@ func TestSettingsGolden(t *testing.T) {
 				t.Errorf("second unmerge: changed=%v err=%v", changedUn2, err)
 			}
 		})
+	}
+}
+
+// assertAllCRLF fails when b holds a bare LF: a CRLF file must stay CRLF
+// (AC-37).
+func assertAllCRLF(t *testing.T, what string, b []byte) {
+	t.Helper()
+	if bytes.Count(b, []byte("\n")) != bytes.Count(b, []byte("\r\n")) {
+		t.Errorf("%s output of a CRLF file has a bare LF:\n%q", what, b)
 	}
 }
 
