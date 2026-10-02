@@ -506,6 +506,9 @@ func (s *session) askChoices() error {
 		if !pending {
 			continue
 		}
+		// Contract: Detail may reach the Prompter here, unredacted (the engine
+		// has no Redactor). Steps must never put a DSN or secret in Detail, and
+		// the TTY Prompter must redact questions (see Prompter).
 		q := fmt.Sprintf("%s [%s]: %s", r.step.Title(), r.det.State, r.det.Detail)
 		i, err := s.ui().Select(q, []string{string(ChoiceApply), string(ChoiceKeep), string(ChoiceSkip)}, defIdx)
 		if err := s.askErr(err); err != nil {
@@ -577,6 +580,15 @@ func (s *session) configurePhase() error {
 		}
 		if r.userSkip {
 			continue
+		}
+		// A prerequisite whose block was just resolved (blockedPrompt, an earlier
+		// step in this loop) makes r's Detection stale: r was Detected as
+		// blocked by it, with no artifacts and no afterDep. Re-Detect it so it
+		// gets Configure / MissingInput like any other step.
+		if r.det.State == StateBlocked && r.det.BlockedBy != "" && s.idx[r.det.BlockedBy].resolved {
+			s.detect(r)
+			r.choices = s.defaultChoices(r)
+			s.resolveAfterDep()
 		}
 		if r.det.State == StateBlocked && r.det.BlockedBy == "" {
 			if err := s.blockedPrompt(r); err != nil {
@@ -705,20 +717,28 @@ func (s *session) reconcile(r *stepRun, old Detection, oldCh Choices, now Detect
 		switch {
 		case r.userSkip:
 			out[a.ID] = ChoiceSkip
+		case interactive && a.State != StateOK && envKeyAnswered(a.ID, answered):
+			// Checked before "state unchanged": a kept hand-edited key
+			// (modified -> modified) is still overwritten by a new answer.
+			out[a.ID] = ChoiceApply
 		case hadState && hadChoice && prev == a.State:
 			out[a.ID] = c
 		default:
 			out[a.ID] = s.defaultChoice(a)
-			if interactive && a.State != StateOK {
-				if i := strings.LastIndex(a.ID, "/"); i >= 0 {
-					if f, ok := EnvKeyFields[a.ID[i+1:]]; ok && answered[f] {
-						out[a.ID] = ChoiceApply
-					}
-				}
-			}
 		}
 	}
 	return out
+}
+
+// envKeyAnswered reports whether id is an env-key artifact ("envfile/<KEY>")
+// whose RunState field the user answered in this run's Configure.
+func envKeyAnswered(id string, answered map[string]bool) bool {
+	key, ok := strings.CutPrefix(id, "envfile/")
+	if !ok {
+		return false
+	}
+	f, ok := EnvKeyFields[key]
+	return ok && answered[f]
 }
 
 // ---- Plan -----------------------------------------------------------------
@@ -799,6 +819,10 @@ func (s *session) gate(r *stepRun) bool {
 			r.blocked, r.hard = "blocked by "+req+": "+strings.TrimPrefix(d.blocked, "blocked: "), d.hard
 		case d.userSkip && d.det.State != StateOK:
 			r.blocked, r.hard = "blocked by "+req+": "+d.skipWhy, false
+		case !d.applied && d.det.State == StateAbsent:
+			// Kept while absent: nothing was installed, so dependents cannot run
+			// (soft block, like a user skip).
+			r.blocked, r.hard = "blocked by "+req+": it is not installed (kept)", false
 		default:
 			continue
 		}
@@ -995,6 +1019,9 @@ func (s *session) awaitFlow(r *stepRun, first StepResult, chosen []string) error
 	first.Await = nil
 	// What the first Apply already did is real: it is recorded when the step
 	// ends blocked, skipped or quit, so the manifest matches the disk.
+	// It is deliberately NOT recorded when the follow-up Plan/Apply or the
+	// success rule fails: a failed step records nothing (AC-9), and the next
+	// run's Detect sees what is on disk and converges from there.
 	record := func() error {
 		r.result = first
 		if err := s.persist(first); err != nil {
@@ -1136,6 +1163,11 @@ func (s *session) outcomes() []StepOutcome {
 }
 
 func (s *session) exitFailed() bool {
+	if s.in.DryRun {
+		// Design 15 step 5: --dry-run stops at the plan with exit 0; a step that
+		// failed Configure/Plan is shown in the outcomes, not in the exit code.
+		return false
+	}
 	for _, r := range s.runs {
 		if r.failed {
 			return true

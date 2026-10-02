@@ -775,6 +775,7 @@ type promptExpect struct {
 	idx     int
 	yes     bool
 	text    string
+	err     error // returned instead of an answer (e.g. ErrInterrupted)
 }
 
 // NewFakePrompter returns a prompter bound to t; with interactive false any
@@ -801,6 +802,18 @@ func (p *FakePrompter) ExpectSelect(q string, idx int) *FakePrompter {
 // ExpectConfirm scripts a Confirm whose question contains q.
 func (p *FakePrompter) ExpectConfirm(q string, yes bool) *FakePrompter {
 	p.script = append(p.script, promptExpect{kind: "confirm", q: q, yes: yes})
+	return p
+}
+
+// ExpectSelectErr scripts a Select whose question contains q, failing with err.
+func (p *FakePrompter) ExpectSelectErr(q string, err error) *FakePrompter {
+	p.script = append(p.script, promptExpect{kind: "select", q: q, err: err})
+	return p
+}
+
+// ExpectConfirmErr scripts a Confirm whose question contains q, failing with err.
+func (p *FakePrompter) ExpectConfirmErr(q string, err error) *FakePrompter {
+	p.script = append(p.script, promptExpect{kind: "confirm", q: q, err: err})
 	return p
 }
 
@@ -838,6 +851,9 @@ func (p *FakePrompter) Select(q string, opts []string, def int) (int, error) {
 	if !ok {
 		return 0, ErrInterrupted
 	}
+	if e.err != nil {
+		return 0, e.err
+	}
 	if e.idx < 0 {
 		return def, nil
 	}
@@ -853,6 +869,9 @@ func (p *FakePrompter) Confirm(q string, def bool) (bool, error) {
 	e, ok := p.next("confirm", q)
 	if !ok {
 		return false, ErrInterrupted
+	}
+	if e.err != nil {
+		return false, e.err
 	}
 	return e.yes, nil
 }

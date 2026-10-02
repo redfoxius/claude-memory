@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -177,9 +178,14 @@ func TestWritableFSLock(t *testing.T) { // AC-9
 	_ = unlock2()
 }
 
+// stubDB / stubOllama are non-nil probers for the builder test; none of their
+// methods is ever called.
+type stubDB struct{ setup.DBProber }
+type stubOllama struct{ setup.OllamaProber }
+
 func TestPortBuilders(t *testing.T) {
 	t.Parallel()
-	d := setupDeps{FS: readOnlyFS{}, Runner: execRunner{readOnly: true}}
+	d := setupDeps{FS: readOnlyFS{}, Runner: execRunner{readOnly: true}, DB: stubDB{}, Ollama: stubOllama{}}
 	dir := t.TempDir()
 	p := filepath.Join(dir, "f")
 
@@ -196,6 +202,16 @@ func TestPortBuilders(t *testing.T) {
 	}
 
 	wp := writablePorts(d, false)
+	if wp.DB == nil || wp.Ollama == nil {
+		t.Error("WritePorts.DB/Ollama must be set")
+	}
+	// Same adapter: compared by type (writableFS holds a func, so == would panic).
+	if fmt.Sprintf("%T", wp.ReadPorts.FS) != fmt.Sprintf("%T", wp.FS) {
+		t.Errorf("WritePorts.ReadPorts.FS is %T, want the same adapter as FS (%T)", wp.ReadPorts.FS, wp.FS)
+	}
+	if fmt.Sprintf("%T/%v", wp.ReadPorts.Runner, wp.ReadPorts.Runner) != fmt.Sprintf("%T/%v", wp.Runner, wp.Runner) {
+		t.Errorf("WritePorts.ReadPorts.Runner is %v, want the same adapter as Runner (%v)", wp.ReadPorts.Runner, wp.Runner)
+	}
 	if wp.Jobs != nil || wp.ClaudeCLI != nil {
 		t.Error("WritePorts.Jobs/ClaudeCLI must be nil in 2a")
 	}

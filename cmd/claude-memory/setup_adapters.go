@@ -126,6 +126,10 @@ func (writableFS) Chmod(p string, mode fs.FileMode) error    { return os.Chmod(p
 // Lock takes an exclusive non-blocking flock on p (created 0600, its
 // directory 0700 when missing). The kernel drops it on process exit, so a
 // crash never leaves a stale lock (no PID file).
+//
+// Note: Lock creates <ConfigDir> and install.lock (both persist) before any
+// Detect runs, so a writable install makes those two filesystem entries even
+// when the run then turns out to be a no-op. Dry-run never calls Lock.
 func (writableFS) Lock(p string) (func() error, error) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return nil, err

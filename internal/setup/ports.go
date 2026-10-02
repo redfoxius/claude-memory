@@ -26,6 +26,12 @@ var ErrReadOnly = errors.New("mutating command refused: read-only runner")
 // Prompter is the line-oriented user interaction port (AC-10, AC-11) [S2].
 // The TTY adapter reads passwords without echo (golang.org/x/term) and
 // registers every secret with the Redactor before returning it (AC-30).
+//
+// Redaction contract: the engine builds some questions from a step's
+// Detection.Detail (the phase-2 Select) and passes them through unredacted, so
+// the TTY Prompter (WI-S2-2) must run every question through the Redactor
+// before printing it, and a step must never put a DSN or other secret in
+// Detail.
 type Prompter interface {
 	// Select shows numbered opts with def preselected and returns the index
 	// chosen (Enter accepts def).

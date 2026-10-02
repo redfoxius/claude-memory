@@ -729,6 +729,11 @@ func TestEngineBlockedPromptRecheckResolves(t *testing.T) { // M1
 	if h.log.Count("Detect prereqs") != 2 {
 		t.Fatalf("calls %v", h.log.Calls())
 	}
+	// HIGH-1: the dependent's Detection was stale (blocked, no artifacts) when
+	// its prerequisite resolved; it must still get its Configure.
+	if h.log.Count("Configure topology") != 1 {
+		t.Fatalf("resolved dependent skipped Configure: %v", h.log.Calls())
+	}
 }
 
 func TestEngineBlockedPromptSkipBlocksDependents(t *testing.T) {
@@ -839,4 +844,216 @@ func TestEngineDuplicateAndUnknownRequires(t *testing.T) {
 	h := newEH(t, false)
 	wantExit(t, h.run(Inputs{Yes: true}, h.step("a", nil, "a"), h.step("a", nil, "a")), ExitUsage)
 	wantExit(t, newEH(t, false).run(Inputs{Yes: true}, h.step("b", []string{"zz"}, "b")), ExitUsage)
+}
+
+// afterDepSteps: a (absent, applied) and b (BlockedBy a until a is applied).
+// bAfter says what b's Detect reports once a is applied.
+func afterDepSteps(h *eh, bStillBlocked bool) (*FakeStep, *FakeStep) {
+	h.world = NewFakeWorld(map[string]State{"a/x": StateAbsent, "b/x": StateAbsent})
+	a := h.step("a", nil, "a/x")
+	b := &FakeStep{StepID: "b", Req: []string{"a"}, Log: h.log, ApplyF: h.world.ApplyOK(),
+		DetectF: func(int, *RunState) Detection {
+			if bStillBlocked || h.world.Get("a/x") != StateOK {
+				return Detection{State: StateBlocked, BlockedBy: "a", Detail: "needs a"}
+			}
+			st := h.world.Get("b/x")
+			return Detection{State: st, Artifacts: []ArtifactState{{ID: "b/x", State: st}}}
+		}}
+	return a, b
+}
+
+func TestEngineApplyAfterDepRedetectsAbsentAndApplies(t *testing.T) {
+	t.Parallel()
+	h := newEH(t, false)
+	a, b := afterDepSteps(h, false)
+	r := h.run(Inputs{Yes: true}, a, b)
+	wantExit(t, r, ExitOK)
+	if outcome(t, r, "a").Outcome != OutcomeApplied || outcome(t, r, "b").Outcome != OutcomeApplied {
+		t.Fatalf("%+v", r.Outcomes)
+	}
+	if h.log.Index("Apply a") > h.log.Index("Apply b") || h.log.Count("Apply b") != 1 {
+		t.Fatalf("b must apply after a: %v", h.log.Calls())
+	}
+	// b is planned only after a was applied (Plan b follows Apply a).
+	if h.log.Count("Plan b") != 1 || h.log.Index("Plan b") < h.log.Index("Apply a") {
+		t.Fatalf("b planned before a applied: %v", h.log.Calls())
+	}
+	// StepPlan.AfterDep and the empty-plan case: b has no concrete plan yet.
+	if len(h.rep.Plans) != 1 || len(h.rep.Plans[0].Steps) != 2 {
+		t.Fatalf("plans %+v", h.rep.Plans)
+	}
+	sp := h.rep.Plans[0].Steps[1]
+	if sp.StepID != "b" || sp.AfterDep != "a" || len(sp.Plan.Actions) != 0 {
+		t.Fatalf("b's StepPlan = %+v", sp)
+	}
+	if h.rep.Plans[0].Steps[0].AfterDep != "" {
+		t.Fatalf("a's StepPlan = %+v", h.rep.Plans[0].Steps[0])
+	}
+}
+
+func TestEngineApplyAfterDepStillBlockedIsHardBlock(t *testing.T) {
+	t.Parallel()
+	h := newEH(t, false)
+	a, b := afterDepSteps(h, true)
+	r := h.run(Inputs{Yes: true}, a, b)
+	wantExit(t, r, ExitFailed)
+	if outcome(t, r, "a").Outcome != OutcomeApplied {
+		t.Fatalf("%+v", r.Outcomes)
+	}
+	if o := outcome(t, r, "b"); o.Outcome != OutcomeBlocked || !o.Hard {
+		t.Fatalf("b = %+v", o)
+	}
+	if h.log.Count("Apply b") != 0 {
+		t.Fatalf("blocked b was applied: %v", h.log.Calls())
+	}
+}
+
+func TestResolveAfterDepAndLabel(t *testing.T) {
+	t.Parallel()
+	mk := func(id string, st State, by string, ch Choices) *stepRun {
+		return &stepRun{step: &FakeStep{StepID: id}, det: Detection{State: st, BlockedBy: by}, choices: ch}
+	}
+	a := mk("a", StateAbsent, "", Choices{"a/x": ChoiceApply})
+	b := mk("b", StateBlocked, "a", Choices{})
+	c := mk("c", StateBlocked, "kept", Choices{})
+	kept := mk("kept", StateAbsent, "", Choices{"kept/x": ChoiceKeep})
+	s := &session{runs: []*stepRun{a, b, c, kept}, idx: map[string]*stepRun{"a": a, "b": b, "c": c, "kept": kept}}
+	s.resolveAfterDep()
+	if b.afterDep != "a" || c.afterDep != "" {
+		t.Fatalf("afterDep b=%q c=%q", b.afterDep, c.afterDep)
+	}
+	if got := s.choiceLabel(b); got != "apply (after a)" {
+		t.Fatalf("label %q", got)
+	}
+	if got := s.choiceLabel(c); got != "blocked" {
+		t.Fatalf("label %q", got)
+	}
+	// A failed or user-skipped prerequisite does not unblock.
+	a.failed = true
+	s.resolveAfterDep()
+	if b.afterDep != "" {
+		t.Fatalf("afterDep on a failed prerequisite: %q", b.afterDep)
+	}
+	a.failed, a.userSkip = false, true
+	s.resolveAfterDep()
+	if b.afterDep != "" {
+		t.Fatalf("afterDep on a skipped prerequisite: %q", b.afterDep)
+	}
+	a.userSkip = false
+	s.resolveAfterDep()
+	rows := s.rows([]*stepRun{b})
+	if len(rows) != 1 || rows[0].Choice != "apply (after a)" {
+		t.Fatalf("rows %+v", rows)
+	}
+}
+
+func TestEngineKeptAbsentPrerequisiteSoftBlocksDependents(t *testing.T) { // MED-2
+	t.Parallel()
+	h := newEH(t, true)
+	h.world = NewFakeWorld(map[string]State{"a/x": StateAbsent, "b/x": StateAbsent})
+	a, b := h.step("a", nil, "a/x"), h.step("b", []string{"a"}, "b/x")
+	h.ui.ExpectSelect("a [absent]", 1).ExpectSelect("b [absent]", 0).ExpectConfirm("Apply", true)
+	r := h.run(Inputs{}, a, b)
+	wantExit(t, r, ExitOK) // soft block, like a user skip
+	if o := outcome(t, r, "b"); o.Outcome != OutcomeBlocked || o.Hard {
+		t.Fatalf("b = %+v", o)
+	}
+	if h.log.Count("Apply a") != 0 || h.log.Count("Apply b") != 0 {
+		t.Fatalf("applied: %v", h.log.Calls())
+	}
+}
+
+func TestEngineRuleAEnvKeyAnswerOverridesKeptModifiedKey(t *testing.T) { // MED-3
+	t.Parallel()
+	h := newEH(t, true)
+	var planned Choices
+	done := false
+	env := &FakeStep{StepID: "envfile", Log: h.log,
+		DetectF: func(int, *RunState) Detection {
+			s := StateModified // the user hand-edited the DSN line, before and after the answer
+			if done {
+				s = StateOK
+			}
+			return Detection{State: s, Artifacts: []ArtifactState{{ID: "envfile/MEMORY_PG_DSN", State: s, Detail: "edited"}}}
+		},
+		PlanF: func(_ *RunState, ch Choices) (Plan, error) { planned = ch; return Plan{}, nil },
+		ApplyF: func(int, WritePorts, *RunState, Plan) (StepResult, error) {
+			done = true
+			return StepResult{}, nil
+		}}
+	db := &FakeStep{StepID: "database", Log: h.log, ConfigureF: func(_ Prompter, st *RunState) error {
+		st.DB.Set(DBTarget{Host: "new"}, SourcePrompt)
+		return nil
+	}}
+	h.ui.ExpectSelect("envfile", 0).ExpectConfirm("overwrite your modified", false). // keep the hand edit ...
+												ExpectConfirm("Apply", true) // ... then the new answer wins, with no second overwrite Confirm
+	r := h.run(Inputs{Reconfigure: true}, env, db)
+	wantExit(t, r, ExitOK)
+	if planned["envfile/MEMORY_PG_DSN"] != ChoiceApply || h.log.Count("Apply envfile") != 1 {
+		t.Fatalf("planned %v, log %v", planned, h.log.Calls())
+	}
+}
+
+func TestEnvKeyAnsweredRequiresEnvfilePrefix(t *testing.T) { // LOW-2
+	t.Parallel()
+	ans := map[string]bool{"DB": true}
+	for id, want := range map[string]bool{
+		"envfile/MEMORY_PG_DSN":   true,
+		"envfile/MEMORY_OTHER":    false,
+		"other/MEMORY_PG_DSN":     false,
+		"a/envfile/MEMORY_PG_DSN": false,
+		"MEMORY_PG_DSN":           false,
+	} {
+		if got := envKeyAnswered(id, ans); got != want {
+			t.Errorf("envKeyAnswered(%q) = %v, want %v", id, got, want)
+		}
+	}
+	if envKeyAnswered("envfile/MEMORY_PG_DSN", map[string]bool{}) {
+		t.Error("unanswered field must not match")
+	}
+}
+
+func TestEngineDryRunStepFailureStillExits0(t *testing.T) { // LOW-1: dry-run stops at the plan with exit 0
+	t.Parallel()
+	h := newEH(t, false)
+	h.world = NewFakeWorld(map[string]State{"p/x": StateAbsent, "c/x": StateAbsent})
+	pf := h.step("planfail", nil, "p/x")
+	pf.PlanF = func(*RunState, Choices) (Plan, error) { return Plan{}, errors.New("cannot plan") }
+	cf := h.step("cfgfail", nil, "c/x")
+	cf.ConfigureF = func(Prompter, *RunState) error { return errors.New("pass --x") }
+	r := h.run(Inputs{DryRun: true, Yes: true}, pf, cf)
+	wantExit(t, r, ExitOK)
+	if outcome(t, r, "planfail").Outcome != OutcomeFailed || outcome(t, r, "cfgfail").Outcome != OutcomeFailed {
+		t.Fatalf("failures must still be visible in the outcomes: %+v", r.Outcomes)
+	}
+	// The same failures outside dry-run exit 1.
+	h2 := newEH(t, false)
+	h2.world = NewFakeWorld(map[string]State{"p/x": StateAbsent})
+	pf2 := h2.step("planfail", nil, "p/x")
+	pf2.PlanF = func(*RunState, Choices) (Plan, error) { return Plan{}, errors.New("cannot plan") }
+	wantExit(t, h2.run(Inputs{Yes: true}, pf2), ExitFailed)
+}
+
+func TestEngineCtrlCAtChoicePromptExits130(t *testing.T) { // LOW-7
+	t.Parallel()
+	h := newEH(t, true)
+	h.world = NewFakeWorld(map[string]State{"s/x": StateAbsent})
+	h.ui.ExpectSelectErr("s [absent]", ErrInterrupted)
+	r := h.run(Inputs{}, h.step("s", nil, "s/x"))
+	wantExit(t, r, ExitInterrupted)
+	if h.log.Count("Apply s") != 0 || len(h.nonLockWrites()) != 0 {
+		t.Fatalf("applied/wrote after Ctrl-C: %v %v", h.log.Calls(), h.nonLockWrites())
+	}
+}
+
+func TestEngineCtrlCAtConfirmExits130(t *testing.T) { // LOW-7
+	t.Parallel()
+	h := newEH(t, true)
+	h.world = NewFakeWorld(map[string]State{"s/x": StateAbsent})
+	h.ui.ExpectSelect("s [absent]", 0).ExpectConfirmErr("Apply", ErrInterrupted)
+	r := h.run(Inputs{}, h.step("s", nil, "s/x"))
+	wantExit(t, r, ExitInterrupted)
+	if r.Declined || h.log.Count("Apply s") != 0 || len(h.nonLockWrites()) != 0 {
+		t.Fatalf("applied/wrote after Ctrl-C: %v %v", h.log.Calls(), h.nonLockWrites())
+	}
 }

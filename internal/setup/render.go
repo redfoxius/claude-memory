@@ -13,6 +13,11 @@ import (
 // steps and checks return data. Every message is built whole, redacted
 // through the Redactor, and only then coloured and written in one call, so a
 // secret is never split across writes and never reaches the writer (AC-30).
+//
+// Contract: a step's Detection.Detail also reaches Prompter questions
+// (engine askChoices), which this renderer does not print. The TTY Prompter
+// (WI-S2-2) must redact questions itself, and steps must never put a DSN or
+// other secret in Detail.
 
 // RenderOptions says how the renderer behaves on its writer (AC-14).
 type RenderOptions struct {
