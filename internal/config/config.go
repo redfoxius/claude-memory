@@ -353,6 +353,7 @@ func ParseEnvData(data []byte, mode fs.FileMode) *EnvFile {
 
 // parseEnv parses env-file content (everything but the mode).
 func parseEnv(data string) *EnvFile {
+	data = strings.TrimPrefix(data, "\ufeff") // UTF-8 BOM would corrupt the first key
 	ef := &EnvFile{Values: map[string]string{}}
 	seen := map[string]bool{}
 	for i, raw := range strings.Split(data, "\n") {

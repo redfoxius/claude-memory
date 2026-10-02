@@ -296,6 +296,8 @@ func TestIsOurHookCommand(t *testing.T) {
 		"/Users/o/.claude/hooks/other/user-prompt-submit.sh":           false,
 		"/Users/o/.claude/hooks/claude-memory/user-prompt-submit.sh.x": false,
 		"claude-memory-hooked":                                         false,
+		"echo 'not claude-memory hook'":                                false,
+		"cd /x && /opt/bin/claude-memory hook":                         true,
 	}
 	for cmd, want := range cases {
 		if got := IsOurHookCommand(cmd); got != want {

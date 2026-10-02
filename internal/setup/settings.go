@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -88,13 +89,18 @@ var ourHookSuffixes = []string{
 	"/claude-memory/" + HookScriptSessionEnd,
 }
 
+// ourHookCmdRe requires `claude-memory` to be the program (start of the
+// command or after `&&`, `||`, `;`, `|`, as in `cd x && claude-memory hook`),
+// not a word inside another command's argument (`echo 'claude-memory hook'`).
+var ourHookCmdRe = regexp.MustCompile(`(^|&&|\|\||[;|(])\s*["']?(\S*/)?claude-memory["']?\s+(hook|extract)\b`)
+
 // IsOurHookCommand reports whether a hook command is ours by identity (spec
 // §2 "Our hook entry"): it runs …/claude-memory/user-prompt-submit.sh or
 // …/claude-memory/session-end.sh, or contains `claude-memory hook` /
 // `claude-memory extract`. This recognizes hand installs ($HOME/... form).
 func IsOurHookCommand(cmd string) bool {
 	c := strings.TrimSpace(cmd)
-	if strings.Contains(c, "claude-memory hook") || strings.Contains(c, "claude-memory extract") {
+	if ourHookCmdRe.MatchString(c) {
 		return true
 	}
 	c = strings.Trim(c, `"'`)

@@ -254,6 +254,21 @@ func TestMigrateErrorNeverContainsDSN(t *testing.T) {
 	}
 }
 
+// A password with an unencoded "/" makes net/url quote a fragment of it
+// ("invalid port \":ab\""); the error must withhold that detail.
+func TestMigrateErrorWithholdsParseDetail(t *testing.T) {
+	dsn := "postgresql://claude_memory:ab/cd+Efgh12345==@127.0.0.1:54329/db"
+	err := Prober{}.Migrate(context.Background(), dsn)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, frag := range []string{":ab", "cd+Efgh", "Efgh12345"} {
+		if strings.Contains(err.Error(), frag) {
+			t.Errorf("error leaks %q: %v", frag, err)
+		}
+	}
+}
+
 func TestSanitize(t *testing.T) {
 	dsn := "postgres://app:hunter2hunter2@db:5432/x"
 	red := dsnRedactor(dsn)

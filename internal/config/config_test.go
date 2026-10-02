@@ -207,3 +207,10 @@ func TestGetStringListEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestParseEnvStripsBOM(t *testing.T) {
+	ef := parseEnv("\ufeffMEMORY_PG_DSN=postgres://u:p@h/db\r\nMEMORY_OLLAMA_URL=http://x\r\n")
+	if ef.Values["MEMORY_PG_DSN"] != "postgres://u:p@h/db" || len(ef.Findings) != 0 {
+		t.Errorf("values=%v findings=%v", ef.Values, ef.Findings)
+	}
+}

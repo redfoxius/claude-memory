@@ -15,14 +15,14 @@ import (
 )
 
 // Test doubles for the ports (plan WI-S1-6). Every internal/setup test uses
-// these and explicit Paths built from t.TempDir(); no test calls t.Setenv
+// these and explicit Paths built from realTempDir(t); no test calls t.Setenv
 // or touches the real HOME, so tests can run in parallel (AC-63).
 
 // testPaths returns a Paths whose every directory lies under one fresh temp
 // dir (nothing is created except the root itself).
 func testPaths(t testing.TB) Paths {
 	t.Helper()
-	root := t.TempDir()
+	root := realTempDir(t)
 	home := filepath.Join(root, "home")
 	return Paths{
 		Home:            home,
@@ -237,7 +237,7 @@ type FakeFS struct {
 }
 
 // NewFakeFS returns a FakeFS rooted at root (typically Paths.Home's parent
-// from testPaths, or t.TempDir()).
+// from testPaths, or realTempDir(t)).
 func NewFakeFS(t testing.TB, root string) *FakeFS {
 	t.Helper()
 	return &FakeFS{t: t, Root: filepath.Clean(root), locks: map[string]bool{}}
@@ -473,7 +473,7 @@ func TestFakeRunnerReadOnlyRejectsMutating(t *testing.T) {
 
 func TestFakeFSWritesFaultsAndReadOnly(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := realTempDir(t)
 	f := NewFakeFS(t, root)
 	dir := filepath.Join(root, "a", "b")
 	if err := f.MkdirAll(dir, 0o700); err != nil {
@@ -553,4 +553,16 @@ func TestTestPathsAreUnderOneRoot(t *testing.T) {
 			t.Errorf("%q not under %q", d, root)
 		}
 	}
+}
+
+// realTempDir is realTempDir(t) with symlinks resolved: on macOS /var is a link
+// to /private/var, and code that resolves symlinks must see the same path
+// the test built its fixtures under.
+func realTempDir(t testing.TB) string {
+	t.Helper()
+	d := t.TempDir()
+	if r, err := filepath.EvalSymlinks(d); err == nil {
+		return r
+	}
+	return d
 }

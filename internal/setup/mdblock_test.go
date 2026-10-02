@@ -123,7 +123,7 @@ func TestMDBlockRefusals(t *testing.T) {
 // (a directory, or a file in worktrees and submodules), via the FS port.
 func TestInGitRepo(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := realTempDir(t)
 	fsys := NewFakeFS(t, root)
 	mk := func(p string, file bool) {
 		t.Helper()
