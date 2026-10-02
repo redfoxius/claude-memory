@@ -264,6 +264,7 @@ listing, dedup and lookups by id never leave the current namespace.
 
 | I want to... | Do this |
 |---|---|
+| list all namespaces and their paths | `claude-memory namespaces list [--json]` |
 | see what a directory maps to | `claude-memory namespaces which [DIR]` |
 | add a project / more paths | `claude-memory namespaces add NAME 'GLOB' ['GLOB'...]` |
 | force a namespace for one repo | set `MEMORY_NAMESPACE` in that repo's `.claude/settings.json` under `env` (beats the file) |
