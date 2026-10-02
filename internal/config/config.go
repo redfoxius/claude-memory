@@ -2,8 +2,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -119,20 +122,20 @@ const NamespaceEnv = "MEMORY_NAMESPACE"
 // It returns an error if any required value is missing or malformed.
 func Load() (*Config, error) {
 	c := &Config{
-		MaxContentChars:     getIntEnv("MEMORY_MAX_CONTENT_CHARS", 20000),
-		StoreSimUpdate:      getFloatEnv("MEMORY_STORE_SIM_UPDATE", 0.85),
-		StoreSimAsk:         getFloatEnv("MEMORY_STORE_SIM_ASK", 0.65),
-		PRIngestLookback:    getDurationEnv("MEMORY_PR_INGEST_LOOKBACK", 30*24*time.Hour),
-		HookSimThreshold:    getFloatEnv("MEMORY_HOOK_SIM_THRESHOLD", 0.50),
-		ExtractMinMessages:  getIntEnv("MEMORY_EXTRACT_MIN_MESSAGES", 20),
-		CandidateTTL:        getDurationEnv("MEMORY_CANDIDATE_TTL", 180*24*time.Hour),
-		HookTimeout:         getDurationEnv("MEMORY_HOOK_TIMEOUT", 800*time.Millisecond),
-		EmbedMaxTokens:      getIntEnv("MEMORY_EMBED_MAX_TOKENS", 2048),
-		OllamaURL:           getStringEnv("MEMORY_OLLAMA_URL", "http://127.0.0.1:11434"),
-		OllamaModel:         getStringEnv("MEMORY_OLLAMA_MODEL", "bge-m3"),
-		PRIngestRepos:       getStringListEnv("MEMORY_PR_INGEST_REPOS"),
-		StaleTimeoutHook:    getDurationEnv("MEMORY_STALE_TIMEOUT_HOOK", 50*time.Millisecond),
-		StaleTimeout:        getDurationEnv("MEMORY_STALE_TIMEOUT", 500*time.Millisecond),
+		MaxContentChars:    getIntEnv("MEMORY_MAX_CONTENT_CHARS", 20000),
+		StoreSimUpdate:     getFloatEnv("MEMORY_STORE_SIM_UPDATE", 0.85),
+		StoreSimAsk:        getFloatEnv("MEMORY_STORE_SIM_ASK", 0.65),
+		PRIngestLookback:   getDurationEnv("MEMORY_PR_INGEST_LOOKBACK", 30*24*time.Hour),
+		HookSimThreshold:   getFloatEnv("MEMORY_HOOK_SIM_THRESHOLD", 0.50),
+		ExtractMinMessages: getIntEnv("MEMORY_EXTRACT_MIN_MESSAGES", 20),
+		CandidateTTL:       getDurationEnv("MEMORY_CANDIDATE_TTL", 180*24*time.Hour),
+		HookTimeout:        getDurationEnv("MEMORY_HOOK_TIMEOUT", 800*time.Millisecond),
+		EmbedMaxTokens:     getIntEnv("MEMORY_EMBED_MAX_TOKENS", 2048),
+		OllamaURL:          getStringEnv("MEMORY_OLLAMA_URL", "http://127.0.0.1:11434"),
+		OllamaModel:        getStringEnv("MEMORY_OLLAMA_MODEL", "bge-m3"),
+		PRIngestRepos:      getStringListEnv("MEMORY_PR_INGEST_REPOS"),
+		StaleTimeoutHook:   getDurationEnv("MEMORY_STALE_TIMEOUT_HOOK", 50*time.Millisecond),
+		StaleTimeout:       getDurationEnv("MEMORY_STALE_TIMEOUT", 500*time.Millisecond),
 	}
 
 	// PGDSN is required and never has a default.
@@ -214,7 +217,9 @@ func getDurationEnv(key string, defaultVal time.Duration) time.Duration {
 }
 
 // LoadFromFile attempts to source environment variables from a local config file.
-// The file is expected to be in KEY=VALUE format (one per line).
+// The file is expected to be in KEY=VALUE format (one per line); it is parsed
+// by ParseEnvFile. Every KEY=VALUE pair is set in the environment unless the
+// variable is already set (non-empty), so the process environment wins.
 // It returns an error if the file is group/world-readable (permission check).
 // This is a no-op if the file doesn't exist.
 func LoadFromFile(path string) error {
@@ -229,35 +234,206 @@ func LoadFromFile(path string) error {
 
 	// Check permissions: must not be readable by group or world (mode 0600).
 	mode := info.Mode().Perm()
-	if mode&0077 != 0 {
+	if mode&0o077 != 0 {
 		return fmt.Errorf("config file %s must have mode 0600, not %#o", path, mode)
 	}
 
-	// Read and parse the file.
-	data, err := os.ReadFile(path)
+	ef, err := ParseEnvFile(path)
 	if err != nil {
-		return fmt.Errorf("read config file: %w", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // removed in between
+		}
+		return err
 	}
 
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		val := strings.TrimSpace(parts[1])
-
+	for _, e := range ef.entries {
 		// Set in environment if not already set.
-		if os.Getenv(key) == "" {
-			_ = os.Setenv(key, val) // os.Setenv always succeeds
+		if os.Getenv(e.key) == "" {
+			_ = os.Setenv(e.key, e.value) // os.Setenv always succeeds
 		}
 	}
 
 	return nil
+}
+
+// FindingKind names one env-file format problem (spec AC-27).
+type FindingKind string
+
+// Env-file finding kinds.
+const (
+	// FindingExportPrefix: a `export KEY=VALUE` line (DEPLOY.md's old form).
+	// The line is rejected: its key is not in Values, and LoadFromFile does
+	// not set it. Convertible to the plain form.
+	FindingExportPrefix FindingKind = "export-prefix"
+	// FindingQuotedWholeValue: quotes wrap the entire value (`KEY="v"`). The
+	// value is kept verbatim, quotes included, as LoadFromFile always did.
+	// Convertible: the quoted text has no character that needs the shell.
+	FindingQuotedWholeValue FindingKind = "quoted-whole-value"
+	// FindingUnparseableValue: anything else the plain format cannot represent
+	// safely: `$(...)`, `${...}`, `$VAR`, backticks, backslashes, unbalanced
+	// or partial quotes, or an invalid key. Never converted.
+	FindingUnparseableValue FindingKind = "unparseable-value"
+	// FindingDuplicate: a key set more than once. The first non-empty value
+	// wins, as in LoadFromFile.
+	FindingDuplicate FindingKind = "duplicate"
+	// FindingNoEquals: a non-comment line without '='. Ignored.
+	FindingNoEquals FindingKind = "no-equals"
+	// FindingGroupWorldReadable: the file mode has group or world bits;
+	// LoadFromFile refuses such a file.
+	FindingGroupWorldReadable FindingKind = "group-world-readable"
+)
+
+// Finding is one format problem in an env file.
+type Finding struct {
+	Line   int // 1-based line number; 0 for file-level findings
+	Kind   FindingKind
+	Key    string // the line's key, when it has one
+	Detail string
+}
+
+// EnvFile is a parsed env file (spec AC-27).
+type EnvFile struct {
+	// Values maps each accepted key to the value LoadFromFile would set from
+	// this file into an environment where it is unset.
+	Values map[string]string
+	// Order lists the keys of Values in order of first appearance.
+	Order []string
+	// Mode is the file's permission bits.
+	Mode fs.FileMode
+	// Findings lists every format problem, in line order (file-level first).
+	Findings []Finding
+
+	entries []envEntry // every accepted KEY=VALUE line, in order, duplicates included
+}
+
+type envEntry struct {
+	line       int
+	key, value string
+}
+
+// envKeyRe is a valid environment variable name.
+var envKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// shellExpansionRe matches text a shell would expand: $(...), ${...}, $VAR.
+var shellExpansionRe = regexp.MustCompile(`\$[A-Za-z_({]`)
+
+// ParseEnvFile reads and parses the KEY=VALUE env file at path without
+// touching the process environment (spec AC-27). Blank lines and lines
+// starting with '#' are skipped; keys and values are trimmed of surrounding
+// whitespace; the value is everything after the first '='. A missing file
+// returns an error wrapping fs.ErrNotExist. Wrong permissions are reported
+// as a finding, not an error: refusing to load such a file is LoadFromFile's
+// job.
+func ParseEnvFile(path string) (*EnvFile, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat config file: %w", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+	ef := parseEnv(string(data))
+	ef.Mode = info.Mode().Perm()
+	if ef.Mode&0o077 != 0 {
+		ef.Findings = append([]Finding{{
+			Kind:   FindingGroupWorldReadable,
+			Detail: fmt.Sprintf("mode %#o has group/world bits; the file must be 0600", ef.Mode),
+		}}, ef.Findings...)
+	}
+	return ef, nil
+}
+
+// parseEnv parses env-file content (everything but the mode).
+func parseEnv(data string) *EnvFile {
+	ef := &EnvFile{Values: map[string]string{}}
+	seen := map[string]bool{}
+	for i, raw := range strings.Split(data, "\n") {
+		lineNo := i + 1
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		exported := false
+		if rest, ok := cutExport(line); ok {
+			exported = true
+			line = rest
+		}
+
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			ef.Findings = append(ef.Findings, Finding{Line: lineNo, Kind: FindingNoEquals,
+				Detail: "line has no '='; ignored"})
+			continue
+		}
+		key := strings.TrimSpace(k)
+		val := strings.TrimSpace(v)
+
+		if exported {
+			ef.Findings = append(ef.Findings, Finding{Line: lineNo, Kind: FindingExportPrefix, Key: key,
+				Detail: "`export` prefix: the line is ignored; write KEY=VALUE"})
+			if kind, detail := classifyValue(val); kind != "" {
+				ef.Findings = append(ef.Findings, Finding{Line: lineNo, Kind: kind, Key: key, Detail: detail})
+			}
+			continue
+		}
+		if !envKeyRe.MatchString(key) {
+			ef.Findings = append(ef.Findings, Finding{Line: lineNo, Kind: FindingUnparseableValue, Key: key,
+				Detail: fmt.Sprintf("invalid key %q; the line is ignored", key)})
+			continue
+		}
+		if kind, detail := classifyValue(val); kind != "" {
+			ef.Findings = append(ef.Findings, Finding{Line: lineNo, Kind: kind, Key: key, Detail: detail})
+		}
+		if seen[key] {
+			ef.Findings = append(ef.Findings, Finding{Line: lineNo, Kind: FindingDuplicate, Key: key,
+				Detail: "key set more than once; the first non-empty value is used"})
+		} else {
+			seen[key] = true
+			ef.Order = append(ef.Order, key)
+		}
+		if ef.Values[key] == "" {
+			ef.Values[key] = val
+		}
+		ef.entries = append(ef.entries, envEntry{line: lineNo, key: key, value: val})
+	}
+	return ef
+}
+
+// cutExport strips a leading `export` keyword (followed by a space or tab).
+func cutExport(line string) (string, bool) {
+	rest, ok := strings.CutPrefix(line, "export")
+	if !ok || rest == "" || (rest[0] != ' ' && rest[0] != '\t') {
+		return line, false
+	}
+	return strings.TrimSpace(rest), true
+}
+
+// classifyValue reports whether a value needs a finding: quotes wrapping the
+// whole value (convertible), or anything a shell would interpret that the
+// plain format reads literally (unparseable).
+func classifyValue(v string) (FindingKind, string) {
+	if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+		q := v[0]
+		inner := v[1 : len(v)-1]
+		switch {
+		case strings.IndexByte(inner, q) >= 0:
+			return FindingUnparseableValue, "quotes inside a quoted value; fix it by hand"
+		case q == '"' && strings.ContainsAny(inner, "\\`$"):
+			return FindingUnparseableValue, "double-quoted value with $, ` or \\; fix it by hand"
+		}
+		return FindingQuotedWholeValue, "quotes wrap the whole value and are kept as part of it; remove them"
+	}
+	switch {
+	case strings.ContainsAny(v, "\\`"):
+		return FindingUnparseableValue, "value contains a backslash or backtick; fix it by hand"
+	case shellExpansionRe.MatchString(v):
+		return FindingUnparseableValue, "value looks like shell expansion ($VAR, ${...}, $(...)), which is not performed"
+	case strings.Count(v, `"`)%2 == 1 || strings.Count(v, "'")%2 == 1:
+		return FindingUnparseableValue, "unbalanced quotes; fix it by hand"
+	case strings.HasPrefix(v, `"`) || strings.HasPrefix(v, "'"):
+		return FindingUnparseableValue, "partially quoted value; fix it by hand"
+	}
+	return "", ""
 }

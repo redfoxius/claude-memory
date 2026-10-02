@@ -1,6 +1,6 @@
 ---
 name: memory-digest
-description: Summarize what shared semantic memory holds for a repo (or across all acme/ repos) via memory_list and memory_search — use when the user asks "what does memory know about X", "show me what we've learned about this repo", or "/memory-digest".
+description: Summarize what shared semantic memory holds for a repo (or across all your projects) via memory_list and memory_search — use when the user asks "what does memory know about X", "show me what we've learned about this repo", or "/memory-digest".
 ---
 
 # /memory-digest
@@ -24,8 +24,8 @@ accumulated — for the current repo, a named repo, or everything tagged
    user wants the full text of a specific one, call `memory_get` for
    that id on request.
 4. If the user is about to act on a `candidate`/unverified record,
-   remind them (per `acme/CLAUDE.md`'s read-path rule) to verify it
-   against the current code before relying on it, and to call
-   `memory_feedback` afterward.
+   remind them (per the read-path rule in the memory section of your
+   CLAUDE.md) to verify it against the current code before relying on
+   it, and to call `memory_feedback` afterward.
 5. If `memory_list` returns nothing for the requested scope, say so
    plainly rather than inventing content.

@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"time"
 
 	"claude-memory/internal/azuredevops"
@@ -23,19 +25,64 @@ import (
 	"claude-memory/internal/postgres"
 	"claude-memory/internal/prcursor"
 	"claude-memory/internal/scrub"
+	"claude-memory/internal/setup"
 )
 
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
 
+// exitError carries a process exit code other than 1: 2 for usage errors,
+// 3 when doctor cannot start (AC-59).
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e *exitError) Error() string { return e.err.Error() }
+func (e *exitError) Unwrap() error { return e.err }
+
+// usageError marks err as a usage error (exit 2).
+func usageError(err error) error { return &exitError{code: 2, err: err} }
+
+// exitCode is the process exit code for err: 0 for nil, the exitError code
+// when present, else 1.
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var e *exitError
+	if errors.As(err, &e) {
+		return e.code
+	}
+	return 1
+}
+
 func run() error {
-	// "namespaces" is local file management: no database, Ollama or DSN needed.
-	if len(os.Args) > 1 && os.Args[1] == "namespaces" {
-		return cmdNamespaces(os.Args[2:])
+	// Early dispatch: these subcommands need no database, Ollama or DSN, and
+	// must work with no env file, a 0644 one, or no MEMORY_PG_DSN (AC-1).
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "namespaces":
+			// Local file management.
+			return cmdNamespaces(os.Args[2:])
+		case "version":
+			return cmdVersion(os.Args[2:])
+		case "doctor":
+			opts, err := parseDoctorFlags(os.Args[2:], os.Stderr)
+			if err != nil {
+				return err
+			}
+			ctx := context.Background()
+			deps, err := buildSetupDeps(ctx, "")
+			if err != nil {
+				return &exitError{code: 3, err: fmt.Errorf("doctor cannot start: %w", err)}
+			}
+			return cmdDoctor(ctx, opts, deps)
+		}
 	}
 
 	// Load config from file first if it exists, then from environment.
@@ -54,7 +101,7 @@ func run() error {
 	args := flag.Args()
 
 	if len(args) == 0 {
-		return fmt.Errorf("no subcommand specified; available: serve, hook, extract, ingest-pr, cleanup, seed, eval-retrieval, namespaces")
+		return fmt.Errorf("no subcommand specified; available: serve, hook, extract, ingest-pr, cleanup, seed, eval-retrieval, migrate, namespaces, doctor, version")
 	}
 
 	subcommand := args[0]
@@ -74,6 +121,8 @@ func run() error {
 		return cmdSeed(cfg)
 	case "eval-retrieval":
 		return cmdEvalRetrieval(cfg)
+	case "migrate":
+		return cmdMigrate(cfg, args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand %q", subcommand)
 	}
@@ -137,6 +186,42 @@ func buildService(ctx context.Context, cfg *config.Config, migrate bool) (*memor
 	svc := memory.New(store, embedder, scrubber, clock, cfg)
 
 	return svc, cleanup, nil
+}
+
+// buildSetupDeps builds the values (Paths, Env, PlatformInfo) and the
+// read-only adapters doctor runs with (AC-57, AC-68). This is the only place
+// internal/setup's adapters are constructed. binDir is the --bin-dir flag
+// ("" = default). The error is errBadHome (or another Paths error) when the
+// paths cannot be computed.
+func buildSetupDeps(ctx context.Context, binDir string) (setupDeps, error) {
+	self, err := os.Executable()
+	if err == nil {
+		if resolved, rerr := filepath.EvalSymlinks(self); rerr == nil {
+			self = resolved
+		}
+	} else {
+		self = ""
+	}
+	cwd, _ := os.Getwd()
+	paths, err := buildPaths(os.Getenv, binDir, os.Getuid(), self, cwd)
+	if err != nil {
+		return setupDeps{}, err
+	}
+
+	fsys := readOnlyFS{}
+	runner := execRunner{readOnly: true}
+	redactor := setup.NewRedactor()
+	return setupDeps{
+		Paths:    paths,
+		Env:      buildEnv(os.Environ()),
+		Platform: detectPlatform(ctx, fsys, runner, runtime.GOOS, runtime.GOARCH),
+		FS:       fsys,
+		Runner:   runner,
+		Clock:    &systemClock{},
+		Redactor: redactor,
+		Stdout:   redactor.Writer(os.Stdout),
+		Stderr:   redactor.Writer(os.Stderr),
+	}, nil
 }
 
 // systemClock implements the memory.Clock interface using time.Now().
