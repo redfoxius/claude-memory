@@ -129,7 +129,7 @@ func WriteDoctorText(w io.Writer, r DoctorReport, m ReportMeta, red *Redactor) e
 		}
 	}
 	fmt.Fprintf(&b, "\n%s\n", summaryLine(r))
-	if !r.OK(m.Strict) && m.Strict && r.Summary.Fail == 0 {
+	if !r.OK(m.Strict) && m.Strict && r.HardFails() == 0 {
 		b.WriteString("(--strict: warnings count as failures)\n")
 	}
 	_, err := io.WriteString(w, red.Redact(b.String()))

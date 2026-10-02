@@ -5,8 +5,9 @@ import (
 	"testing"
 )
 
-// TestInstallStepsRegistry is the 2a registry (AC-7), ending in the final doctor: the exact order, every
-// Requires pointing at an earlier step, and no mcp or jobs step. 2a leaves
+// TestInstallStepsRegistry is the 2a registry (AC-7), ending in the final
+// doctor: the exact order, every Requires pointing at an earlier step, and no
+// mcp or jobs step. 2a leaves
 // WritePorts.ClaudeCLI and WritePorts.Jobs (and ReadPorts.Jobs) nil, so a
 // registered step that used them would dereference nil.
 func TestInstallStepsRegistry(t *testing.T) {

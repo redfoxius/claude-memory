@@ -115,7 +115,7 @@ type Inputs struct {
 	// hand-edited); it is the default of the TLS prompt and the sslmode of
 	// the local create path.
 	PGSSLMode      string
-	NoDoctor       bool   // --no-doctor: the final doctor step (slice 2b/14b) is skipped
+	NoDoctor       bool   // --no-doctor: the final doctor step is skipped
 	PGPassword     string // read from stdin before Detect (AC-31)
 	OllamaURL      string
 	OllamaModel    string

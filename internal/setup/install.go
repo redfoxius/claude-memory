@@ -42,6 +42,10 @@ var AllStepIDs = []string{
 	"hooks.scripts", "hooks.settings", "mcp", "skills", "claude-md", "jobs", "doctor",
 }
 
+// unownedChecks are doctor checks no install step owns (the manifest and the
+// state directory are engine bookkeeping): their fails are never exempt.
+var unownedChecks = []string{"manifest", "dirs.state"}
+
 // DoctorStepID is the id of the final doctor step.
 const DoctorStepID = "doctor"
 
@@ -49,8 +53,7 @@ const DoctorStepID = "doctor"
 // it (AC-62): a fail of the check is exempt ("not installed: <step>
 // skipped") only when that step was skipped by the user, is soft blocked by
 // such a skip, or is not registered in this build. A test fails when a check
-// has no entry. manifest and dirs.state have no dedicated step; the platform
-// step (first in the pipeline) owns them.
+// has neither an entry nor a place in unownedChecks.
 var DoctorCheckSteps = map[string]string{
 	"binary.version":   "binary",
 	"env.file":         "envfile",
@@ -73,13 +76,7 @@ var DoctorCheckSteps = map[string]string{
 	"claude-md":        "claude-md",
 	"namespaces":       "namespaces",
 	"jobs":             "jobs",
-	"dirs.state":       "platform",
-	"manifest":         "platform",
 }
-
-// claudeSteps are the steps whose change needs a restart of open Claude Code
-// sessions (hooks, MCP registration, skills, CLAUDE.md; WI-S1-0 default).
-var claudeSteps = []string{"hooks.scripts", "hooks.settings", "mcp", "skills", "claude-md"}
 
 // DoctorStep is the final doctor (AC-62). Its Detect/Plan/Apply are inert (it
 // always reports ok, so the engine never plans or applies it); the work is in
@@ -147,12 +144,9 @@ func (s DoctorStep) Final(ctx context.Context, rc ReadPorts, st *RunState, fv Fi
 			rep.Checks[i].NotInstalled = "not installed: " + name + " skipped"
 		}
 	}
-	restart := false
-	for _, id := range claudeSteps {
-		if st.Applied[id] {
-			restart = true
-		}
-	}
+	// Running MCP servers and hooks read the binary, env file and namespaces
+	// at start, so any applied change calls for a restart (AC-62 v0.6).
+	restart := len(st.Applied) > 0
 	return FinalResult{
 		Ran: true, Report: rep, Restart: restart,
 		Meta: ReportMeta{Version: s.Version, Platform: rc.Platform, ConfigDir: rc.Paths.ClaudeDir, Bin: rc.Paths.Self},

@@ -326,7 +326,7 @@ func (r *Renderer) Final(fr FinalResult) {
 	b.WriteString("\n")
 	_ = WriteDoctorText(&b, fr.Report, fr.Meta, r.red)
 	if fr.Restart {
-		b.WriteString("\nrestart open Claude Code sessions to load the changes\n")
+		b.WriteString("\nrestart Claude Code sessions to load the changes\n")
 	}
 	r.emit(b.String())
 }

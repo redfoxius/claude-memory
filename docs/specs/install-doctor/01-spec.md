@@ -2,13 +2,13 @@
 
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-01-install-doctor
-- Status: v0.5. Slice 1 is implemented and merged, with the review 04
+- Status: v0.6 (one AC-62 wording change, §0.6; otherwise v0.5). Slice 1 is implemented and merged, with the review 04
   fixes in. Slice 2 is re-planned after the slice-2 plan review
   (`05-slice-2-plan-review.md`, v0.3 edits in §0.3) and its iteration-2
   and iteration-3 re-reviews (`06-slice-2-plan-rereview.md`, v0.4 edits
   in §0.4, v0.5 edits in §0.5). Slice 3 is not implemented.
   Implementation proceeds **slice by slice** (§0.2).
-- Version: 0.5 (v0.1 → v0.2 changes in §0.1; v0.2 → v0.3 in §0.3; v0.3 →
+- Version: 0.6 (v0.5 → v0.6 in §0.6; v0.1 → v0.2 changes in §0.1; v0.2 → v0.3 in §0.3; v0.3 →
   v0.4 in §0.4; v0.4 → v0.5 in §0.5)
 - Owner: Oleksandr Kolomoiets (user@example.com)
 - Supersedes: none. Replaces the manual procedure in `integration/INSTALL.md`
@@ -112,6 +112,15 @@ Slice-2 text only; each edit closes a `06-slice-2-plan-rereview.md`
 | AC-28 | A key is written when its owner set it in this run, including a documented default or a generated value. | N3 |
 | AC-50 | Verify adds: a differing shell `MEMORY_PG_DSN` does not make a no-op run write. | N10 |
 | §10 | `Detection` (with `Remedy`) listed; `Seed` returns `([]Note, error)`; `Await{Instructions, Artifacts}`. | N4, N6, N1 |
+
+
+### 0.6 Changes in v0.6 (WI-S2-14b review, 2026-10-02)
+
+Small and reversible: restore the old AC-62 sentence to undo it.
+
+| AC / § | Change | Finding |
+|---|---|---|
+| AC-62 | The restart line is printed only when the run applied a change, and reads "restart Claude Code sessions to load the changes". | 14b review #2 |
 
 ## 1. Overview & Problem
 
@@ -1229,8 +1238,11 @@ Both are acceptable for a single-user tool.
   each run embeds one prompt.
 - AC-62 [S2] (Ubiquitous): `install` shall run doctor's check registry
   in-process as its final step (unless `--no-doctor`) and print its
-  summary, followed by "restart Claude Code sessions to load the hooks"
-  unless WI-0 shows that a running session reloads `settings.json`. If
+  summary, followed by "restart Claude Code sessions to load the changes"
+  when this run applied a change (v0.6; was: always, "to load the hooks",
+  unless WI-0 showed that a running session reloads `settings.json`; WI-0
+  could not verify that, and running MCP and hook processes also read the
+  binary, env file and namespaces at start). If
   doctor reports a fail, `install` exits 1. **v0.3 exception (narrowed
   in v0.4):** a `fail` from a check whose owning step the user skipped
   (`--skip`, choice `skip`, or `skip` at a blocked step's prompt), that

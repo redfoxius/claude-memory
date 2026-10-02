@@ -9,10 +9,11 @@ import (
 	"strings"
 )
 
-// The install engine (plan Design 15-19, WI-S2-1c): phases 0-6. It is
+// The install engine (plan Design 15-19, WI-S2-1c, WI-S2-14b): phases 0-7. It is
 // synchronous, starts no goroutines, prints nothing (a Reporter receives the
 // data) and reaches the outside only through ReadPorts / WritePorts. The
-// final doctor (phase 7) and the summary are WI-S2-14b / WI-S2-1b.
+// final doctor (phase 7) runs through the Finalizer step; the summary is
+// printed by the renderer after Run.
 
 // Exit codes of Engine.Run (spec §10).
 const (
@@ -186,7 +187,7 @@ type Engine struct {
 	KnownIDs []string
 }
 
-// Run executes phases 0-6 for in.
+// Run executes phases 0-7 for in.
 func (e *Engine) Run(ctx context.Context, in Inputs) RunResult {
 	s := &session{e: e, ctx: ctx, in: in, st: NewRunState(in), idx: map[string]*stepRun{}}
 	s.auto = in.Yes || in.Upgrade || (in.DryRun && !s.interactive())
@@ -228,7 +229,9 @@ type stepRun struct {
 
 	applied bool
 	ran     bool
-	result  StepResult
+
+	finalDetail string // the final doctor's summary line (outcome detail)
+	result      StepResult
 }
 
 type session struct {
@@ -858,7 +861,21 @@ func (s *session) applyPhase() error {
 			// Blocked by a prerequisite that is not going to be applied.
 			dep := s.idx[r.det.BlockedBy]
 			r.blocked, r.remedy = "blocked by "+r.det.BlockedBy+": "+r.det.Detail, r.det.Remedy
-			r.hard = !dep.userSkip
+			// Like gate: a skipped or kept-absent prerequisite is a soft block
+			// (the user chose not to install it); a failed or hard-blocked
+			// one is hard.
+			switch {
+			case dep.userSkip:
+				r.hard = false
+			case dep.failed:
+				r.hard = true
+			case dep.blocked != "":
+				r.hard = dep.hard
+			case !dep.applied && dep.det.State == StateAbsent:
+				r.hard = false
+			default:
+				r.hard = true
+			}
 			s.report().StepDone(s.outcomeOf(r))
 			continue
 		}
@@ -1096,6 +1113,9 @@ func (s *session) finalPhase() error {
 			continue
 		}
 		fr := fin.Final(s.ctx, s.e.Read, s.st, s.finalView())
+		if err := s.checkCtx(); err != nil {
+			return err // Ctrl-C during the doctor: exit 130, no bogus FAIL lines
+		}
 		if !fr.Ran {
 			continue
 		}
@@ -1106,8 +1126,9 @@ func (s *session) finalPhase() error {
 		if n := fr.Report.HardFails(); n > 0 {
 			r.failed, r.failErr = true, fmt.Errorf("doctor reported %d failing check(s)", n)
 		} else {
-			r.applied = true
-			r.det.Detail = summaryLine(fr.Report)
+			// Not "applied": the doctor changes nothing, and a no-op re-run
+			// must still summarise as unchanged.
+			r.finalDetail = summaryLine(fr.Report)
 		}
 		s.report().StepDone(s.outcomeOf(r))
 	}
@@ -1292,6 +1313,9 @@ func (s *session) outcomeOf(r *stepRun) StepOutcome {
 		o.Outcome, o.Detail = OutcomeSkipped, r.skipWhy
 	case r.applied:
 		o.Outcome, o.Detail = OutcomeApplied, r.det.Detail
+	}
+	if r.finalDetail != "" && o.Outcome == OutcomeUnchanged {
+		o.Detail = r.finalDetail
 	}
 	if r.applied {
 		o.Notes = append(o.Notes, r.result.Notes...)
