@@ -226,7 +226,7 @@ Decoder move dropped (spec D5, AC-39 withdrawn); `cmd` wires
 ### WI-11 — Docs (all ACs, documentation only)
 - `DEPLOY.md` / `integration/INSTALL.md`: the new commands; 0004 is
   auto-applied at the next session start (no manual `migrate`); rollback =
-  reinstall the old binary (AC-38); TTL re-import risk and the 30-day
+  reinstall the old binary (AC-38); TTL re-import risk and the TTL
   reminder; run `--dry-run` first; id prefix limits.
 - `docs/specs/README.md` item 3 status.
 
