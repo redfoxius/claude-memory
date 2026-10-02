@@ -10,8 +10,8 @@ import (
 )
 
 // ErrTooManyAttempts is returned by a LinePrompter after three invalid
-// answers to one question (AC-10). The caller aborts that step as skipped;
-// the engine maps it to exit 2 when it comes from a phase-2 question.
+// answers to one question (AC-10). The engine skips the step it came from
+// (whether raised in Configure or while asking for a choice) and goes on.
 var ErrTooManyAttempts = errors.New("too many invalid answers")
 
 // MaxPromptAttempts is how many answers one question gets (AC-10).

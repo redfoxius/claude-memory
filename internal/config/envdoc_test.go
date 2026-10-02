@@ -149,3 +149,53 @@ func TestEnvDocFindingsMatchParseEnvData(t *testing.T) {
 		}
 	}
 }
+
+// HIGH-1: NormalizeAll must not convert an `export` line while the key has a
+// plain assignment: the loader reads the plain line, and a converted export
+// line above it would win the first-non-empty rule.
+func TestEnvDocNormalizeKeepsExportShadowedByPlain(t *testing.T) {
+	t.Parallel()
+	in := "export MEMORY_PG_DSN=postgresql://u:old@h/d\nMEMORY_PG_DSN=postgresql://u:new@h/d\n"
+	d := ParseEnvDoc([]byte(in))
+	if got := d.NormalizeAll(); len(got) != 0 {
+		t.Errorf("NormalizeAll converted %v", got)
+	}
+	if d.Normalize("MEMORY_PG_DSN") {
+		t.Error("Normalize converted the plain-shadowed key")
+	}
+	if string(d.Marshal()) != in {
+		t.Errorf("document changed: %q", d.Marshal())
+	}
+	if got := ParseEnvData(d.Marshal(), 0o600).Values["MEMORY_PG_DSN"]; got != "postgresql://u:new@h/d" {
+		t.Errorf("loader reads %q", got)
+	}
+	// The same holds when the plain line comes first, and for an empty one.
+	d = ParseEnvDoc([]byte("A=\nexport A=1\n"))
+	if got := d.NormalizeAll(); len(got) != 0 {
+		t.Errorf("NormalizeAll converted %v", got)
+	}
+	if se := d.ShadowedExports(); len(se) != 1 || se[0].Line != 2 || se[0].Key != "A" {
+		t.Errorf("ShadowedExports = %v", se)
+	}
+}
+
+// LOW-13: the loader takes the first non-empty plain value, so find does too.
+func TestEnvDocFindFollowsFirstNonEmptyRule(t *testing.T) {
+	t.Parallel()
+	in := "A=\nA=real\n"
+	d := ParseEnvDoc([]byte(in))
+	if v, ok := d.Get("A"); !ok || v != "real" {
+		t.Errorf("Get = %q, %v; the loader reads %q", v, ok, ParseEnvData([]byte(in), 0o600).Values["A"])
+	}
+	if _, err := d.Set("A", "new"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ParseEnvData(d.Marshal(), 0o600).Values["A"]; got != "new" {
+		t.Errorf("after Set the loader reads %q in %q", got, d.Marshal())
+	}
+	// All plain lines empty: the first one is the one to edit.
+	d = ParseEnvDoc([]byte("A=\nB=1\nA=\n"))
+	if e, ok := d.Entry("A"); !ok || e.Line != 1 {
+		t.Errorf("Entry = %+v", e)
+	}
+}

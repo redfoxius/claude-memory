@@ -44,6 +44,11 @@ func GeneratePassword(r io.Reader) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// reservedDBNames are databases bootstrap.sql must never take over: it
+// revokes PUBLIC's privileges on the database it is given, which on one of
+// these would break the server's own use of it.
+var reservedDBNames = map[string]bool{"postgres": true, "template0": true, "template1": true}
+
 func isNameStart(c byte) bool { return c == '_' || (c >= 'a' && c <= 'z') }
 func isNameByte(c byte) bool  { return isNameStart(c) || (c >= '0' && c <= '9') }
 
@@ -54,6 +59,9 @@ func ValidateBootstrapName(what, v string) error {
 	ok := len(v) >= 1 && len(v) <= 63 && isNameStart(v[0])
 	for i := 1; ok && i < len(v); i++ {
 		ok = isNameByte(v[i])
+	}
+	if ok && what == "database name" && reservedDBNames[v] {
+		return fmt.Errorf("%s %q is reserved by Postgres: pick another name", what, v)
 	}
 	if !ok {
 		return fmt.Errorf("%s %q cannot be created by install: use 1-63 characters from a-z, 0-9 and _, not starting with a digit", what, v)

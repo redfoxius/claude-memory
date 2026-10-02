@@ -247,6 +247,12 @@ func (TopologyStep) Plan(_ context.Context, rc ReadPorts, st *RunState, ch Choic
 // the manifest header after this step succeeds. The step marks its own field
 // recorded (Source=manifest) so the success rule's re-Detect, which runs
 // before that write, finds it ok.
+//
+// The flip is deliberate and has one consequence: after Apply the field's
+// Source is "manifest" even though this run decided the value (flag, prompt
+// or default). Nothing may use Source to ask "was this chosen in this run?"
+// after the Apply phase; Detect and Plan of this step only compare against
+// the manifest, which by then agrees.
 func (TopologyStep) Apply(_ context.Context, _ WritePorts, st *RunState, _ Plan) (StepResult, error) {
 	if st.Topology.IsSet() {
 		st.Topology.Set(st.Topology.Get(), SourceManifest)

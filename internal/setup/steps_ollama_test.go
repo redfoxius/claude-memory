@@ -318,7 +318,7 @@ func TestOllamaConfigure(t *testing.T) {
 func TestOllamaApplyPullsWithProgressAndVerifiesDims(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s := OllamaStep{}
+	s := OllamaStep{Redactor: NewRedactor()}
 	const local = "http://127.0.0.1:11434"
 	type tick struct {
 		step, label string

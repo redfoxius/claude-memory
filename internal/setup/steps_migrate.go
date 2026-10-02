@@ -23,8 +23,8 @@ const MigrateSchemaArtifact = "migrate/schema"
 // process environment loaded at startup. Nothing is recorded in the manifest:
 // uninstall never drops the schema.
 type MigrateStep struct {
-	// Redactor, when set, masks secrets in a migration error (AC-30); the
-	// adapter already sanitizes its errors.
+	// Redactor masks secrets in a migration error (AC-30); the adapter already
+	// sanitizes its errors. Without one the error text is withheld (fail closed).
 	Redactor *Redactor
 }
 
@@ -40,10 +40,7 @@ func (MigrateStep) Title() string { return "Schema migrations" }
 func (MigrateStep) Requires() []string { return []string{DatabaseStepID, EnvFileStepID} }
 
 func (m MigrateStep) redact(s string) string {
-	if m.Redactor == nil {
-		return s
-	}
-	return m.Redactor.Redact(s)
+	return redactOrWithhold(m.Redactor, s)
 }
 
 // pendingMigrations lists the not-fully-applied migrations as "0002 (missing

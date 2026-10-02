@@ -179,7 +179,7 @@ func TestEnvFileGoldenFresh(t *testing.T) {
 		t.Errorf("findings %+v", ef.Findings)
 	}
 	tg, err := ParseDBTarget(ef.Values["MEMORY_PG_DSN"])
-	if err != nil || tg.password != sentinelPassword {
+	if err != nil || string(tg.password) != sentinelPassword {
 		t.Errorf("round trip: %v", err)
 	}
 	h.assertIdempotent(st)
@@ -225,10 +225,13 @@ func TestEnvFileGoldenExportConverted(t *testing.T) {
 	h.loadCase("export", 0o600)
 	st := dbState(t, "s3cret", SourceEnvFile)
 
-	// Without consent (--yes) the file is left alone.
+	// Without consent (--yes) the unrelated export line is left alone; the
+	// managed DSN line, which the binary does not read, is rewritten in place
+	// (outdated, not modified: its connection is the chosen one).
 	r0 := h.envRun(st)
-	if r0.after != r0.before || r0.det.State != StateModified {
-		t.Fatalf("yes: state %s, changed=%v", r0.det.State, r0.after != r0.before)
+	if r0.det.State != StateModified || !strings.Contains(r0.after, "\nMEMORY_PG_DSN=") && !strings.HasPrefix(r0.after, "MEMORY_PG_DSN=") ||
+		!strings.Contains(r0.after, "export FOO=bar") {
+		t.Fatalf("yes: state %s, after %q", r0.det.State, r0.after)
 	}
 	// With consent every export line becomes plain, in place; a backup is kept.
 	r := h.envRun(st, envFormatArtifact)
@@ -300,7 +303,7 @@ func TestEnvFileGoldenBase64SlashReencoded(t *testing.T) {
 		t.Errorf("findings %+v", ef.Findings)
 	}
 	u, err := ParseDBTarget(ef.Values["MEMORY_PG_DSN"])
-	if err != nil || u.password != "ab/cd+ef==" {
+	if err != nil || string(u.password) != "ab/cd+ef==" {
 		t.Errorf("password after re-encode: %v", err)
 	}
 	if !strings.Contains(r.after, "MEMORY_OLLAMA_URL=http://127.0.0.1:11434\n") {
@@ -612,10 +615,12 @@ func TestSeedEnvValueOrder(t *testing.T) { // Design 16, N10
 		t.Errorf("no file: %+v", s)
 	}
 	// An unparseable file line is not usable: falls to Env, else not found.
-	if s := SeedEnvValue(st(file), Env{"BAD": "shellvalue"}, "BAD", "", nil); s.Source != SourceEnv {
+	// An unparseable file line is returned raw and flagged; the shell's value
+	// never stands in for it (MED-3), and the drift is a note.
+	if s := SeedEnvValue(st(file), Env{"BAD": "shellvalue"}, "BAD", "", nil); s.Source != SourceEnvFile || !s.Unparseable || s.Value != "$(x)" || len(s.Notes) != 1 {
 		t.Errorf("unparseable: %+v", s)
 	}
-	if s := SeedEnvValue(st(file), nil, "BAD", "", nil); s.Found {
+	if s := SeedEnvValue(st(file), nil, "BAD", "", nil); !s.Found || !s.Unparseable || s.Value != "$(x)" {
 		t.Errorf("unparseable, no env: %+v", s)
 	}
 	// Whole-value quotes are stripped; absent everywhere: not found.

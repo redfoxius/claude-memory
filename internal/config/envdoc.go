@@ -122,21 +122,61 @@ func parseEnvLine(raw, eol string) envLine {
 }
 
 // find returns the index of the line the loader would use for key: the first
-// plain assignment, else the first `export` one; -1 when there is none.
+// plain assignment with a non-empty value (the loader's first-non-empty
+// rule), else the first plain one (an empty value), else the first `export`
+// one; -1 when there is none.
 func (d *EnvDoc) find(key string) int {
-	exp := -1
+	empty, exp := -1, -1
 	for i, l := range d.lines {
 		if l.kind != envAssign || l.key != key {
 			continue
 		}
-		if !l.export {
+		switch {
+		case l.export:
+			if exp < 0 {
+				exp = i
+			}
+		case l.value != "":
 			return i
-		}
-		if exp < 0 {
-			exp = i
+		case empty < 0:
+			empty = i
 		}
 	}
+	if empty >= 0 {
+		return empty
+	}
 	return exp
+}
+
+// hasPlain reports whether key has a plain (non-export) assignment.
+func (d *EnvDoc) hasPlain(key string) bool {
+	for _, l := range d.lines {
+		if l.kind == envAssign && !l.export && l.key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// ShadowedExport is an `export KEY=VALUE` line that Normalize leaves alone
+// because KEY also has a plain assignment: the binary reads the plain line, and
+// converting the export one could change which value wins.
+type ShadowedExport struct {
+	Line int // 1-based
+	Key  string
+}
+
+// ShadowedExports lists the export lines whose key also has a plain
+// assignment, in file order (reported as duplicates; removing one needs the
+// user's consent, so install never does it).
+func (d *EnvDoc) ShadowedExports() []ShadowedExport {
+	var out []ShadowedExport
+	for i, l := range d.lines {
+		if l.kind == envAssign && l.export && d.hasPlain(l.key) {
+			out = append(out, ShadowedExport{Line: i + 1, Key: l.key})
+		}
+	}
+	return out
 }
 
 func entryOf(i int, l envLine) EnvEntry {
@@ -245,6 +285,12 @@ func (d *EnvDoc) normalizeLine(i int) bool {
 	l := d.lines[i]
 	e := entryOf(i, l)
 	if !e.Convertible() {
+		return false
+	}
+	// The binary ignores an export line. Converting one while the key has a
+	// plain assignment would make it a candidate for the loader's
+	// first-non-empty rule and could change the value the binary reads.
+	if l.export && d.hasPlain(l.key) {
 		return false
 	}
 	d.lines[i] = envLine{raw: l.key + "=" + e.Value, eol: l.eol, kind: envAssign, key: l.key, value: e.Value}

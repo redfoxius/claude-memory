@@ -22,7 +22,8 @@ const OllamaModelArtifact = "ollama/model"
 // prompted. Nothing is recorded in the manifest (a pulled model is not ours
 // to remove).
 type OllamaStep struct {
-	// Redactor, when set, masks secrets in error text from the prober.
+	// Redactor masks secrets in error text from the prober; without one the
+	// text is withheld (fail closed).
 	Redactor *Redactor
 }
 
@@ -43,10 +44,7 @@ func (OllamaStep) Title() string { return "Ollama" }
 func (OllamaStep) Requires() []string { return nil }
 
 func (o OllamaStep) redact(s string) string {
-	if o.Redactor == nil {
-		return s
-	}
-	return o.Redactor.Redact(s)
+	return redactOrWithhold(o.Redactor, s)
 }
 
 // ValidateOllamaURL accepts an http(s) URL with a host and no credentials (a
@@ -100,7 +98,7 @@ func (OllamaStep) Seed(_ context.Context, rc ReadPorts, st *RunState) ([]Note, e
 
 	m := SeedEnvValue(st, rc.Env, EnvKeyModel, in.OllamaModel, nil)
 	notes = append(notes, m.Notes...)
-	if m.Found {
+	if m.Found && !m.Unparseable {
 		tgt.Model = m.Value
 		srcs = append(srcs, m.Source)
 	} else {
@@ -108,7 +106,7 @@ func (OllamaStep) Seed(_ context.Context, rc ReadPorts, st *RunState) ([]Note, e
 		srcs = append(srcs, SourceDefault)
 	}
 
-	if mt := SeedEnvValue(st, rc.Env, EnvKeyMaxTokens, "", nil); mt.Found {
+	if mt := SeedEnvValue(st, rc.Env, EnvKeyMaxTokens, "", nil); mt.Found && !mt.Unparseable {
 		tgt.EmbedMaxTokens = mt.Value
 		notes = append(notes, mt.Notes...)
 	}
