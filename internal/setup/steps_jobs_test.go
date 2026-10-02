@@ -321,8 +321,112 @@ func TestJobsStepReplacesLegacyPlist(t *testing.T) {
 	if r.launchctlMutating("bootout") != 1 || r.launchctlMutating("bootstrap") != 1 {
 		t.Errorf("reload: bootout %d, bootstrap %d", r.launchctlMutating("bootout"), r.launchctlMutating("bootstrap"))
 	}
-	if matches, _ := filepath.Glob(r.plistPath(JobCleanup) + ".bak*"); len(matches) != 0 {
-		t.Errorf("a legacy plist needs no backup: %v", matches)
+	// An outdated legacy plist is still the user's file: it is backed up.
+	baks, _ := filepath.Glob(r.plistPath(JobCleanup) + SettingsBackupSuffix + "*")
+	if len(baks) != 1 {
+		t.Fatalf("backups = %v, want one", baks)
+	}
+	if b, _ := os.ReadFile(baks[0]); string(b) != legacy {
+		t.Error("the backup is not the legacy plist")
+	}
+	if info, _ := os.Stat(baks[0]); info.Mode().Perm() != 0o600 {
+		t.Errorf("backup mode %v", info.Mode().Perm())
+	}
+	if strings.HasSuffix(baks[0], ".plist") {
+		t.Errorf("backup name %s would be loaded by launchd", baks[0])
+	}
+}
+
+// A legacy ingest-pr plist with no PR repos configured is left alone, with a
+// note saying so.
+func TestJobsStepLegacyIngestPRUntouchedWithNote(t *testing.T) {
+	r := newFullRig(t)
+	legacy := strings.ReplaceAll(string(readTestdata(t, "testdata/fixtures/launchd/legacy-cleanup.plist")), "cleanup", "ingest-pr")
+	legacy = strings.ReplaceAll(legacy, "__HOME__", r.p.Home)
+	writeFile(t, r.plistPath(JobIngestPR), []byte(legacy), 0o644)
+	if res := r.run(r.inputs()); res.ExitCode != ExitOK {
+		t.Fatalf("exit %d, err %v\n%s", res.ExitCode, res.Err, r.out)
+	}
+	if b, _ := os.ReadFile(r.plistPath(JobIngestPR)); string(b) != legacy {
+		t.Error("the legacy ingest-pr plist was changed")
+	}
+	if !strings.Contains(r.out.String(), "legacy ingest-pr plist left untouched; pass --pr-repos to manage it") {
+		t.Errorf("no note:\n%s", r.out)
+	}
+}
+
+// bootstrap fails after the plist was written (exit 5 twice: the retry fails
+// too): the run fails and nothing is recorded; the next run sees a plist that
+// equals the rendering but is not loaded (outdated) and loads it.
+func TestJobsStepBootstrapFailureThenRecovers(t *testing.T) {
+	r := newFullRig(t)
+	r.launchd.failBootstrap = 2
+	if res := r.run(r.inputs()); res.ExitCode == ExitOK {
+		t.Fatalf("a failed bootstrap must fail the run\n%s", r.out)
+	}
+	if _, err := os.Stat(r.plistPath(JobCleanup)); err != nil {
+		t.Fatalf("plist not written: %v", err)
+	}
+	if r.launchd.isLoaded(LaunchdLabelPrefix + JobCleanup) {
+		t.Fatal("loaded despite the failure")
+	}
+	if _, ok := r.recordedJob(JobCleanup); ok {
+		t.Error("recorded despite the failure")
+	}
+	r.out.Reset()
+	if res := r.run(r.inputs()); res.ExitCode != ExitOK {
+		t.Fatalf("recovery run: exit %d, err %v\n%s", res.ExitCode, res.Err, r.out)
+	}
+	if !r.launchd.isLoaded(LaunchdLabelPrefix + JobCleanup) {
+		t.Error("not loaded after the recovery run")
+	}
+	if _, ok := r.recordedJob(JobCleanup); !ok {
+		t.Error("not recorded after the recovery run")
+	}
+	if baks, _ := filepath.Glob(r.plistPath(JobCleanup) + SettingsBackupSuffix + "*"); len(baks) != 0 {
+		t.Errorf("a plist equal to the rendering needs no backup: %v", baks)
+	}
+}
+
+// One bounded retry, only for exit 5 / 37.
+func TestLaunchdInstallBootstrapRetry(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		codes     []int // exit codes of successive bootstrap calls
+		wantErr   bool
+		wantCalls int
+	}{
+		{"exit 5 then ok", []int{5, 0}, false, 2},
+		{"exit 37 then ok", []int{37, 0}, false, 2},
+		{"exit 5 twice", []int{5, 5, 0}, true, 2},
+		{"other exit is not retried", []int{1, 0}, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := testPaths(t)
+			fsys := NewFakeFS(t, filepath.Dir(p.Home))
+			r := NewFakeRunner(t)
+			calls := 0
+			r.Handler = func(c Cmd) (Result, bool) {
+				if c.Argv[1] == "bootstrap" {
+					code := tc.codes[calls]
+					calls++
+					return Result{ExitCode: code}, true
+				}
+				return Result{ExitCode: 3}, true
+			}
+			sleeps := 0
+			m := LaunchdManager{LaunchdJobs: LaunchdJobs{FS: fsys, Runner: r, Paths: p, Assets: integration.FS}, Write: fsys,
+				Sleep: func(time.Duration) { sleeps++ }}
+			err := m.Install(context.Background(), DefaultJobSpecs(p, p.InstalledBinary(), "/usr/bin")[0])
+			if (err != nil) != tc.wantErr || calls != tc.wantCalls {
+				t.Errorf("err = %v, bootstrap calls = %d (want error %v, calls %d)", err, calls, tc.wantErr, tc.wantCalls)
+			}
+			if wantSleeps := tc.wantCalls - 1; sleeps != wantSleeps {
+				t.Errorf("sleeps = %d, want %d", sleeps, wantSleeps)
+			}
+		})
 	}
 }
 

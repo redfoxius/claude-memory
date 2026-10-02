@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 )
 
 // launchd jobs (spec AC-44, AC-58 `jobs`; plan WI-S1-10, WI-S2-13a).
@@ -114,6 +115,28 @@ type LaunchdJobs struct {
 type LaunchdManager struct {
 	LaunchdJobs
 	Write FS
+	// Sleep pauses between the bootstrap attempts; nil sleeps for real
+	// (cut short by ctx). Tests inject a no-op.
+	Sleep func(time.Duration)
+}
+
+// bootstrapRetryDelay is the pause before the one bootstrap retry.
+const bootstrapRetryDelay = 500 * time.Millisecond
+
+// bootstrapTransient reports the exit codes bootstrap gives right after a
+// bootout of a loaded job (5 "Input/output error", 37 "Operation already in
+// progress"): the service is still being torn down.
+func bootstrapTransient(code int) bool { return code == 5 || code == 37 }
+
+func (m LaunchdManager) pause(ctx context.Context, d time.Duration) {
+	if m.Sleep != nil {
+		m.Sleep(d)
+		return
+	}
+	select {
+	case <-time.After(d):
+	case <-ctx.Done():
+	}
 }
 
 var (
@@ -187,7 +210,13 @@ func (m LaunchdManager) Install(ctx context.Context, j JobSpec) error {
 		return fmt.Errorf("launchctl bootout %s: exit %d: %s", j.Label, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
 	}
 	plist := m.PlistPath(j)
-	res, err = m.Runner.Run(ctx, Cmd{Argv: []string{"launchctl", "bootstrap", domain, plist}, Mutating: true})
+	bootstrap := Cmd{Argv: []string{"launchctl", "bootstrap", domain, plist}, Mutating: true}
+	res, err = m.Runner.Run(ctx, bootstrap)
+	if err == nil && bootstrapTransient(res.ExitCode) {
+		// One bounded retry: the booted-out job may still be going away.
+		m.pause(ctx, bootstrapRetryDelay)
+		res, err = m.Runner.Run(ctx, bootstrap)
+	}
 	if err != nil {
 		return fmt.Errorf("launchctl bootstrap %s: %w", j.Label, err)
 	}

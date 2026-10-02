@@ -2,7 +2,7 @@
 
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-01-install-doctor
-- Status: v0.8 (small WI-S2-11/12 changes, §0.8; v0.7 small WI-S2-9/10 review changes, §0.7; v0.6 one AC-62 wording change, §0.6; otherwise v0.5). Slice 1 is implemented and merged, with the review 04
+- Status: v0.9 (launchd-only jobs, §0.9; small WI-S2-11/12 changes, §0.8; v0.7 small WI-S2-9/10 review changes, §0.7; v0.6 one AC-62 wording change, §0.6; otherwise v0.5). Slice 1 is implemented and merged, with the review 04
   fixes in. Slice 2 is re-planned after the slice-2 plan review
   (`05-slice-2-plan-review.md`, v0.3 edits in §0.3) and its iteration-2
   and iteration-3 re-reviews (`06-slice-2-plan-rereview.md`, v0.4 edits
@@ -143,6 +143,18 @@ Small and reversible: restore the old wording of each AC to undo it.
 | AC-41/AC-6 | A step may implement `ModifiedDiffer`: its modified artifacts get "keep / overwrite (backup kept) / show diff" instead of the extra Confirm; when no diff can be built (hand-pasted section, symlink outside Home) overwrite is not offered. A skills backup is made only when a modified file is overwritten. | WI-S2-11/12 reviews |
 | AC-12/§10 | `Detection.SkipReason` makes the engine skip a step with a documented, non-failing reason (one-way). `RunState.Auto` tells a step whether nothing is asked (`--yes`, `--upgrade`, non-TTY dry-run). | WI-S2-12 |
 | AC-51 | Adoption also re-records a known artifact whose recorded hash differs from the ok on-disk one (hand-updated file). | WI-S2-11/12 conformance |
+
+### 0.9 Changes in v0.9 (minimal jobs, owner decision 2026-10-02)
+
+Small and reversible: restore the old wording of each AC to undo it.
+
+| AC / § | Change |
+|---|---|
+| AC-16 | This build is launchd-only. Backend `none` (or `--no-jobs`), or any platform without launchd, makes the `jobs` step skipped (`SkipReason`) with the manual instructions printed, exit 0; it is not `blocked`. systemd, the bus retry and the doctor warning for a backend that differs from the recorded one are deferred. |
+| AC-43 | Stable-shim PATH preference (volta, `current` symlinks over versioned nvm paths) is deferred: PATH is the tool directories found now, then `/usr/bin:/bin`. |
+| AC-45 | Deferred (systemd). |
+| §10 | `JobManager.Remove` is dropped (no uninstall in this build); `JobDetector.Detect` takes the manifest-recorded hashes. |
+| AC-44 | `launchctl bootstrap` is retried once after a short pause on exit 5 or 37 (right after a bootout). An existing plist that install did not write (unrecorded, legacy or edited) is backed up before it is replaced, also when it is only `outdated`. |
 
 ## 1. Overview & Problem
 

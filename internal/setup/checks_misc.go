@@ -127,6 +127,9 @@ func nonEmpty(s string) []string {
 const (
 	jobsRemedyInstall = "run `claude-memory install` to install the jobs"
 	jobsRemedyUpgrade = "run `claude-memory install --upgrade` to re-install the jobs from this version"
+	// --yes/--upgrade keep a modified plist (AC-52), so only the interactive
+	// overwrite Confirm replaces it.
+	jobsRemedyModified = "run `claude-memory install` (interactive) and confirm the overwrite of the modified plist"
 )
 
 func (d *doctor) checkJobs(ctx context.Context) (Status, string, string) {
@@ -157,7 +160,11 @@ func (d *doctor) checkJobs(ctx context.Context) (Status, string, string) {
 			oks = append(oks, j.Name+": "+s.Detail)
 		default:
 			warns = append(warns, j.Name+": "+s.Detail)
-			remedy = jobsRemedyUpgrade
+			if s.State == StateModified {
+				remedy = jobsRemedyModified
+			} else if remedy != jobsRemedyModified {
+				remedy = jobsRemedyUpgrade
+			}
 		}
 	}
 	if len(warns) > 0 {

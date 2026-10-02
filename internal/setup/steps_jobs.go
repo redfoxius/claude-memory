@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -113,11 +114,7 @@ func jobsUnavailable(in Inputs, p PlatformInfo) string {
 
 // jobSpecs are the jobs this run manages.
 func jobSpecs(rc ReadPorts, st *RunState) []JobSpec {
-	jobPATH := st.JobPATH.Get()
-	if !st.JobPATH.IsSet() {
-		jobPATH = ComputeJobPATH(rc.Runner)
-	}
-	all := DefaultJobSpecs(rc.Paths, binTarget(rc, st), jobPATH)
+	all := DefaultJobSpecs(rc.Paths, binTarget(rc, st), st.JobPATH.Get()) // Seed always sets JobPATH
 	if st.PRRepos.IsSet() && strings.TrimSpace(st.PRRepos.Get()) != "" {
 		return all
 	}
@@ -198,6 +195,10 @@ func (JobsStep) Detect(ctx context.Context, rc ReadPorts, st *RunState) Detectio
 		d.Notes = append(d.Notes, Note{NoteInfo, "ingest-pr supports Azure DevOps repositories only"})
 	} else {
 		d.Notes = append(d.Notes, Note{NoteInfo, "ingest-pr is not installed: pass --pr-repos or set MEMORY_PR_INGEST_REPOS to enable it"})
+		if b, err := rc.FS.ReadFile(filepath.Join(rc.Paths.LaunchAgentsDir, LaunchdLabelPrefix+JobIngestPR+".plist")); err == nil &&
+			bytes.Contains(b, []byte(legacyWrapperSuffix)) {
+			d.Notes = append(d.Notes, Note{NoteWarn, "legacy ingest-pr plist left untouched; pass --pr-repos to manage it"})
+		}
 	}
 	return d
 }
@@ -272,17 +273,21 @@ func (s JobsStep) Apply(ctx context.Context, wc WritePorts, st *RunState, p Plan
 			return res, fmt.Errorf("%s: %w", v.path, ErrJobChanged)
 		}
 	}
+	recorded := recordedJobHashes(st.Prior.Manifest)
 	for _, v := range views {
 		if !chosen[v.id] {
 			continue
 		}
 		if v.state != StateOK {
-			if v.exists && v.state == StateModified {
+			// Anything this step did not write itself (unrecorded, legacy,
+			// edited) is backed up first, also when it is only outdated:
+			// a hand-set schedule must not be lost silently.
+			if v.exists && recorded[v.path] != sha256Hex(v.existing) && !bytes.Equal(v.existing, v.rendered) {
 				bak := UniqueBackupPath(wc.FS, SettingsBackupPath(v.path, wc.Clock))
 				if err := wc.FS.WriteFileAtomic(bak, v.existing, BackupFileMode); err != nil {
 					return res, fmt.Errorf("back up %s: %w", v.path, err)
 				}
-				res.Notes = append(res.Notes, Note{NoteInfo, "backup of your modified " + v.spec.Name + " plist: " + bak})
+				res.Notes = append(res.Notes, Note{NoteInfo, "backup of your existing " + v.spec.Name + " plist: " + bak})
 			}
 			if err := wc.Jobs.Install(ctx, v.spec); err != nil {
 				return res, fmt.Errorf("install job %s: %w", v.spec.Name, err)

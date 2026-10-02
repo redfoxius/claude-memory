@@ -574,10 +574,11 @@ func TestDoctorBranches(t *testing.T) {
 			rm(f, f.p.LaunchAgentsDir)
 		}, want: map[string]Status{"jobs": StatusWarn}, detail: map[string]string{"jobs": "cleanup: not installed"}},
 		{name: "jobs: darwin not loaded", mutate: func(f *doctorFixture) {
-			f.plat = PlatformInfo{OS: OSDarwin, Arch: "arm64", JobsBackend: JobsLaunchd}
-			plist := strings.ReplaceAll(string(readTestdata(f.t, "testdata/fixtures/launchd/direct-cleanup.plist")), "__HOME__", f.p.Home)
-			writeFile(f.t, filepath.Join(f.p.LaunchAgentsDir, LaunchdLabelPrefix+JobCleanup+".plist"), []byte(plist), 0o644)
-			f.runner.Script(ArgvPrefix("launchctl", "print"), Result{ExitCode: 113, Stderr: readTestdata(f.t, "testdata/fixtures/launchd/launchctl-print-not-found.txt")})
+			f.darwin(false)
+			notFound := readTestdata(f.t, "testdata/fixtures/launchd/launchctl-print-not-found.txt")
+			f.runner.Handler = func(c Cmd) (Result, bool) {
+				return Result{ExitCode: 113, Stderr: notFound}, len(c.Argv) > 1 && c.Argv[1] == "print"
+			}
 		}, want: map[string]Status{"jobs": StatusWarn}, detail: map[string]string{"jobs": "not loaded"}, remedy: map[string]string{"jobs": "claude-memory install --upgrade"}},
 		{name: "jobs: darwin rendered plists are ok", mutate: func(f *doctorFixture) { f.darwin(true) },
 			want: map[string]Status{"jobs": StatusPass}},
@@ -586,7 +587,7 @@ func TestDoctorBranches(t *testing.T) {
 			plist := strings.ReplaceAll(string(readTestdata(f.t, "testdata/fixtures/launchd/direct-cleanup.plist")), "__HOME__", f.p.Home)
 			writeFile(f.t, filepath.Join(f.p.LaunchAgentsDir, LaunchdLabelPrefix+JobCleanup+".plist"), []byte(plist), 0o644)
 		}, want: map[string]Status{"jobs": StatusWarn}, detail: map[string]string{"jobs": "differs from the plist this version renders"},
-			remedy: map[string]string{"jobs": "claude-memory install --upgrade"}},
+			remedy: map[string]string{"jobs": "(interactive) and confirm the overwrite"}},
 		{name: "jobs: darwin recorded unedited plist differs from the rendering", mutate: func(f *doctorFixture) {
 			f.darwin(false)
 			path := filepath.Join(f.p.LaunchAgentsDir, LaunchdLabelPrefix+JobCleanup+".plist")

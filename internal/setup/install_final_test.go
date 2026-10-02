@@ -97,6 +97,8 @@ func (t tamperStep) Apply(context.Context, WritePorts, *RunState, Plan) (StepRes
 type fakeLaunchd struct {
 	mu     sync.Mutex
 	loaded map[string]bool
+	// failBootstrap makes the next n bootstrap calls fail with exit 5.
+	failBootstrap int
 }
 
 func newFakeLaunchd() *fakeLaunchd { return &fakeLaunchd{loaded: map[string]bool{}} }
@@ -127,6 +129,10 @@ func (l *fakeLaunchd) handle(c Cmd) (Result, bool) {
 		}
 		return Result{ExitCode: 3, Stderr: []byte("Boot-out failed: 3: No such process")}, true
 	case "bootstrap":
+		if l.failBootstrap > 0 {
+			l.failBootstrap--
+			return Result{ExitCode: 5, Stderr: []byte("Bootstrap failed: 5: Input/output error")}, true
+		}
 		l.loaded[strings.TrimSuffix(filepath.Base(c.Argv[3]), ".plist")] = true
 		return Result{}, true
 	}
@@ -216,7 +222,7 @@ func (r *fullRig) run(in Inputs) RunResult {
 		steps = slices.Insert(steps, i, Step(tamperStep{r.tamper}))
 	}
 	wp := WritePorts{ReadPorts: rp, FS: r.fs, Runner: r.runner, DB: r.db, Ollama: r.oll, ClaudeCLI: r.claude, Progress: rend.Progress,
-		Jobs: LaunchdManager{LaunchdJobs: jobs, Write: r.fs}}
+		Jobs: LaunchdManager{LaunchdJobs: jobs, Write: r.fs, Sleep: func(time.Duration) {}}}
 	ui := r.ui
 	if ui == nil {
 		ui = NewFakePrompter(r.t, false)
