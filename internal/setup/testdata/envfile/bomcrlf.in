@@ -1,0 +1,3 @@
+﻿# crlf file
+MEMORY_PG_DSN=postgresql://claude_memory:old@db.example:5432/claude_memory
+FOO=bar

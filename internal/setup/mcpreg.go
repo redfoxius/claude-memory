@@ -83,7 +83,7 @@ type mcpServerJSON struct {
 
 // ReadMCPRegistration reads Paths.ClaudeJSON read-only. Only an I/O error
 // other than "not found" is returned as an error.
-func ReadMCPRegistration(fsys FS, p Paths) (MCPRegistration, error) {
+func ReadMCPRegistration(fsys ReadFS, p Paths) (MCPRegistration, error) {
 	reg := MCPRegistration{Path: p.ClaudeJSON}
 	b, err := fsys.ReadFile(p.ClaudeJSON)
 	if errors.Is(err, fs.ErrNotExist) {

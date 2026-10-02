@@ -547,18 +547,18 @@ type SettingsFile struct {
 // ReadSettingsFile reads a settings file through the FS port, following a
 // symlink only when its target lies inside home (AC-38; §8: dotfiles). A
 // missing file is not an error (Exists false).
-func ReadSettingsFile(fsys FS, home, path string) (*SettingsFile, error) {
+func ReadSettingsFile(fsys ReadFS, home, path string) (*SettingsFile, error) {
 	return readSettingsFile(fsys, home, path, false)
 }
 
 // ReadSettingsFileFollow is ReadSettingsFile for read-only callers: a
 // symlink whose target is outside home is followed and flagged
 // (OutsideHome) instead of refused. Writers must keep using ReadSettingsFile.
-func ReadSettingsFileFollow(fsys FS, home, path string) (*SettingsFile, error) {
+func ReadSettingsFileFollow(fsys ReadFS, home, path string) (*SettingsFile, error) {
 	return readSettingsFile(fsys, home, path, true)
 }
 
-func readSettingsFile(fsys FS, home, path string, followOutside bool) (*SettingsFile, error) {
+func readSettingsFile(fsys ReadFS, home, path string, followOutside bool) (*SettingsFile, error) {
 	f := &SettingsFile{Path: path, Target: path}
 	li, err := fsys.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -598,7 +598,7 @@ func readSettingsFile(fsys FS, home, path string, followOutside bool) (*Settings
 
 // underDir reports whether p lies inside dir, comparing symlink-resolved
 // forms when dir resolves (e.g. macOS /var → /private/var).
-func underDir(fsys FS, p, dir string) bool {
+func underDir(fsys ReadFS, p, dir string) bool {
 	inside := func(p, dir string) bool {
 		rel, err := filepath.Rel(dir, p)
 		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
@@ -704,7 +704,7 @@ type OtherSettingsReport struct {
 
 // ScanOtherSettings reads the AC-70 files read-only and reports every entry
 // of ours in them: each would fire the hook a second time.
-func ScanOtherSettings(fsys FS, p Paths) OtherSettingsReport {
+func ScanOtherSettings(fsys ReadFS, p Paths) OtherSettingsReport {
 	var r OtherSettingsReport
 	for _, path := range OtherSettingsFiles(p) {
 		b, err := fsys.ReadFile(path)

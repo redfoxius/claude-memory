@@ -17,5 +17,9 @@ var FS embed.FS
 const (
 	InitDBDir     = "initdb"
 	InitDBAppRole = "initdb/01-app-role.sh"
-	EnvExample    = ".env.example"
+	// InitDBAppRolePSQL is the shared psql-variable script: the compose
+	// stack's 01-app-role.sh runs it, and the installer renders bootstrap.sql
+	// from it.
+	InitDBAppRolePSQL = "initdb/app-role.psql"
+	EnvExample        = ".env.example"
 )

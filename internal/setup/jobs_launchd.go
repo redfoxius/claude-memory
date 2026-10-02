@@ -59,7 +59,7 @@ func DefaultJobSpecs(p Paths, binPath string) []JobSpec {
 // LaunchdJobs inspects launchd jobs through the ports. Runner may be the
 // read-only adapter: every command it runs has Mutating unset.
 type LaunchdJobs struct {
-	FS     FS
+	FS     ReadFS
 	Runner Runner
 	Paths  Paths
 }

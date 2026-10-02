@@ -1,0 +1,5 @@
+MEMORY_PG_DSN=postgresql://claude_memory:%2Ft0ken@100.64.0.9:5432/claude_memory
+MEMORY_OLLAMA_URL=http://127.0.0.1:11434
+MEMORY_EMBED_MAX_TOKENS=2048
+MEMORY_PR_INGEST_REPOS=acme/api,acme/web
+MEMORY_OLLAMA_MODEL=bge-m3

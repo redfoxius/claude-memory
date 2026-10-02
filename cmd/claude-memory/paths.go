@@ -80,3 +80,24 @@ func buildEnv(environ []string) setup.Env {
 	}
 	return env
 }
+
+// ephemeralDirs lists where a `go run` binary lives (AC-35): the temp
+// directory, $GOTMPDIR when set (go run builds there), and $GOCACHE, else
+// <user cache dir>/go-build. Pure over its inputs; main passes os.TempDir,
+// os.Getenv and os.UserCacheDir. Empty and relative entries are dropped.
+func ephemeralDirs(tmpDir string, getenv func(string) string, userCacheDir func() (string, error)) []string {
+	var out []string
+	add := func(d string) {
+		if d != "" && filepath.IsAbs(d) {
+			out = append(out, filepath.Clean(d))
+		}
+	}
+	add(tmpDir)
+	add(getenv("GOTMPDIR"))
+	if gc := getenv("GOCACHE"); gc != "" {
+		add(gc)
+	} else if cache, err := userCacheDir(); err == nil {
+		add(filepath.Join(cache, "go-build"))
+	}
+	return out
+}

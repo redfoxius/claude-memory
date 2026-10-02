@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -565,4 +566,374 @@ func realTempDir(t testing.TB) string {
 		return r
 	}
 	return d
+}
+
+// ---- FakeLog, FakeStep, FakePrompter, FakeReporter (WI-S2-1c) -------------
+
+// FakeLog is a shared, ordered call log ("Seed envfile", "Detect envfile",
+// "Apply envfile", ...) for engine tests.
+type FakeLog struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+// Add appends one entry.
+func (l *FakeLog) Add(format string, a ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls = append(l.calls, fmt.Sprintf(format, a...))
+}
+
+// Calls returns a copy of the log.
+func (l *FakeLog) Calls() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.calls)
+}
+
+// Count counts entries equal to s.
+func (l *FakeLog) Count(s string) int {
+	n := 0
+	for _, c := range l.Calls() {
+		if c == s {
+			n++
+		}
+	}
+	return n
+}
+
+// Index returns the index of the first entry equal to s, or -1.
+func (l *FakeLog) Index(s string) int { return slices.Index(l.Calls(), s) }
+
+// FakeStep is a scriptable Step; it always implements Seeder, Configurer and
+// MissingInputter, with nil hooks meaning "do nothing", and logs every call.
+type FakeStep struct {
+	StepID, StepTitle string
+	Req               []string
+	Log               *FakeLog
+
+	// DetectF gets the 1-based Detect call number for this step.
+	DetectF    func(n int, st *RunState) Detection
+	PlanF      func(st *RunState, ch Choices) (Plan, error)
+	ApplyF     func(n int, wc WritePorts, st *RunState, p Plan) (StepResult, error)
+	SeedF      func(st *RunState) ([]Note, error)
+	ConfigureF func(ui Prompter, st *RunState) error
+	MissingF   func(st *RunState) bool
+
+	detects, applies int
+}
+
+var (
+	_ Step            = (*FakeStep)(nil)
+	_ Seeder          = (*FakeStep)(nil)
+	_ Configurer      = (*FakeStep)(nil)
+	_ MissingInputter = (*FakeStep)(nil)
+)
+
+// ID implements Step.
+func (f *FakeStep) ID() string { return f.StepID }
+
+// Title implements Step.
+func (f *FakeStep) Title() string {
+	if f.StepTitle != "" {
+		return f.StepTitle
+	}
+	return f.StepID
+}
+
+// Requires implements Step.
+func (f *FakeStep) Requires() []string { return f.Req }
+
+// Detect implements Step.
+func (f *FakeStep) Detect(_ context.Context, _ ReadPorts, st *RunState) Detection {
+	f.detects++
+	f.Log.Add("Detect %s", f.StepID)
+	if f.DetectF == nil {
+		return Detection{State: StateOK, Artifacts: []ArtifactState{{ID: f.StepID, State: StateOK}}}
+	}
+	return f.DetectF(f.detects, st)
+}
+
+// Plan implements Step; the default plan lists every artifact chosen apply.
+func (f *FakeStep) Plan(_ context.Context, _ ReadPorts, st *RunState, ch Choices) (Plan, error) {
+	f.Log.Add("Plan %s", f.StepID)
+	if f.PlanF != nil {
+		return f.PlanF(st, ch)
+	}
+	var p Plan
+	for _, id := range applyIDs(ch) {
+		p.Actions = append(p.Actions, Action{Artifact: id, Verb: "write", Desc: id})
+	}
+	return p, nil
+}
+
+// Apply implements Step.
+func (f *FakeStep) Apply(_ context.Context, wc WritePorts, st *RunState, p Plan) (StepResult, error) {
+	f.applies++
+	f.Log.Add("Apply %s", f.StepID)
+	if f.ApplyF == nil {
+		return StepResult{}, nil
+	}
+	return f.ApplyF(f.applies, wc, st, p)
+}
+
+// Seed implements Seeder.
+func (f *FakeStep) Seed(_ context.Context, _ ReadPorts, st *RunState) ([]Note, error) {
+	f.Log.Add("Seed %s", f.StepID)
+	if f.SeedF == nil {
+		return nil, nil
+	}
+	return f.SeedF(st)
+}
+
+// Configure implements Configurer.
+func (f *FakeStep) Configure(_ context.Context, _ ReadPorts, ui Prompter, st *RunState) error {
+	f.Log.Add("Configure %s", f.StepID)
+	if f.ConfigureF == nil {
+		return nil
+	}
+	return f.ConfigureF(ui, st)
+}
+
+// MissingInput implements MissingInputter.
+func (f *FakeStep) MissingInput(st *RunState) bool { return f.MissingF != nil && f.MissingF(st) }
+
+// FakeWorld holds artifact states that FakeStep hooks read and write.
+type FakeWorld struct {
+	mu sync.Mutex
+	m  map[string]State
+}
+
+// NewFakeWorld returns a world with the given artifact states.
+func NewFakeWorld(init map[string]State) *FakeWorld {
+	w := &FakeWorld{m: map[string]State{}}
+	maps.Copy(w.m, init)
+	return w
+}
+
+// Get returns the state of id.
+func (w *FakeWorld) Get(id string) State {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.m[id]
+}
+
+// Set sets the state of id.
+func (w *FakeWorld) Set(id string, s State) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.m[id] = s
+}
+
+// DetectFor returns a DetectF reporting the world's state of ids.
+func (w *FakeWorld) DetectFor(ids ...string) func(int, *RunState) Detection {
+	return func(int, *RunState) Detection {
+		d := Detection{State: StateOK}
+		for _, id := range ids {
+			s := w.Get(id)
+			d.Artifacts = append(d.Artifacts, ArtifactState{ID: id, State: s, Detail: string(s)})
+			d.State = worseState(d.State, s)
+		}
+		return d
+	}
+}
+
+// ApplyOK returns an ApplyF that marks every planned artifact ok.
+func (w *FakeWorld) ApplyOK() func(int, WritePorts, *RunState, Plan) (StepResult, error) {
+	return func(_ int, _ WritePorts, _ *RunState, p Plan) (StepResult, error) {
+		var res StepResult
+		for _, a := range p.Actions {
+			w.Set(a.Artifact, StateOK)
+			res.Artifacts = append(res.Artifacts, Artifact{Step: strings.SplitN(a.Artifact, "/", 2)[0], Kind: KindFile, Path: "/x/" + a.Artifact, Version: "v1.0.0"})
+		}
+		return res, nil
+	}
+}
+
+func worseState(a, b State) State {
+	rank := map[State]int{StateOK: 0, StateOutdated: 1, StateModified: 2, StateAbsent: 3, StateBlocked: 4}
+	if rank[b] > rank[a] {
+		return b
+	}
+	return a
+}
+
+// FakePrompter is a strict, scripted Prompter: every call must match the next
+// expectation (kind and a substring of the question), or the test fails. An
+// answer of -1 for a Select accepts the default. Unconsumed expectations
+// fail at cleanup.
+type FakePrompter struct {
+	t           testing.TB
+	interactive bool
+	mu          sync.Mutex
+	script      []promptExpect
+	calls       []string
+}
+
+type promptExpect struct {
+	kind, q string
+	idx     int
+	yes     bool
+	text    string
+	err     error // returned instead of an answer (e.g. ErrInterrupted)
+}
+
+// NewFakePrompter returns a prompter bound to t; with interactive false any
+// prompt is a test failure.
+func NewFakePrompter(t testing.TB, interactive bool) *FakePrompter {
+	t.Helper()
+	p := &FakePrompter{t: t, interactive: interactive}
+	t.Cleanup(func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if len(p.script) > 0 {
+			t.Errorf("FakePrompter: %d expected prompt(s) never asked, first: %s %q", len(p.script), p.script[0].kind, p.script[0].q)
+		}
+	})
+	return p
+}
+
+// ExpectSelect scripts a Select whose question contains q, answered idx.
+func (p *FakePrompter) ExpectSelect(q string, idx int) *FakePrompter {
+	p.script = append(p.script, promptExpect{kind: "select", q: q, idx: idx})
+	return p
+}
+
+// ExpectConfirm scripts a Confirm whose question contains q.
+func (p *FakePrompter) ExpectConfirm(q string, yes bool) *FakePrompter {
+	p.script = append(p.script, promptExpect{kind: "confirm", q: q, yes: yes})
+	return p
+}
+
+// ExpectSelectErr scripts a Select whose question contains q, failing with err.
+func (p *FakePrompter) ExpectSelectErr(q string, err error) *FakePrompter {
+	p.script = append(p.script, promptExpect{kind: "select", q: q, err: err})
+	return p
+}
+
+// ExpectConfirmErr scripts a Confirm whose question contains q, failing with err.
+func (p *FakePrompter) ExpectConfirmErr(q string, err error) *FakePrompter {
+	p.script = append(p.script, promptExpect{kind: "confirm", q: q, err: err})
+	return p
+}
+
+// Calls returns the asked prompts as "<kind> <question>".
+func (p *FakePrompter) Calls() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.calls)
+}
+
+func (p *FakePrompter) next(kind, q string) (promptExpect, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls = append(p.calls, kind+" "+q)
+	if !p.interactive {
+		p.t.Errorf("FakePrompter: %s %q asked in a non-interactive session", kind, q)
+		return promptExpect{}, false
+	}
+	if len(p.script) == 0 {
+		p.t.Errorf("FakePrompter: unexpected %s %q", kind, q)
+		return promptExpect{}, false
+	}
+	e := p.script[0]
+	p.script = p.script[1:]
+	if e.kind != kind || !strings.Contains(q, e.q) {
+		p.t.Errorf("FakePrompter: got %s %q, want %s containing %q", kind, q, e.kind, e.q)
+		return promptExpect{}, false
+	}
+	return e, true
+}
+
+// Select implements Prompter.
+func (p *FakePrompter) Select(q string, opts []string, def int) (int, error) {
+	e, ok := p.next("select", q)
+	if !ok {
+		return 0, ErrInterrupted
+	}
+	if e.err != nil {
+		return 0, e.err
+	}
+	if e.idx < 0 {
+		return def, nil
+	}
+	if e.idx >= len(opts) {
+		p.t.Errorf("FakePrompter: select %q answer %d out of %d options", q, e.idx, len(opts))
+		return 0, ErrInterrupted
+	}
+	return e.idx, nil
+}
+
+// Confirm implements Prompter.
+func (p *FakePrompter) Confirm(q string, def bool) (bool, error) {
+	e, ok := p.next("confirm", q)
+	if !ok {
+		return false, ErrInterrupted
+	}
+	if e.err != nil {
+		return false, e.err
+	}
+	return e.yes, nil
+}
+
+// Text implements Prompter (never scripted in the engine tests).
+func (p *FakePrompter) Text(q, def string, _ func(string) error) (string, error) {
+	p.next("text", q)
+	return def, ErrInterrupted
+}
+
+// Secret implements Prompter (never scripted in the engine tests).
+func (p *FakePrompter) Secret(q string) (string, error) {
+	p.next("secret", q)
+	return "", ErrInterrupted
+}
+
+// Interactive implements Prompter.
+func (p *FakePrompter) Interactive() bool { return p.interactive }
+
+var _ Prompter = (*FakePrompter)(nil)
+
+// FakeReporter records everything the engine reports.
+type FakeReporter struct {
+	Events   []string
+	Notes_   []Note
+	Tables   [][]StatusRow
+	Plans    []CombinedPlan
+	Awaits   map[string][]string
+	Outcomes []StepOutcome
+}
+
+var _ Reporter = (*FakeReporter)(nil)
+
+// Notes implements Reporter.
+func (r *FakeReporter) Notes(ns []Note) {
+	r.Events = append(r.Events, "notes")
+	r.Notes_ = append(r.Notes_, ns...)
+}
+
+// Table implements Reporter.
+func (r *FakeReporter) Table(rows []StatusRow) {
+	r.Events = append(r.Events, "table")
+	r.Tables = append(r.Tables, rows)
+}
+
+// Plan implements Reporter.
+func (r *FakeReporter) Plan(cp CombinedPlan) {
+	r.Events = append(r.Events, "plan")
+	r.Plans = append(r.Plans, cp)
+}
+
+// Await implements Reporter.
+func (r *FakeReporter) Await(id string, ins []string) {
+	r.Events = append(r.Events, "await "+id)
+	if r.Awaits == nil {
+		r.Awaits = map[string][]string{}
+	}
+	r.Awaits[id] = ins
+}
+
+// StepDone implements Reporter.
+func (r *FakeReporter) StepDone(o StepOutcome) {
+	r.Events = append(r.Events, "done "+o.StepID)
+	r.Outcomes = append(r.Outcomes, o)
 }

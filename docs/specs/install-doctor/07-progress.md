@@ -1,0 +1,24 @@
+# install/doctor — progress and handoff (2026-10-02)
+
+## Slice 1 manual run (WI-S1-12) — recorded
+`doctor` from `master` (`cd28e43`+) on the owner's live macOS install (darwin/arm64, launchd), after the server came back:
+23 checks — pass: env, perms, format, pg.connect (PG 16.15, pgvector 0.8.6, 3–4 ms), ollama (0.35.0, bge-m3, 1024 dims), git/claude/az, MCP registered, hook scripts; warn: `hooks.settings` (legacy `$HOME/...` form, both events), `skills` (modified vs embedded), `jobs` (cleanup/ingest-pr plists not installed), `pg.schema` (0002 missing — **applied during this run with `migrate`, now ok**); info: no CLAUDE.md block, no `namespaces.yaml`, no `install.json`.
+First run was FAIL `pg.connect` (server `home-server` offline over Tailscale); not a code issue.
+## WI-S1-0 manual fixtures — measured on the Mac (macOS 26.2, Claude Code 2.1.287)
+- **`launchctl bootout gui/<uid>/<label>` for a job that is not loaded:** prints `Boot-out failed: 3: No such process`, **exit 3**. `launchctl print` for the same label: `Could not find service "<label>" in domain for user gui: 501`, **exit 113** (the slice-1 fixture). WI-S2-13a must tolerate bootout exit 3 (not only 113) when "not loaded".
+- **`~/.claude/projects` names:** the absolute path with every `/` replaced by `-` (e.g. `-Users-example-user-work-acme-claude-memory`). A literal hyphen in a directory name is indistinguishable (`-Users-example-user-work-Block-strike` is `~/work/Block-strike`), so WI-S2-8's existence-checked greedy decoding is required; confirmed.
+- **`$HOME` in a hook command:** `settings.json` hooks use `$HOME/.claude/hooks/claude-memory/user-prompt-submit.sh` (timeout 5) and fire correctly in this session (UserPromptSubmit context arrives), so Claude Code expands `$HOME` there. The legacy form works; replacing it is optional.
+- **Settings reload for the AC-62 restart line:** not verifiable from inside a session; keep the plan default ("restart open Claude Code sessions").
+
+
+## Slice 2 status (branch `feature/install-s2-core`, from `feature/install-s2-prework`)
+Done and committed: WI-S2-0, 1a, 1b, 1c (+ architecture review fixes), 2, 3, 4a, 5.
+Opus architecture review of 1a/1c: PASS WITH FIXES, all fixed.
+In flight at time of writing: WI-S2-4b, 6, 7 (security-sensitive: `bootstrap.sql`, password alphabet, psql).
+Next: Opus review of 4a/4b/5/6/7 → WI-S2-8 (namespaces), 14a (install command), 14b (final doctor) → PR 2a. Then PR 2b (hooks, MCP, skills, CLAUDE.md, jobs, doctor deltas, uninstall, e2e, docs).
+Open items noted by implementers: ParseDBTarget refuses DSN query options other than `sslmode`; `--jobs-backend` override must be called by 14a (`jobsBackendOverride` + `UnsupportedError` → exit 2); `Renderer.Summary` must be called by `cmd` after `Engine.Run`; Await-wait Select still maps ErrTooManyAttempts to exit 2.
+
+## Live system state to restore after restart
+- Server schema: migrations 0001, 0002 applied (records backfilled to `acme`).
+- Installed binary `~/.local/bin/claude-memory` is still the OLD build until replaced; replace from `master`, then restart open Claude Code sessions.
+- `namespaces.yaml` absent: run `claude-memory namespaces init --default global acme='~/work/acme/**'` so backfilled records stay visible in Acme projects.

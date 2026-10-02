@@ -446,6 +446,9 @@ renaming launchd labels.
        an `env-key` whose source field the user answered in this run's
        Configure is `apply` (that answer is the consent; the AC-26 warning
        was shown before it; spec AC-6 names this exception, v0.5 N9).
+       The exception is checked before "state unchanged keeps its choice":
+       a kept hand-edited key (`modified` → `modified`) also becomes
+       `apply` on a new answer, and only interactively.
        Otherwise a re-Detect never escalates to an
        overwrite, so an artifact that became `modified` gets `keep` (under
        `--yes` always). Re-detected rows are printed again. On a no-op run
@@ -1661,6 +1664,10 @@ v0.5 resolutions themselves:
 | `Source=default` keys are now written, so the first `install` over a hand install whose env file relies on the binary's Ollama defaults adds `MEMORY_OLLAMA_URL`/`MEMORY_OLLAMA_MODEL` lines | Design 16; WI-S2-7 | These show as `absent → apply` in the plan diff. When the AC-51 hand-install fixture's env file lacks them, it must expect them on run 1 and a no-op on run 2. |
 | Seed order flag → env file → `Env` differs from the binary's own precedence (shell over file, `internal/config/config.go:251`) | Design 16 | Intentional: the file is what hooks, MCP and jobs read. The drift note is the only signal; doctor's shell-only FAIL (`checks_env.go:114-118`) is unchanged. |
 | Narrowing slice-1 helpers to `ReadFS` touches merged, reviewed code | WI-S2-1a | Signature-only change; the slice-1 tests must pass unchanged. |
+| A step's `Detection.Detail` reaches Prompter questions (the engine's phase-2 Select) unredacted, since the engine has no Redactor | Design 17; WI-S2-1c, WI-S2-2 | Steps must never put a DSN or other secret in `Detail`. The TTY Prompter (WI-S2-2) must redact every question it prints. |
+| The engine plans and applies only steps with an `apply` choice | Design 15; every step WI | A step must put its notes about kept artifacts (e.g. a kept modified file) into `Detection.Notes`, or they are never shown. |
+| AC-9 "write the manifest only on change" | Design 8; WI-S2-1c | A header-only manifest write happens when something was applied and only the header (version, topology, platform) differs. A run that applies nothing never writes the manifest. |
+| The first Apply's artifacts of an `Await` step are not recorded when the follow-up Apply or the success rule fails | Design 19; WI-S2-1c | Deliberate: a failed step records nothing. The next run's Detect re-converges from the disk. |
 
 ## Rollout
 1. **Slice 1 merged → owner runs `claude-memory doctor`** on the current

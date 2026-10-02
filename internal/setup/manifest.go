@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -54,6 +55,75 @@ type Artifact struct {
 	// CreatedContainer is set on a settings-hook artifact when install
 	// created the "hooks" object, so uninstall may remove it (AC-54).
 	CreatedContainer bool `json:"created_container,omitempty"`
+	// CreatedFile is set on a settings-hook artifact when install created
+	// settings.json itself, so uninstall deletes it only when the unmerge
+	// leaves {} (Design 23). CreatedContainer keeps its own meaning.
+	CreatedFile bool `json:"created_file,omitempty"`
+}
+
+// Key returns the identity of a under which the manifest stores it.
+func (a Artifact) Key() ArtifactKey {
+	return ArtifactKey{Kind: a.Kind, Path: a.Path, Identity: a.Identity}
+}
+
+// ArtifactRetained reports whether uninstall drops a from the manifest
+// without reversing it (Design 23): env-key artifacts, and dir artifacts
+// outside <ClaudeDir> (<ConfigDir>, <StateDir>, <BinDir>). A dir under
+// <ClaudeDir> (hooks/claude-memory, skills/<name>) is owned and reversed.
+func ArtifactRetained(a Artifact, p Paths) bool {
+	switch a.Kind {
+	case KindEnvKey:
+		return true
+	case KindDir:
+		return !pathUnder(a.Path, p.ClaudeDir)
+	}
+	return false
+}
+
+func pathUnder(path, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// Upsert records a (replacing the artifact with the same key) and reports
+// whether the artifact set or any recorded field changed.
+func (m *Manifest) Upsert(a Artifact) bool {
+	for i, have := range m.Artifacts {
+		if have.Key() == a.Key() {
+			if have == a {
+				return false
+			}
+			m.Artifacts[i] = a
+			return true
+		}
+	}
+	m.Artifacts = append(m.Artifacts, a)
+	return true
+}
+
+// Drop removes the artifact with key k and reports whether it was recorded.
+func (m *Manifest) Drop(k ArtifactKey) bool {
+	for i, have := range m.Artifacts {
+		if have.Key() == k {
+			m.Artifacts = append(m.Artifacts[:i:i], m.Artifacts[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// Trim drops every key in keys and reports whether anything was dropped.
+func (m *Manifest) Trim(keys []ArtifactKey) bool {
+	changed := false
+	for _, k := range keys {
+		if m.Drop(k) {
+			changed = true
+		}
+	}
+	return changed
 }
 
 // ManifestPlatform is the platform the manifest was written on.
@@ -171,7 +241,7 @@ func (l ManifestLoad) Present() bool { return l.Manifest != nil }
 // LoadManifest reads Paths.Manifest() read-only. Only an I/O error other
 // than "not found" is returned as an error; a corrupt file is reported in
 // the result (AC-49: treated as absent, and reported).
-func LoadManifest(fsys FS, p Paths) (ManifestLoad, error) {
+func LoadManifest(fsys ReadFS, p Paths) (ManifestLoad, error) {
 	l := ManifestLoad{Path: p.Manifest()}
 	b, err := fsys.ReadFile(l.Path)
 	if errors.Is(err, fs.ErrNotExist) {

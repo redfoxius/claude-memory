@@ -1,0 +1,3 @@
+MEMORY_PG_DSN=postgresql://claude_memory:s3cret@db.example:5432/claude_memory?sslmode=prefer
+FOO=bar
+# end

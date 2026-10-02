@@ -9,6 +9,7 @@ require (
 	github.com/pgvector/pgvector-go v0.2.0
 	github.com/rs/zerolog v1.35.1
 	github.com/testcontainers/testcontainers-go v0.44.0
+	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

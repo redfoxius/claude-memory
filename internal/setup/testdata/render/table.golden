@@ -1,0 +1,9 @@
+STEP              STATE     CHOICE                DETAIL
+Binary            ok        keep                  /home/u/.local/bin/claude-memory
+Env file          modified  keep                  MEMORY_PG_DSN=postgresql://claude_memory:***@db:5432/claude_memory differs
+  - envfile/MEMORY_PG_DSN modified differs from recorded
+  - envfile/mode outdated mode 0644, want 0600
+Hooks (settings)  absent    apply                 2 events to add
+Scheduled jobs    absent    apply (after binary)
+Ollama            blocked   skip                  ollama not found
+

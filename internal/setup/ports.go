@@ -26,6 +26,12 @@ var ErrReadOnly = errors.New("mutating command refused: read-only runner")
 // Prompter is the line-oriented user interaction port (AC-10, AC-11) [S2].
 // The TTY adapter reads passwords without echo (golang.org/x/term) and
 // registers every secret with the Redactor before returning it (AC-30).
+//
+// Redaction contract: the engine builds some questions from a step's
+// Detection.Detail (the phase-2 Select) and passes them through unredacted, so
+// the TTY Prompter (WI-S2-2) must run every question through the Redactor
+// before printing it, and a step must never put a DSN or other secret in
+// Detail.
 type Prompter interface {
 	// Select shows numbered opts with def preselected and returns the index
 	// chosen (Enter accepts def).
@@ -42,10 +48,10 @@ type Prompter interface {
 	Interactive() bool
 }
 
-// FS is the filesystem port. Every path is absolute. The read half is used
-// from slice 1 (doctor, Detect); the write half from slice 2. The read-only
-// (doctor) and dry-run adapters return ErrDryRun from every write method.
-type FS interface {
+// ReadFS is the read half of the filesystem port. Every path is absolute.
+// Detect, Seed, Configure and Plan receive only this half (Design 20), so a
+// write from them does not compile.
+type ReadFS interface {
 	ReadFile(p string) ([]byte, error)
 	Stat(p string) (fs.FileInfo, error)
 	Lstat(p string) (fs.FileInfo, error)
@@ -54,6 +60,13 @@ type FS interface {
 	// Writable reports whether p could be written, via access(2); it never
 	// writes anything (doctor dirs.state).
 	Writable(p string) bool
+}
+
+// FS is the full filesystem port: ReadFS plus the write half (slice 2). The
+// read-only (doctor) and dry-run adapters return ErrDryRun from every write
+// method.
+type FS interface {
+	ReadFS
 
 	// WriteFileAtomic writes b to p via a temp file in the same directory,
 	// fsync and rename, with the given mode (AC-9).
@@ -142,33 +155,44 @@ type DBStatus struct {
 	Unknown []string
 }
 
-// DBProber probes and migrates the database. Adapter: internal/postgres.
-type DBProber interface {
+// DBProbe is the read half of the database port (Design 20): Detect, Seed,
+// Configure and Plan receive only this.
+type DBProbe interface {
 	// Probe connects read-only (postgres.Open: no migrations) and reports
 	// ping RTT, TLS, the vector extension and schema objects. On failure the
 	// returned status carries the ErrorClass, and the error its cause.
 	Probe(ctx context.Context, dsn string) (DBStatus, error)
-	// Migrate applies the embedded migrations (postgres.New + Close); used
-	// by the migrate step [S2].
-	Migrate(ctx context.Context, dsn string) error
 	// LocalServerEvidence reports whether a local Postgres server exists:
 	// TCP 127.0.0.1:5432 plus a local socket or postgres process (AC-19),
 	// with a one-line description of the evidence [S2].
 	LocalServerEvidence(ctx context.Context) (bool, string)
 }
 
-// OllamaProber talks to the Ollama HTTP API. Adapter: internal/ollama.
-// Pull is used from slice 2.
-type OllamaProber interface {
+// DBProber probes and migrates the database. Adapter: internal/postgres.
+type DBProber interface {
+	DBProbe
+	// Migrate applies the embedded migrations (postgres.New + Close); used
+	// by the migrate step [S2].
+	Migrate(ctx context.Context, dsn string) error
+}
+
+// OllamaProbe is the read half of the Ollama port (Design 20).
+type OllamaProbe interface {
 	// Version calls GET /api/version.
 	Version(ctx context.Context, url string) (string, error)
 	// HasModel reports whether model is listed by GET /api/tags.
 	HasModel(ctx context.Context, url, model string) (bool, error)
-	// Pull runs POST /api/pull, reporting streamed progress [S2].
-	Pull(ctx context.Context, url, model string, progress func(done, total int64)) error
 	// EmbedDims embeds one short text and returns the vector length and
 	// the request latency (the schema needs 1024).
 	EmbedDims(ctx context.Context, url, model string) (dims int, latency time.Duration, err error)
+}
+
+// OllamaProber talks to the Ollama HTTP API. Adapter: internal/ollama.
+// Pull is used from slice 2.
+type OllamaProber interface {
+	OllamaProbe
+	// Pull runs POST /api/pull, reporting streamed progress [S2].
+	Pull(ctx context.Context, url, model string, progress func(done, total int64)) error
 }
 
 // JobSpec describes one scheduled job (AC-43).
@@ -183,14 +207,20 @@ type JobSpec struct {
 	LogPath string // <StateDir>/<name>.log
 }
 
-// JobManager manages scheduled jobs for one backend: launchd (Detect in
-// slice 1, the rest in slice 2) or systemd (slice 2).
-type JobManager interface {
+// JobDetector is the read half of the job port (Design 20): render and
+// detect, never change anything.
+type JobDetector interface {
 	// Render returns the unit/plist files for j, keyed by absolute path.
 	Render(j JobSpec) (map[string][]byte, error)
 	// Detect reports the job's state read-only (file read plus one
 	// launchctl print / systemctl --user show) with a one-line detail.
 	Detect(ctx context.Context, j JobSpec) (State, string, error)
+}
+
+// JobManager manages scheduled jobs for one backend: launchd (Detect in
+// slice 1, the rest in slice 2) or systemd (slice 2).
+type JobManager interface {
+	JobDetector
 	Install(ctx context.Context, j JobSpec) error
 	Remove(ctx context.Context, j JobSpec) error
 }
@@ -220,4 +250,38 @@ type Check struct {
 	ID, Title string
 	Requires  []string
 	Run       func(ctx context.Context) (Status, string /*detail*/, string /*remedy*/)
+}
+
+// ReadPorts is everything Detect, Seed, Configure and Plan may touch
+// (Design 20). Its port fields are the narrowed read interfaces, so a file
+// write, a migration, a model pull or a job install from those phases does
+// not compile. The one runtime guard left is Runner (Cmd.Mutating ->
+// ErrReadOnly). Jobs is nil when no step reads it (2a).
+type ReadPorts struct {
+	FS       ReadFS
+	Runner   Runner // read-only adapter
+	DB       DBProbe
+	Ollama   OllamaProbe
+	Jobs     JobDetector
+	Clock    Clock
+	Paths    Paths
+	Env      Env
+	Platform PlatformInfo
+	Assets   fs.FS
+}
+
+// WritePorts is what Apply (and uninstall) receives: the read ports plus the
+// writable counterparts (Design 20). Under --dry-run its FS and Runner are
+// the read-only adapters. ClaudeCLI and Jobs are nil in 2a.
+type WritePorts struct {
+	ReadPorts // embedded read view: its FS/Runner/DB/Ollama/Jobs are the same adapters
+
+	// Writable counterparts; they shadow the embedded read fields.
+	FS        FS
+	Runner    Runner // mutating allowed (read-only adapter under --dry-run)
+	DB        DBProber
+	Ollama    OllamaProber
+	Jobs      JobManager
+	ClaudeCLI ClaudeCLI
+	Progress  ProgressSink
 }

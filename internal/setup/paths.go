@@ -31,6 +31,11 @@ type Paths struct {
 	Cwd             string // for project settings (AC-70) and `namespaces which`
 	Self            string // os.Executable, symlinks resolved ("" when unknown)
 	UID             int
+	// EphemeralDirs are the directories a `go run` or `go test` binary lives
+	// in: os.TempDir(), $GOTMPDIR when set, $GOCACHE else UserCacheDir/go-build.
+	// The binary step refuses a Self under any of them (AC-35). Computed in
+	// main; the step also resolves their symlinks through the FS port.
+	EphemeralDirs []string
 }
 
 // File names inside the directories of Paths.

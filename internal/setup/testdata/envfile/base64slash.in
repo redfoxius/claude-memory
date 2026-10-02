@@ -1,0 +1,2 @@
+MEMORY_PG_DSN=postgresql://claude_memory:ab/cd+ef==@db.example:5432/claude_memory
+MEMORY_OLLAMA_URL=http://127.0.0.1:11434

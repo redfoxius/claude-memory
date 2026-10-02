@@ -95,3 +95,35 @@ func TestBuildEnvAllowList(t *testing.T) {
 		t.Errorf("buildEnv = %#v, want %#v", got, want)
 	}
 }
+
+func TestEphemeralDirs(t *testing.T) {
+	t.Parallel()
+	env := func(kv ...string) func(string) string {
+		m := map[string]string{}
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[kv[i]] = kv[i+1]
+		}
+		return func(k string) string { return m[k] }
+	}
+	cache := func() (string, error) { return "/home/u/.cache", nil }
+	noCache := func() (string, error) { return "", errors.New("no home") }
+	cases := []struct {
+		name   string
+		tmp    string
+		getenv func(string) string
+		cache  func() (string, error)
+		want   []string
+	}{
+		{"defaults", "/tmp", env(), cache, []string{"/tmp", "/home/u/.cache/go-build"}},
+		{"GOTMPDIR and GOCACHE", "/tmp", env("GOTMPDIR", "/var/gotmp", "GOCACHE", "/c/go"), cache, []string{"/tmp", "/var/gotmp", "/c/go"}},
+		{"GOCACHE wins over the cache dir", "/tmp", env("GOCACHE", "/c/go"), cache, []string{"/tmp", "/c/go"}},
+		{"no cache dir", "/tmp", env(), noCache, []string{"/tmp"}},
+		{"relative and empty dropped", "", env("GOTMPDIR", "rel"), noCache, nil},
+		{"cleaned", "/tmp/", env(), noCache, []string{"/tmp"}},
+	}
+	for _, tc := range cases {
+		if got := ephemeralDirs(tc.tmp, tc.getenv, tc.cache); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
