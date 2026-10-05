@@ -37,7 +37,7 @@
 
 ## Measured on real systems (2026-10-01)
 
-- Embedding: Mac Mini AVX-only ~17 ms/token; M1 Pro Metal 0.02–0.21s;
+- Embedding: older x86 server (AVX-only) ~17 ms/token; M1 Pro Metal 0.02–0.21s;
   Ollama cap = `num_batch` (default 2048).
 - Retrieval eval: paraphrase recall@3 4/6, identifier 5/5; relevant
   similarity 0.45–0.72, unrelated 0.28–0.42, near-duplicates 0.79/0.88;

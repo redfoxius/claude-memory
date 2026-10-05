@@ -10,7 +10,7 @@
   Implementation proceeds **slice by slice** (§0.2).
 - Version: 0.6 (v0.5 → v0.6 in §0.6; v0.1 → v0.2 changes in §0.1; v0.2 → v0.3 in §0.3; v0.3 →
   v0.4 in §0.4; v0.4 → v0.5 in §0.5)
-- Owner: Oleksandr Kolomoiets (user@example.com)
+- Owner: Oleksandr Kolomoiets
 - Supersedes: none. Replaces the manual procedure in `integration/INSTALL.md`
   steps 1–9 and the laptop half of `DEPLOY.md` (they stay as reference).
 - Related: `docs/specs/README.md` backlog item 8 (owner request,

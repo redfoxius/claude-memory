@@ -27,7 +27,7 @@ Per-namespace `pr_ingest` (`enabled`/`provider`) shipped with item 4 (pr-provide
 
 Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
 
-- New `namespace` field on every record (e.g. `acme`, `pet-game`). All
+- New `namespace` field on every record (e.g. `work`, `pet-game`). All
   reads and writes are scoped to it: search, dedup candidates, list,
   advisory-lock key. Records from different namespaces never mix or merge.
 - Namespace resolved automatically from the project directory via
@@ -41,7 +41,7 @@ Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
 - Language/stack inside one namespace (e.g. Go vs JavaScript at Acme) is a
   tag / `lang` field, not a separate namespace — company-wide conventions
   should still surface across stacks.
-- Migration: existing records backfilled to `acme`; indexes include
+- Migration: existing records backfilled to `work`; indexes include
   `namespace`.
 - Out of scope for now (possible later): physically separate Postgres
   database + role per namespace for hard isolation (same code, different DSN

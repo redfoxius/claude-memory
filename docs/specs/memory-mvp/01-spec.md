@@ -4,7 +4,7 @@
 - Spec ID: SPEC-2026-10-01-memory-mvp
 - Status: implemented and verified (07-verification.md); operational ACs outstanding
 - Version: 0.5
-- Owner: Oleksandr Kolomoiets (user@example.com)
+- Owner: Oleksandr Kolomoiets
 - Supersedes: none
 - Related: shared conventions `acme/CLAUDE.md`; no prior spec/plan exists (greenfield repo); design decisions captured here were agreed in a prior discussion with the owner, not sourced from a separate document; v0.2 revises the deployment topology (laptop-local Ollama + `claude-memory`, server reduced to Postgres-only) based on the owner's AC-44 smoke-test measurements taken 2026-10-01
 
@@ -92,9 +92,9 @@ by default.
   isolation. **(changed in v0.2)** Authentication is Postgres password
   auth plus Tailscale network-level restriction (see Constraints) rather
   than an MCP-layer bearer token — AC-41 is withdrawn, replaced by AC-54.
-- The home Mac Mini server, Tailscale, Docker CE (`data-root
-  /mnt/data/docker`), and the existing production workloads (game server,
-  Node/PM2 app, MongoDB, Redis, Caddy) are already running and must not be
+- The home x86 server, Tailscale, Docker CE (`data-root
+  /mnt/data/docker`), and the other existing production workloads
+  are already running and must not be
   reconfigured or disrupted by this deployment. **(changed in v0.2)** The
   server's only `claude-memory`-related workload is now the Postgres +
   pgvector container — Ollama and the `claude-memory` process no longer
@@ -142,7 +142,7 @@ by default.
   same in-process service/library or the local Ollama HTTP API directly —
   there is no laptop→server MCP-over-HTTP hop in the MVP. A
   `--transport http` mode may remain available as a future/optional
-  capability, but no AC in this spec requires it (see §12). Caddy on the
+  capability, but no AC in this spec requires it (see §12). The reverse proxy on the
   server is not touched.
 - **(v0.2)** The server's container resource ceiling is now just
   Postgres: 512 MiB RAM / 1.0 CPU — chosen to leave ample headroom for
@@ -574,7 +574,7 @@ log entry.
   before relying on it for the live hooks in production.
   **Measured baseline (smoke test completed 2026-10-01), which directly
   motivated moving Ollama off the server in v0.2:**
-  - Mac Mini 2012 server (AVX-only, no AVX2, `bge-m3` F16 via Ollama,
+  - older x86 home server (AVX-only, no AVX2, `bge-m3` F16 via Ollama,
     2.0 CPUs): ~15 tokens → p50 0.23 s; ~150 tokens → 2.3 s; ~600 tokens
     → 12.3 s (~17 ms/token, linear in length); RSS (anon) 1434 MiB;
     `num_thread` 2 vs. 4 showed no difference.
@@ -658,7 +658,7 @@ log entry.
 - AC-49 (Ubiquitous): **(reshaped in v0.2 — server now runs only
   Postgres)** The `postgres` container shall run within its configured
   memory/CPU limit (512 MiB RAM / 1.0 CPU), and the pre-existing host
-  workloads (game server, Node/PM2 app, MongoDB, Redis, Caddy) shall show
+  workloads shall show
   no measurable degradation after it is deployed. Ollama and
   `claude-memory` no longer run on the server at all in the MVP, so their
   former 1.5 GiB/2.0-CPU and 128 MiB/0.5-CPU ceilings no longer apply.
@@ -901,7 +901,7 @@ prompt context:
 | 3 | 5 | First-run PR-ingest lookback window when no cursor exists? | [NEEDS CLARIFICATION: spec-creator default 30 days] | AC-28 |
 | 4 | 3 | Similarity threshold for injecting a card on the read path? | Resolved v0.5 (see row 11): 0.50 on cosine similarity. | AC-32 |
 | 5 | 1/2/3/4/5/6 | All other functional scope, data model, UX flow, NFR, integration, and edge-case decisions | Fully decided by the owner in prior discussion (see request); recorded directly into §6/§7 without re-asking, per explicit instruction | AC-1–AC-2, AC-4–AC-14, AC-16–AC-27, AC-29–AC-31, AC-33–AC-53 |
-| 6 | 5 | Was server-side embedding latency on the AVX-only Mac Mini acceptable for production use? | Measured via the AC-44 smoke test on 2026-10-01: server ~17 ms/token (linear), 12–60× slower than the laptop's Metal-accelerated Ollama. Owner decided (v0.2 topology) to move Ollama and the `claude-memory` MCP process off the server entirely onto the laptop, reducing the server to Postgres-only, reachable solely over Tailscale with password auth replacing the former bearer-token MCP auth. | AC-30 (changed), AC-31 (changed), AC-41 (withdrawn), AC-42 (changed), AC-44 (changed), AC-47 (changed), AC-49 (changed), AC-50 (changed), AC-52 (changed), AC-54 (new), AC-55 (new), AC-56 (new), AC-57 (new) |
+| 6 | 5 | Was server-side embedding latency on the AVX-only x86 server acceptable for production use? | Measured via the AC-44 smoke test on 2026-10-01: server ~17 ms/token (linear), 12–60× slower than the laptop's Metal-accelerated Ollama. Owner decided (v0.2 topology) to move Ollama and the `claude-memory` MCP process off the server entirely onto the laptop, reducing the server to Postgres-only, reachable solely over Tailscale with password auth replacing the former bearer-token MCP auth. | AC-30 (changed), AC-31 (changed), AC-41 (withdrawn), AC-42 (changed), AC-44 (changed), AC-47 (changed), AC-49 (changed), AC-50 (changed), AC-52 (changed), AC-54 (new), AC-55 (new), AC-56 (new), AC-57 (new) |
 | 7 | 4 | What hook-added p95 latency target applies now that embedding is local rather than over the former laptop→server MCP hop? | [NEEDS CLARIFICATION: spec-creator default 300 ms p95, proposed as reasonable given the removed network hop; confirm or retune once measured end-to-end on the real Tailscale link] (2026-10-01) | AC-30 |
 | 8 | 4 | Should the new Postgres-over-Tailscale connection require `sslmode=require`, given WireGuard already encrypts the link? | Decided (spec-creator judgment, recorded 2026-10-01 in §4 Constraints): not mandated for the MVP — an additional TLS layer is redundant for this single-user, single-link topology; `sslmode=require` remains available as an optional future hardening step, with no AC depending on it. | None (design decision, not a testable AC) |
 | 9 | 4 | What embedding token limit applies, given Ollama's real behavior? | Measured 2026-10-01 (Ollama 0.35, M1 Pro): Ollama silently truncates at `num_batch` (default 2048), keeping leading tokens; 2048 tokens 0.6s, 4096 3.4s, 8192 8.0s. 8192 would break AC-48 (< 3s). Owner decided: configurable `MEMORY_EMBED_MAX_TOKENS`, default 2048, passed as `num_ctx`/`num_batch`; full content always in the full-text index. (v0.3) | AC-55 (changed), AC-56 (changed) |

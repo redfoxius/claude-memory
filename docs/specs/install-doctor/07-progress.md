@@ -6,7 +6,7 @@
 First run was FAIL `pg.connect` (server `home-server` offline over Tailscale); not a code issue.
 ## WI-S1-0 manual fixtures — measured on the Mac (macOS 26.2, Claude Code 2.1.287)
 - **`launchctl bootout gui/<uid>/<label>` for a job that is not loaded:** prints `Boot-out failed: 3: No such process`, **exit 3**. `launchctl print` for the same label: `Could not find service "<label>" in domain for user gui: 501`, **exit 113** (the slice-1 fixture). WI-S2-13a must tolerate bootout exit 3 (not only 113) when "not loaded".
-- **`~/.claude/projects` names:** the absolute path with every `/` replaced by `-` (e.g. `-Users-example-user-work-acme-claude-memory`). A literal hyphen in a directory name is indistinguishable (`-Users-example-user-work-Block-strike` is `~/work/Block-strike`), so WI-S2-8's existence-checked greedy decoding is required; confirmed.
+- **`~/.claude/projects` names:** the absolute path with every `/` replaced by `-` (e.g. `-Users-me-work-acme-claude-memory`). A literal hyphen in a directory name is indistinguishable (`-Users-me-work-Block-strike` is `~/work/Block-strike`), so WI-S2-8's existence-checked greedy decoding is required; confirmed.
 - **`$HOME` in a hook command:** `settings.json` hooks use `$HOME/.claude/hooks/claude-memory/user-prompt-submit.sh` (timeout 5) and fire correctly in this session (UserPromptSubmit context arrives), so Claude Code expands `$HOME` there. The legacy form works; replacing it is optional.
 - **Settings reload for the AC-62 restart line:** not verifiable from inside a session; keep the plan default ("restart open Claude Code sessions").
 

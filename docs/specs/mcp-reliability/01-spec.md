@@ -3,7 +3,7 @@
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-05-mcp-reliability
 - Status: v0.3 — implemented; two Opus reviews PASS WITH FIXES; fixes applied (§9)
-- Owner: Oleksandr Kolomoiets (user@example.com)
+- Owner: Oleksandr Kolomoiets
 - Input: owner request (paraphrased): "how many times we searched in the
   current session, how many records we tried to store, how many were
   actually stored and how many attempts failed (e.g. DB unavailable) — we

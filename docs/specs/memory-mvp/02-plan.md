@@ -15,7 +15,7 @@ no `go.mod`. **Topology B (spec v0.2):**
   `cleanup` / `seed` subcommands. All subcommands call the `internal/memory`
   service **in-process** — there is no laptop→server MCP hop and no MCP
   client package.
-- **Server (home Mac Mini, Ubuntu 26.04)** runs only Postgres 16 + pgvector
+- **Server (home x86 server, Ubuntu 26.04)** runs only Postgres 16 + pgvector
   in Docker (512M / 1.0 CPU), bound to its Tailscale IP, scram-sha-256,
   `pg_hba` limited to `100.64.0.0/10`, plus daily `pg_dump`.
 - AC-44 smoke test is done (spec §AC-44): server CPU ~17 ms/token, M1 Pro
