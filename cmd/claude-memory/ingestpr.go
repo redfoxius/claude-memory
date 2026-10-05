@@ -51,7 +51,13 @@ type ingestPorts struct {
 // after the whole batch succeeds. One repo's failure never blocks the
 // others.
 func runIngestPR(ctx context.Context, cfg *config.Config, svc extraction.StoreWriter, d ingestPorts, dryRun bool) error {
-	repos := discoverRepos(cfg.PRIngestRepos)
+	repos, skippedWT := discoverReposDetailed(cfg.PRIngestRepos, gitMainWorktree)
+	for _, w := range skippedWT {
+		slog.Info("ingest-pr: skipping linked worktree (its main checkout is also ingested)", "worktree", w.path, "main", w.main)
+		if dryRun {
+			fmt.Printf("%s: skipped (linked worktree of %s)\n", filepath.Base(w.path), filepath.Base(w.main))
+		}
+	}
 	if len(repos) == 0 {
 		slog.Warn("ingest-pr: no repos configured or discovered (MEMORY_PR_INGEST_REPOS)")
 		return nil
@@ -267,6 +273,86 @@ func cursorKey(p prsource.Provider, host, path string) string {
 // directories: a root that is itself a git repo is used as-is; a root that
 // isn't is scanned one level deep for subdirectories that are git repos.
 func discoverRepos(roots []string) []string {
+	repos, _ := discoverReposDetailed(roots, gitMainWorktree)
+	return repos
+}
+
+// skippedWorktree is a linked git worktree left out of ingestion because its
+// main checkout is also among the discovered repos.
+type skippedWorktree struct{ path, main string }
+
+// discoverReposDetailed is discoverRepos plus linked-worktree filtering: a
+// worktree is dropped only when resolveMain reports a main working tree that
+// is itself in the discovered list (otherwise the repo would never be
+// ingested). Order of the kept repos is the discovery order.
+func discoverReposDetailed(roots []string, resolveMain func(dir string) (string, error)) ([]string, []skippedWorktree) {
+	all := scanRepos(roots)
+	present := make(map[string]bool, len(all))
+	for _, r := range all {
+		present[normPath(r)] = true
+	}
+	var kept []string
+	var skipped []skippedWorktree
+	for _, r := range all {
+		if isLinkedWorktree(r) {
+			main, err := resolveMain(r)
+			if err != nil {
+				slog.Warn("ingest-pr: cannot resolve main checkout of linked worktree; keeping it", "worktree", r, "error", err)
+			} else if nm := normPath(main); nm != normPath(r) && present[nm] {
+				skipped = append(skipped, skippedWorktree{path: r, main: main})
+				continue
+			}
+		}
+		kept = append(kept, r)
+	}
+	return kept, skipped
+}
+
+// normPath makes a path comparable: absolute, cleaned, symlinks resolved.
+func normPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	}
+	return filepath.Clean(p)
+}
+
+// isLinkedWorktree reports whether dir/.git is a gitlink file pointing into
+// <common>/worktrees/<name>. Submodule gitlinks (.../modules/<name>) are not.
+func isLinkedWorktree(dir string) bool {
+	b, err := os.ReadFile(filepath.Join(dir, ".git"))
+	if err != nil {
+		return false // a directory (normal clone) or missing
+	}
+	line := strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
+	target, ok := strings.CutPrefix(line, "gitdir:")
+	if !ok {
+		return false
+	}
+	target = filepath.ToSlash(filepath.Clean(strings.TrimSpace(target)))
+	return filepath.Base(filepath.Dir(target)) == "worktrees"
+}
+
+// gitMainWorktree returns the main working tree of the linked worktree dir,
+// resolved by git itself.
+func gitMainWorktree(dir string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse --git-common-dir: %w", err)
+	}
+	common := strings.TrimSpace(string(out))
+	if filepath.Base(common) != ".git" {
+		return "", fmt.Errorf("common git dir %q is not a .git directory (bare repo?)", common)
+	}
+	return filepath.Dir(common), nil
+}
+
+// scanRepos resolves roots into git repo directories, in root order.
+func scanRepos(roots []string) []string {
 	var repos []string
 	for _, root := range roots {
 		root = strings.TrimSpace(root)

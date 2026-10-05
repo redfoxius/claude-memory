@@ -47,6 +47,8 @@ claude-memory ingest-pr                    # real run; cursors in ~/.local/state
 MEMORY_PR_INGEST_REPOS=$HOME/work/acme/billing-service claude-memory ingest-pr --dry-run
 ```
 
+A linked `git worktree` is not ingested separately when its main checkout is also among the discovered repos (same origin, same PRs); with no main checkout in the list it is ingested as usual.
+
 Azure DevOps (`az`), GitHub (`gh`) and GitLab (`glab`) repos are ingested;
 the provider comes from the repo's `origin`. Log in once per CLI
 (`gh auth login`, `glab auth login`); `claude-memory doctor` shows the
