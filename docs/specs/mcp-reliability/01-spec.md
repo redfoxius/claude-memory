@@ -2,7 +2,7 @@
 
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-05-mcp-reliability
-- Status: v0.2 — Opus plan review PASS WITH FIXES; fixes applied (§9)
+- Status: v0.3 — implemented; two Opus reviews PASS WITH FIXES; fixes applied (§9)
 - Owner: Oleksandr Kolomoiets (user@example.com)
 - Input: owner request (paraphrased): "how many times we searched in the
   current session, how many records we tried to store, how many were
@@ -72,20 +72,21 @@ although serve's events are still in the spool.
   Existing types shall reject a non-empty `error_class` and the new
   outcome/via values.
 - **AC-3** (v0.2) `memory` shall provide `ClassifyError(err, dbDown
-  func(error) bool) ErrorClass`, checked in this order: `dbDown(err)` →
-  `db_unavailable` (first, so a `*pgconn.ConnectError` wrapping a deadline
-  is never `timeout`); `ErrInvalidRequest` or a handler validation error →
-  `invalid_request`; new sentinel `ErrEmbeddingUnavailable` (wrapped by
-  `Store` (`writepath.go:53`) and `FindCandidatesForText`
-  (`service.go:184`) where the embedder fails, `%w: %w`, message text
-  unchanged) → `embedding_unavailable`; `context.DeadlineExceeded` →
-  `timeout`; else `internal`. Searches never produce
+  func(error) bool) ErrorClass`, checked in this order: new sentinel
+  `ErrEmbeddingUnavailable` (wrapped by `Store` (`writepath.go:53`) and
+  `FindCandidatesForText` (`service.go:184`) where the embedder fails,
+  `%w: %w`, message text unchanged) → `embedding_unavailable`; `dbDown(err)`
+  → `db_unavailable`; `ErrInvalidRequest` or a handler validation error →
+  `invalid_request`; `context.DeadlineExceeded` → `timeout`; else `internal`.
+  (v0.3) A cancelled context (`context.Canceled`, the client gave up) is not
+  a service failure: the MCP handlers and the hook emit **no event** for it
+  (`memory.IsCanceled`); no new class, no schema change. Searches never produce
   `embedding_unavailable`: `Search` degrades instead of failing (outcome
   `degraded`).
 - **AC-4** `postgres` shall provide `IsUnavailable(err) bool`: true for
-  `*pgconn.ConnectError` (incl. one wrapping a deadline), dial errors,
-  `net.Error`, SQLSTATE class `08`, `57P01..57P03`, and
-  `puddle.ErrClosedPool` (puddle/v2 becomes a direct require — already in
+  `*pgconn.ConnectError`, `*net.OpError`, `*net.DNSError`, SQLSTATE class `08`, `57P01..57P03`, and
+  `puddle.ErrClosedPool` (v0.3: not the `net.Error` interface, which
+  `context.DeadlineExceeded` also satisfies; puddle/v2 becomes a direct require — already in
   the module graph). Connection drops mid-query not matching these land in
   `internal` (accepted drift). Wired into `ClassifyError` only in `main.go`.
 
@@ -138,12 +139,13 @@ although serve's events are still in the spool.
   and session.
 - **AC-14** Each hook run that decoded stdin shall emit exactly one
   `search_called` (`via=hook`, hook session id when valid): `error` +
-  class when service build fails (**always `db_unavailable`** — the only
-  network step of `buildService` is `postgres.Open`'s ping, even when the
-  800 ms hook deadline cut it) or search fails (`ClassifyError`), `degraded` when the result is degraded, else `ok`
+  class when service build fails (**always `db_unavailable`** — the hook records it for any build failure:
+  an unreachable DB, a DSN parse error or a bad password all mean "DB
+  unusable"; the namespace is resolved quietly, no stderr output) or search fails (`ClassifyError`), `degraded` when the result is degraded, else `ok`
   (regardless of card count). It shall go into the same single `Append`
-  as the card events, after stdout is written; with no cards it is the only
-  event. A stdin decode failure emits nothing (no namespace).
+  as the card events, which are spooled only after stdout was written
+  successfully; on an encode failure only `search_called` is spooled; with
+  no cards it is the only event. A stdin decode failure emits nothing (no namespace).
 - **AC-15** Hook output, exit code and timeouts shall be unchanged; a spool
   failure stays at Debug.
 
@@ -181,7 +183,7 @@ although serve's events are still in the spool.
   attempts, failures; `n/a` when none. (v0.2) Its counts are the **merge**
   of DB rows for that `session_id` and its spool-resident rows whose ids
   are not in the DB — never one source replacing the other. JSON:
-  `latest_serve_session` (null when none).
+  `latest_serve_session` at the top level of the report (null when none).
 - **AC-22** When the live spool file is over its cap, the report shall add
   `spool is full: new events are being dropped and not counted` (JSON
   `spool_full: true`).
@@ -202,8 +204,9 @@ although serve's events are still in the spool.
 ## 7. Verification
 - Unit (`go test ./...`): `Validate` table (new types, per-type outcome
   sets, class iff error, old types reject new values); `ClassifyError`
-  table (incl. a `ConnectError` wrapping `context.DeadlineExceeded` →
-  `db_unavailable`); `IsUnavailable` with synthetic `pgconn` errors; handler tests with
+  table (a dbDown match wins over a wrapped deadline; with pgx v5.7.1 a
+  blackholed connect under a deadline is a bare `ping database: context
+  deadline exceeded`, i.e. `timeout` in serve); `IsUnavailable` with synthetic `pgconn` errors; handler tests with
   a fake sink and fake service (each outcome, errors by class, append
   error does not change result); hook tests (one event per run, merged
   with cards, build-failure path, decode failure emits nothing);
@@ -245,6 +248,13 @@ although serve's events are still in the spool.
   outcome from the handler branch, unknown decision → `error`/`internal`,
   no caller namespace (AC-10); searches never `embedding_unavailable`;
   Risks/D6 notes added.
+- v0.3 (2026-10-05, two Opus reviews PASS WITH FIXES): `context.Canceled`
+  emits no event (AC-3); `IsUnavailable` matches `*net.OpError`/`*net.DNSError`
+  not `net.Error` (AC-4); hook build-failure namespace resolved quietly,
+  card events only after a successful stdout write (AC-14); `latest_serve_session`
+  top-level in JSON (AC-21); stats keeps SQL namespace order and appends
+  spool-only namespaces; rationale corrected: a connect under a deadline is
+  `timeout` in serve, `db_unavailable` for any hook build failure.
 - Owner decisions (v0.2): `extract`/`ingest-pr` store attempts **not
   counted** (D10); `degraded` search outcome **kept**; spool-only `stats`
   mode **out of scope**.

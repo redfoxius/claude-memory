@@ -17,8 +17,12 @@ func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in Se
 
 	// One reliability event per call, after the result is built. Anything that
 	// returns before the outcome is set counts as an internal error.
-	outcome, class := memory.OutcomeError, memory.ErrClassInternal
-	defer func() { s.emit(ctx, memory.EventSearchCalled, "", outcome, class) }()
+	outcome, class, canceled := memory.OutcomeError, memory.ErrClassInternal, false
+	defer func() {
+		if !canceled { // a cancelled call is not a service failure
+			s.emit(ctx, memory.EventSearchCalled, "", outcome, class)
+		}
+	}()
 
 	var kind *record.Kind
 	if in.Kind != "" {
@@ -40,7 +44,7 @@ func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in Se
 
 	result, err := s.svc.Search(ctx, req)
 	if err != nil {
-		class = s.classifyErr(err)
+		class, canceled = s.classifyErr(err), memory.IsCanceled(err)
 		s.logCall("memory_search", start, err, nil)
 		return nil, SearchOutput{}, toToolError("memory_search", err)
 	}
@@ -85,8 +89,12 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 	// One reliability event per call, after the result is built, from the
 	// branch taken below (never from the caller's namespace). Anything that
 	// returns before the outcome is set counts as an internal error.
-	outcome, class, ns := memory.OutcomeError, memory.ErrClassInternal, ""
-	defer func() { s.emit(ctx, memory.EventStoreAttempted, ns, outcome, class) }()
+	outcome, class, ns, canceled := memory.OutcomeError, memory.ErrClassInternal, "", false
+	defer func() {
+		if !canceled { // a cancelled call is not a service failure
+			s.emit(ctx, memory.EventStoreAttempted, ns, outcome, class)
+		}
+	}()
 
 	kind := record.Kind(in.Kind)
 	if !kind.IsValid() {
@@ -148,7 +156,7 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 
 	resp, err := s.svc.Store(ctx, req)
 	if err != nil {
-		class = s.classifyErr(err)
+		class, canceled = s.classifyErr(err), memory.IsCanceled(err)
 		s.logCall("memory_store", start, err, map[string]interface{}{"repo": repo})
 		return nil, StoreOutput{}, toToolError("memory_store", err)
 	}

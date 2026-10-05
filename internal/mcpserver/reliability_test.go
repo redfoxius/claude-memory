@@ -167,3 +167,22 @@ func TestOtherToolsAndNilSinkEmitNothing(t *testing.T) {
 		t.Errorf("get/list emitted %d events", len(sink.evs))
 	}
 }
+
+// A cancelled call (the client gave up) is not a service failure: no event.
+func TestCanceledCallsEmitNoEvent(t *testing.T) {
+	sink := &recSink{}
+	svc := &fakeService{
+		searchFn: func(context.Context, *memory.SearchRequest) (*memory.SearchResult, error) {
+			return nil, fmt.Errorf("search: %w", context.Canceled)
+		},
+		storeFn: func(context.Context, *memory.StoreRequest) (*memory.StoreResponse, error) {
+			return nil, fmt.Errorf("store: %w", context.Canceled)
+		},
+	}
+	cs := newTestClient(t, svc, WithEvents(sink, "sess-1", testClassify))
+	callToolExpectError(t, cs, "memory_search", map[string]any{"query": "q"})
+	callToolExpectError(t, cs, "memory_store", storeArgs())
+	if len(sink.evs) != 0 {
+		t.Errorf("events = %+v, want none", sink.evs)
+	}
+}

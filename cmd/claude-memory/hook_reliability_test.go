@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -149,5 +152,52 @@ func TestHook_BuildFailureSpoolLine(t *testing.T) {
 	evs := spoolEvents(t, dir)
 	if len(evs) != 1 || evs[0].ErrorClass != memory.ErrClassDBUnavailable || strings.Contains(fmt.Sprint(evs[0]), "down") {
 		t.Errorf("events = %+v", evs)
+	}
+}
+
+// A cancelled search is not a service failure: no reliability event.
+func TestHook_CanceledSearchEmitsNothing(t *testing.T) {
+	sink := &countingSink{}
+	out, err := runHookCmdDeps(t, context.Background(), hookTestCfg(), failingSearchSvc(context.Canceled),
+		`{"prompt":"p","cwd":"/tmp","session_id":"sess-1"}`, hookDeps{Events: sink})
+	if err != nil || out != "" || len(sink.calls) != 0 {
+		t.Errorf("out %q err %v calls %d", out, err, len(sink.calls))
+	}
+}
+
+// The build-failure path resolves the namespace quietly: nothing on the
+// logger (stderr) even with a broken namespaces.yaml and an invalid
+// MEMORY_NAMESPACE; stdout and the exit result are unchanged.
+func TestHook_BuildFailureResolvesNamespaceQuietly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".config", "claude-memory"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(namespacesFile(), []byte("rules: [unclosed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MEMORY_NAMESPACE", "Bad Name!")
+
+	old := resolveNamespaceQuiet
+	resolveNamespaceQuiet = quietResolveNamespace
+	t.Cleanup(func() { resolveNamespaceQuiet = old })
+
+	var logs bytes.Buffer
+	oldLog := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(oldLog) })
+
+	sink := &countingSink{}
+	build := func(context.Context) (*memory.Service, func(), error) { return nil, nil, errors.New("ping database") }
+	out, err := runHookBuild(t, context.Background(), hookTestCfg(), `{"prompt":"p","cwd":"/tmp","session_id":"sess-9"}`, build, hookDeps{Events: sink})
+	if err != nil || out != "" {
+		t.Fatalf("out %q err %v", out, err)
+	}
+	if strings.Contains(logs.String(), "WARN") {
+		t.Errorf("warning emitted: %s", logs.String())
+	}
+	if e := lastEvent(t, sink); e.ErrorClass != memory.ErrClassDBUnavailable {
+		t.Errorf("event = %+v", e)
 	}
 }

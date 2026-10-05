@@ -222,3 +222,21 @@ func TestRunStatsSpoolFull(t *testing.T) {
 		t.Error("spool_full false in JSON")
 	}
 }
+
+// The SQL namespace order is kept; spool-only namespaces follow it, sorted.
+func TestRunStats_SpoolOnlyNamespacesAppendedAfterSQLOrder(t *testing.T) {
+	spool := t.TempDir()
+	writeSpool(t, spool,
+		relEv("spool-b", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "s1", relNow.Add(-time.Minute)),
+		relEv("spool-a", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "s1", relNow.Add(-2*time.Minute)),
+	)
+	fake := &fakeStats{nss: []string{"zeta", "alpha"}, byNS: map[string]memory.EventCounts{}}
+	rep := runStatsJSON(t, fake, spool)
+	var got []string
+	for _, b := range rep.Namespaces {
+		got = append(got, b.Namespace)
+	}
+	if want := "zeta,alpha,spool-a,spool-b"; strings.Join(got, ",") != want {
+		t.Errorf("namespaces = %v, want %s", got, want)
+	}
+}

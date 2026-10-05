@@ -158,9 +158,9 @@ func newStatsBlock(ns string, c memory.EventCounts) statsBlock {
 		StaleFlagRate:   ratio{c.CardsStale, c.CardsChecked},
 		CheckCoverage:   ratio{c.CardsChecked, c.Cards},
 
-		FailureRateMCPSearch:  searchFailureRatio(c.Reliability.Search["mcp"]),
-		FailureRateHookSearch: searchFailureRatio(c.Reliability.Search["hook"]),
-		FailureRateStore:      searchFailureRatio(c.Reliability.Store),
+		FailureRateMCPSearch:  failureRatio(c.Reliability.Search["mcp"]),
+		FailureRateHookSearch: failureRatio(c.Reliability.Search["hook"]),
+		FailureRateStore:      failureRatio(c.Reliability.Store),
 	}
 }
 
@@ -298,8 +298,8 @@ func latestServeSession(ctx context.Context, r statsReader, since time.Time, fre
 	return &c, nil
 }
 
-// searchFailureRatio is error / all attempts over an outcome -> count map.
-func searchFailureRatio(outcomes map[string]int) ratio {
+// failureRatio is error / all attempts over an outcome -> count map.
+func failureRatio(outcomes map[string]int) ratio {
 	total := 0
 	for _, n := range outcomes {
 		total += n
@@ -365,11 +365,21 @@ func runStats(ctx context.Context, r statsReader, opts statsOptions, now time.Ti
 		Since: since.UTC(), Total: newStatsBlock("", total), Namespaces: []statsBlock{},
 		ReliabilityFromSpool: len(fresh), SpoolFull: spoolFull, LatestServeSession: session,
 	}
-	names := make([]string, 0, len(byNS))
-	for ns := range byNS {
-		names = append(names, ns)
+	// SQL order first (stable JSON array order), then spool-only namespaces
+	// in sorted order.
+	names := append([]string(nil), namespaces...)
+	inSQL := make(map[string]bool, len(namespaces))
+	for _, ns := range namespaces {
+		inSQL[ns] = true
 	}
-	sort.Strings(names)
+	var spoolOnly []string
+	for ns := range byNS {
+		if !inSQL[ns] {
+			spoolOnly = append(spoolOnly, ns)
+		}
+	}
+	sort.Strings(spoolOnly)
+	names = append(names, spoolOnly...)
 	for _, ns := range names {
 		rep.Namespaces = append(rep.Namespaces, newStatsBlock(ns, byNS[ns]))
 	}

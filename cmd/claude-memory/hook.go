@@ -131,7 +131,7 @@ func runHook(ctx context.Context, cfg *config.Config, stdin io.Reader, build fun
 	svc, cleanup, err := build(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "failed to build service", "error", err)
-		spoolHookEvents(ctx, deps, reliabilityEvent(resolveNamespace(input.CWD), input.SessionID, time.Now(),
+		spoolHookEvents(ctx, deps, reliabilityEvent(resolveNamespaceQuiet(input.CWD), input.SessionID, time.Now(),
 			memory.OutcomeError, memory.ErrClassDBUnavailable))
 		return nil
 	}
@@ -200,6 +200,9 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, input
 	if err != nil {
 		// Silent failure: search error is not reported (AC-31).
 		slog.DebugContext(ctx, "search failed", "error", err)
+		if memory.IsCanceled(err) {
+			return nil // not a service failure: no reliability event
+		}
 		class := memory.ClassifyError(err, nil)
 		if deps.Classify != nil {
 			class = deps.Classify(err)

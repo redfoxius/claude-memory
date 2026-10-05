@@ -100,7 +100,7 @@ func TestClassifyError(t *testing.T) {
 		want ErrorClass
 	}{
 		{"db down", fmt.Errorf("search: %w", down), ErrClassDBUnavailable},
-		// A connect error wrapping a deadline must stay db_unavailable.
+		// A dbDown match wins over a wrapped deadline.
 		{"db down wrapping deadline", fmt.Errorf("%w: %w", down, context.DeadlineExceeded), ErrClassDBUnavailable},
 		{"invalid request", fmt.Errorf("store validation: %w", ErrInvalidRequest), ErrClassInvalidRequest},
 		{"embedding", fmt.Errorf("%w: %w", ErrEmbeddingUnavailable, errors.New("ollama refused")), ErrClassEmbeddingUnavailable},
@@ -109,7 +109,7 @@ func TestClassifyError(t *testing.T) {
 		{"embedding deadline", fmt.Errorf("%w: %w", ErrEmbeddingUnavailable, context.DeadlineExceeded), ErrClassEmbeddingUnavailable},
 		{"deadline", fmt.Errorf("x: %w", context.DeadlineExceeded), ErrClassTimeout},
 		{"other", errors.New("boom"), ErrClassInternal},
-		{"canceled", context.Canceled, ErrClassInternal},
+		{"canceled (callers skip the event)", context.Canceled, ErrClassInternal},
 	}
 	for _, tc := range cases {
 		if got := ClassifyError(tc.err, isDown); got != tc.want {
@@ -118,6 +118,12 @@ func TestClassifyError(t *testing.T) {
 	}
 	if got := ClassifyError(down, nil); got != ErrClassInternal {
 		t.Errorf("nil dbDown: %q", got)
+	}
+}
+
+func TestIsCanceled(t *testing.T) {
+	if !IsCanceled(fmt.Errorf("x: %w", context.Canceled)) || IsCanceled(context.DeadlineExceeded) || IsCanceled(nil) {
+		t.Error("IsCanceled wrong")
 	}
 }
 

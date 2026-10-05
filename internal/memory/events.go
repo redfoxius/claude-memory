@@ -114,13 +114,16 @@ func (c ErrorClass) IsValid() bool {
 	return false
 }
 
-// ClassifyError maps a failed call to its ErrorClass. dbDown reports a
+// ClassifyError maps a failed call to its ErrorClass. Order: embedding
+// sentinel, dbDown, invalid request, deadline, else internal. dbDown reports a
 // database-unavailable error (the postgres adapter's IsUnavailable, passed in
-// by the composition root) and is checked before the deadline, so a connect
-// error that wraps a deadline is db_unavailable, not timeout. nil dbDown never
-// matches. The embedding sentinel comes first of all: an embedder's own
-// network error (Ollama down) looks like a dial error and must not be taken
-// for a database outage.
+// by the composition root); nil dbDown never matches. The embedding sentinel
+// comes first: an embedder's own network error (Ollama down) looks like a dial
+// error and must not be taken for a database outage. A bare deadline is
+// timeout: with pgx v5.7.1 a blackholed connect under a deadline surfaces as
+// `ping database: context deadline exceeded`, so in serve a timeout can hide an
+// unreachable database. A cancelled context is not a service failure; callers
+// skip the event (see IsCanceled) rather than classify it.
 func ClassifyError(err error, dbDown func(error) bool) ErrorClass {
 	switch {
 	case errors.Is(err, ErrEmbeddingUnavailable):
@@ -134,6 +137,10 @@ func ClassifyError(err error, dbDown func(error) bool) ErrorClass {
 	}
 	return ErrClassInternal
 }
+
+// IsCanceled reports whether err is a cancelled context (the client gave up).
+// Such a call emits no reliability event: it is not a service failure.
+func IsCanceled(err error) bool { return errors.Is(err, context.Canceled) }
 
 // Event is one usage or lifecycle fact. Its fields are the columns of the
 // events table (migration 0003) and nothing else: no title, content, repo,
