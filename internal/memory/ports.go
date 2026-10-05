@@ -131,23 +131,23 @@ type SearchResult struct {
 // SearchRecord is a single search result, with enough data to show in a card
 // (title, repo, id) and to measure relevance (score, status).
 type SearchRecord struct {
-	ID         string
-	Kind       record.Kind
-	Title      string
-	Repo       string
-	Namespace  string // "global" rows are shared across namespaces
-	Files      []string
-	CommitSHA  string
+	ID        string
+	Kind      record.Kind
+	Title     string
+	Repo      string
+	Namespace string // "global" rows are shared across namespaces
+	Files     []string
+	CommitSHA string
 	// Stale is set when the record's files changed since it was recorded;
 	// nil means fresh or unchecked.
 	Stale *StaleHint
 	// StaleChecked is true when the staleness check ran to a verdict (fresh
 	// or stale); false means unchecked. Only events read it.
 	StaleChecked bool
-	Tags       []string
-	Status     record.Status
-	Confidence float64
-	Score      float64 // fused (RRF) rank score — ordering only
+	Tags         []string
+	Status       record.Status
+	Confidence   float64
+	Score        float64 // fused (RRF) rank score — ordering only
 	// Similarity is the cosine similarity of the query embedding to this
 	// record (0 when the search ran degraded / full-text-only). The hook
 	// threshold (AC-32, config.Config.HookSimThreshold) compares against

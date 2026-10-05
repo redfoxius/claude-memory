@@ -35,7 +35,7 @@ type Rule struct {
 //
 //	default: global
 //	namespaces:
-//	  - namespace: acme
+//	  - namespace: work
 //	    paths: ["~/work/acme/**"]
 //	  - namespace: pet-game
 //	    paths: ["~/src/pet-game", "~/src/pet-game/**"]

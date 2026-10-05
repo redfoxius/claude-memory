@@ -58,11 +58,11 @@ func nsBlock(rep statsReport, ns string) (statsBlock, bool) {
 func TestRunStatsReliabilityFromSpool(t *testing.T) {
 	spool := t.TempDir()
 	h := func(m int) time.Time { return relNow.Add(-time.Duration(m) * time.Minute) }
-	inDB := relEv("acme", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "s1", h(5))
-	fresh1 := relEv("acme", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeDegraded, "", "s1", h(4))
-	fresh2 := relEv("acme", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeError, memory.ErrClassDBUnavailable, "s1", h(3))
+	inDB := relEv("work", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "s1", h(5))
+	fresh1 := relEv("work", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeDegraded, "", "s1", h(4))
+	fresh2 := relEv("work", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeError, memory.ErrClassDBUnavailable, "s1", h(3))
 	hook := relEv("only-spool", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassDBUnavailable, "", h(2))
-	old := relEv("acme", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "s0", relNow.Add(-48*time.Hour))
+	old := relEv("work", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "s0", relNow.Add(-48*time.Hour))
 	writeSpool(t, spool, inDB, fresh1, fresh2, hook, old, fresh1) // fresh1 twice
 
 	dbCounts := func() memory.EventCounts {
@@ -71,8 +71,8 @@ func TestRunStatsReliabilityFromSpool(t *testing.T) {
 		return c
 	}
 	fake := &fakeStats{
-		nss:  []string{"acme"},
-		byNS: map[string]memory.EventCounts{"": dbCounts(), "acme": dbCounts()},
+		nss:  []string{"work"},
+		byNS: map[string]memory.EventCounts{"": dbCounts(), "work": dbCounts()},
 		inDB: map[string]bool{inDB.ID: true},
 	}
 	rep := runStatsJSON(t, fake, spool)
@@ -108,8 +108,8 @@ func TestRunStatsDownHoursMergeAsSet(t *testing.T) {
 	sameHour := relNow.Add(-20 * time.Minute)
 	earlier := relNow.Add(-150 * time.Minute) // two hours before the other
 	writeSpool(t, spool,
-		relEv("acme", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassDBUnavailable, "", sameHour),
-		relEv("acme", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassDBUnavailable, "", earlier))
+		relEv("work", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassDBUnavailable, "", sameHour),
+		relEv("work", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassDBUnavailable, "", earlier))
 	c := emptyCounts()
 	first, last := sameHour.Add(-5*time.Minute), sameHour.Add(5*time.Minute)
 	c.Reliability.DownHours = []time.Time{sameHour.Truncate(time.Hour)}
@@ -131,9 +131,9 @@ func TestRunStatsLatestServeSession(t *testing.T) {
 		sessions: map[string]memory.SessionCounts{"aaaaaaaa-1111-4111-8111-111111111111": {First: &first, Last: &last, Searches: 2, Stores: 1, Failures: 1}},
 	}
 	writeSpool(t, spool,
-		relEv("acme", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "aaaaaaaa-1111-4111-8111-111111111111", h(10)),
-		relEv("acme", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeError, memory.ErrClassInternal, "aaaaaaaa-1111-4111-8111-111111111111", h(9)),
-		relEv("acme", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeOK, "", "hook-sess", h(1)))
+		relEv("work", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "aaaaaaaa-1111-4111-8111-111111111111", h(10)),
+		relEv("work", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeError, memory.ErrClassInternal, "aaaaaaaa-1111-4111-8111-111111111111", h(9)),
+		relEv("work", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeOK, "", "hook-sess", h(1)))
 	rep := runStatsJSON(t, fake, spool)
 	s := rep.LatestServeSession
 	if s == nil || s.Searches != 3 || s.Stores != 2 || s.Failures != 2 || !s.First.Equal(first) || !s.Last.Equal(h(9)) {
@@ -141,7 +141,7 @@ func TestRunStatsLatestServeSession(t *testing.T) {
 	}
 
 	// A newer session present only in the spool replaces it.
-	writeSpool(t, spool, relEv("acme", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "bbbbbbbb-2222-4222-8222-222222222222", h(2)))
+	writeSpool(t, spool, relEv("work", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "bbbbbbbb-2222-4222-8222-222222222222", h(2)))
 	s = runStatsJSON(t, fake, spool).LatestServeSession
 	if s == nil || s.ID != "bbbbbbbb-2222-4222-8222-222222222222" || s.Searches != 1 || s.Stores != 0 {
 		t.Errorf("session = %+v", s)
@@ -157,10 +157,10 @@ func TestRunStatsReliabilityText(t *testing.T) {
 	spool := t.TempDir()
 	h := func(m int) time.Time { return relNow.Add(-time.Duration(m) * time.Minute) }
 	writeSpool(t, spool,
-		relEv("acme", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "s1111111-1111-4111-8111-111111111111", h(5)),
-		relEv("acme", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeError, memory.ErrClassTimeout, "s1111111-1111-4111-8111-111111111111", h(4)),
-		relEv("acme", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeAdded, "", "s1111111-1111-4111-8111-111111111111", h(3)),
-		relEv("acme", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassDBUnavailable, "", h(2)))
+		relEv("work", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "s1111111-1111-4111-8111-111111111111", h(5)),
+		relEv("work", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeError, memory.ErrClassTimeout, "s1111111-1111-4111-8111-111111111111", h(4)),
+		relEv("work", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeAdded, "", "s1111111-1111-4111-8111-111111111111", h(3)),
+		relEv("work", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassDBUnavailable, "", h(2)))
 	const layout = "2006-01-02 15:04"
 	var out bytes.Buffer
 	if err := runStats(context.Background(), &fakeStats{}, statsOptions{Since: 24 * time.Hour}, relNow, spool, &out); err != nil {

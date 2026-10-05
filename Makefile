@@ -60,7 +60,7 @@ clean:
 
 # Build and install the claude-memory binary to ~/.local/bin (user-level,
 # no sudo). This is step 1 of integration/INSTALL.md; it never touches
-# ~/.claude/, ~/Library/LaunchAgents, or acme/CLAUDE.md itself.
+# ~/.claude/, ~/Library/LaunchAgents, or your shared CLAUDE.md itself.
 # The old file is removed first: on macOS, cp over a previously executed
 # binary keeps the stale code-signature cache and the new one is SIGKILLed (137).
 install: build

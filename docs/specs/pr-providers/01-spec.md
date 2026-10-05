@@ -3,7 +3,7 @@
 ## 0. Metadata
 - Spec ID: SPEC-2026-10-05-pr-providers
 - Status: v0.2 — Opus plan review PASS WITH FIXES; fixes applied (§0.1)
-- Owner: Oleksandr Kolomoiets (user@example.com)
+- Owner: Oleksandr Kolomoiets
 - Input: `docs/specs/README.md` backlog item 4; builds on `memory-mvp`
   AC-26/27/28/58 (cursor, per-repo isolation, lookback, `PRSource` port),
   `staleness-metrics` AC-11 (merge-commit baseline) and `namespaces`.

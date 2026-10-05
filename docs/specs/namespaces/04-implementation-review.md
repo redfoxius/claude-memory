@@ -6,7 +6,7 @@
   `03-architecture-review.md` (iteration 0, blockers 1-5). Line numbers are
   at `cd98340`.
 - **Owner decisions honoured:** fallback is the shared `global` (no project
-  special-cased in code; 0002 backfills legacy rows to `acme` as historic
+  special-cased in code; 0002 backfills legacy rows to `work` as historic
   data); single-user local DB, so cross-namespace visibility is a relevance
   concern only (LOW, no fail-closed); `namespaces.yaml` is an install step
   via `namespaces init|add|which`; the hook skips migrations.
@@ -51,7 +51,7 @@
    ci.yml:19-27` now defines the `integration` job (good), but there is no
    evidence of a green run and the two tests the spec requires do not exist:
    no test applies `0001` alone, inserts rows, runs all migrations twice and
-   checks the `acme` backfill, the failing bare INSERT and the two
+   checks the `work` backfill, the failing bare INSERT and the two
    `pg_indexes` rows (AC-2..AC-4); no test does concurrent near-duplicate
    writes in one vs two namespaces (AC-18) — `TestConcurrentWrites`
    (`store_integration_test.go:329-410`) uses `testNS` for both goroutines.
@@ -96,7 +96,7 @@
 | MEDIUM | `cmd/claude-memory/namespace.go:23-36` + `:40-47` + `:65-69`; `cmd/claude-memory/main.go:115-118` + `hook.go:83` | AC-8 "log one warning", AC-28 "exactly one Warn", MVP AC-31 | `warnIfFallback` → `explainNamespace` → `loadNamespaces` re-reads the YAML and, when the file is broken, logs a **second** "namespaces.yaml unusable" Warn (`:43`) after `resolveNamespace` already logged one (`:27`), then a third line for the fallback (`:67`): three Warns per repo in `ingest-pr`, not one. The hook resolves twice per prompt (`buildService` from `os.Getwd()`, then from payload `cwd`) and with a broken file writes two Warn lines to stderr on every prompt (slog default handler → stderr), which the hook wrapper promises not to do (`integration/hooks/user-prompt-submit.sh:9-11`). | Load the config once per process: `resolveNamespace` returns `(ns, why)` (or a small struct) and `warnIfFallback(dir, why)` takes the provenance instead of re-resolving; `buildService(ctx, cfg, migrate, ns string)` so the hook passes `""` and skips the first resolve (iteration-0 L5). For the hook specifically, log resolution problems at Debug. |
 | LOW | `cmd/claude-memory/main.go:240-241` | AC-14 | `eval-retrieval` is scoped to `eval` **unconditionally**; spec says "unless `MEMORY_NAMESPACE` is set". The env override that `buildService` already resolved into `cfg.Namespace` is thrown away. | `if os.Getenv(config.NamespaceEnv) == "" { svc = svc.WithNamespace("eval") }`. |
 | LOW | `cmd/claude-memory/serve.go:22` | AC-28 | `serve` logs `namespace` but not its provenance ("shall log its resolved namespace and provenance at startup"). | Have `buildService` keep the `why` from `explainNamespace(wd)` and log `Str("provenance", why)`. |
-| LOW | `integration/INSTALL.md:222-241`, `:74-75` | AC-24 | "Using namespaces" has no re-home SQL and no pointer to `DEPLOY.md`'s; the `which` examples show `-> acme` / `-> global (the default)` while the command prints `acme\t(rule ~/work/acme/**)` and `global\t(default)`. Everything else in 2a and the table matches the CLI. | Add one row "move stray `global` records to a project → see re-home SQL in `DEPLOY.md`" (or inline the two statements); show the real two-column output. |
+| LOW | `integration/INSTALL.md:222-241`, `:74-75` | AC-24 | "Using namespaces" has no re-home SQL and no pointer to `DEPLOY.md`'s; the `which` examples show `-> work` / `-> global (the default)` while the command prints `work\t(rule ~/work/acme/**)` and `global\t(default)`. Everything else in 2a and the table matches the CLI. | Add one row "move stray `global` records to a project → see re-home SQL in `DEPLOY.md`" (or inline the two statements); show the real two-column output. |
 | LOW | `internal/memory/crud.go:153-155` | AC-19 completeness (iteration-0 L4, still open) | `DeprecateRequest.SupersededBy` is written without `getAccessible`; a project can link its record to another namespace's id. Relevance-only harm, but the spec's AC-19 list covers `memory_deprecate`. | `if req.SupersededBy != nil { if _, err := s.getAccessible(ctx, *req.SupersededBy); err != nil { return nil, err } }`. |
 | LOW | `internal/memory/service.go:36-40,53-57`; `internal/record/record.go` (no namespace check in `Validate`) | AC-1 (iteration-0 L3, still open) | `WithNamespace("")`/`New` accept an empty or invalid name; `NOT NULL` does not reject `''`. The resolver never returns `""`, so only a programming error reaches it — which is exactly what blocker 1 is. | Validate in `New`/`WithNamespace` with the name rule (move `ValidName` to `record` so `record` owns it), or have the store's `Create` refuse `Namespace == ""`. |
 | LOW | `internal/namespace/namespace.go:20` vs `internal/record/record.go:13` vs `internal/memory/service.go:26`; `record.go:11-12` comment; `docs/specs/README.md:17-19` | single source of truth; stale text | `memory.DefaultNamespace` now references `record.GlobalNamespace` (good), but `namespace.Fallback` is still an independent literal `"global"`. The `record.go:12` comment ("Nothing is written to it automatically") and the README backlog entry still state the v0.1 rule the owner reversed. | `const Fallback = record.GlobalNamespace` (the package stays free of `memory`/`postgres`); fix the two comments. |
@@ -113,7 +113,7 @@
 |---|---|---|---|
 | 1 | HIGH — run integration suite incl. migration (AC-2..4) and lock (AC-18) tests; add CI job | **OPEN** | CI job added (`ci.yml:19-27`); migration and lock tests absent; no green run observed. Carried as blocker 2. |
 | 2 | HIGH — re-baseline spec to v0.2 and plan | **RESOLVED** | `01-spec.md` v0.2 (changes §0, AC-8 rewritten, AC-9 withdrawn, AC-22 reworded, AC-25..AC-30 added, §13 all resolved); `02-plan.md` owner decisions, WI-5 remaining, Risks, Rollout rewritten. Two stale sentences remain (`record.go:12`, `docs/specs/README.md:17-19`), LOW. |
-| 3 | MEDIUM (M1) — rollout order; DEPLOY.md upgrade/rollback | **RESOLVED** | `DEPLOY.md:196-208`: map `acme` **before** starting Claude Code on the new binary, run `claude-memory cleanup` once (hook skips migrations), rollback `SET DEFAULT 'global'`, re-home SQL. Plan Rollout steps 4-5 match. |
+| 3 | MEDIUM (M1) — rollout order; DEPLOY.md upgrade/rollback | **RESOLVED** | `DEPLOY.md:196-208`: map `work` **before** starting Claude Code on the new binary, run `claude-memory cleanup` once (hook skips migrations), rollback `SET DEFAULT 'global'`, re-home SQL. Plan Rollout steps 4-5 match. |
 | 4 | MEDIUM (M3) — replace ingest-pr type probe with injected scoping; two-repo test | **RESOLVED in code, test incomplete** | `scopeFunc` type `ingestpr.go:22`, applied `:87-90`; built in composition root `main.go:206-213`; `ingestOneRepo` has no type assertion. Test covers one repo and only the path argument (blocker 3). |
 | 5 | MEDIUM (M2) — `namespace` in tool outputs with server tests | **RESOLVED in code, tests missing** | `types.go:25` (search item), `:76` (store output), `:143` (record output); `handlers.go:48,126`; `convert.go:19`; `StoreResponse.Namespace` set on both return paths `writepath.go:304,312`. No server test asserts it (blocker 3). |
 
@@ -276,12 +276,12 @@ Checked clean unless noted.
 - **Statement splitting** (`store.go:28-30,86-91`): `migrationSQL = 0001 +
   ";\n" + 0002`, split on `;`, blanks skipped. `0001` ends with `;`, so the
   join yields one empty statement that `TrimSpace`/`continue` drops. `0002`
-  has four statements; its only string literal is `'acme'` and neither
+  has four statements; its only string literal is `'work'` and neither
   the literal nor the leading `--` comments contain `;`. The last statement
   has no trailing `;` — fine under split. The comments are prepended to the
   first `ALTER TABLE`, which Postgres accepts.
 - **First run on an MVP database:** `ADD COLUMN IF NOT EXISTS namespace TEXT
-  NOT NULL DEFAULT 'acme'` backfills every existing row (AC-2 historic
+  NOT NULL DEFAULT 'work'` backfills every existing row (AC-2 historic
   data); `ALTER COLUMN namespace DROP DEFAULT` removes the default so a
   bare INSERT fails (AC-2 second clause); two `CREATE INDEX IF NOT EXISTS`
   (AC-3). Fresh database: same statements on an empty table.
@@ -292,7 +292,7 @@ Checked clean unless noted.
   executes it** (blocker 2).
 - **Partial failure:** if the process dies between `ADD COLUMN` and `DROP
   DEFAULT`, the next start completes the drop; in the gap only an *old*
-  binary's INSERT could pick up `'acme'` (new binaries always bind
+  binary's INSERT could pick up `'work'` (new binaries always bind
   `$24`). Acceptable.
 - **Concurrency:** two `serve` processes starting together serialize on the
   `ALTER TABLE` lock; a racing `CREATE INDEX IF NOT EXISTS` can still raise
@@ -305,12 +305,12 @@ Checked clean unless noted.
 
 ## Item 7 — docs vs CLI behaviour
 
-- `integration/INSTALL.md:43-79` (2a): `namespaces init acme='~/work/
+- `integration/INSTALL.md:43-79` (2a): `namespaces init work='~/work/
   acme/**' …` matches `namespaces.go:35-54` (`NAME=GLOB`, `~` expanded
   by `namespace.go:114-119`, quotes keep the shell from expanding); "no
   database, DSN or Ollama" is true (`main.go:34-37` dispatches before
   `config.LoadFromFile`); `--default NAME` and the `global` default match
-  `file.go:60-62`; the upgrade note (map `acme`) is correct. The `which`
+  `file.go:60-62`; the upgrade note (map `work`) is correct. The `which`
   examples at `:74-75` omit the `\t(<provenance>)` column — LOW.
 - `INSTALL.md:222-241` (Using namespaces): the resolution description
   (MCP = start dir, hook = prompt dir, extraction = session dir, ingest-pr =
@@ -330,9 +330,9 @@ Checked clean unless noted.
   matches AC-24 and the `StoreInput.Namespace` schema hint
   (`types.go:53`).
 - `integration/namespaces.example.yaml:4-19`: order, `**`/`~` semantics,
-  fallback `global`, the `acme` backfill note — match `namespace.go`.
+  fallback `global`, the `work` backfill note — match `namespace.go`.
   Its `pet-game` rule shows the exact-plus-`/**` idiom the spec recommends.
-- Spec §3 "Install" says `which` prints `acme\t(rule ~/work/acme/**)`
+- Spec §3 "Install" says `which` prints `work\t(rule ~/work/acme/**)`
   — the code prints the glob as written in the file (`namespace.go:101`
   keeps `g`, not the expanded `eg`), so this is exact.
 

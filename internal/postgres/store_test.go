@@ -36,4 +36,3 @@ func TestUpdate_RejectsNonWhitelistedColumn(t *testing.T) {
 		})
 	}
 }
-

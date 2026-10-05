@@ -58,7 +58,7 @@ func TestListNamespaces_MultipleGlobs(t *testing.T) {
 namespaces:
   - namespace: pet-game
     paths: ["~/src/pet-game", "~/src/pet-game/**"]
-  - namespace: acme
+  - namespace: work
     paths: ["~/work/acme/**"]
 `)
 	var buf bytes.Buffer
@@ -68,9 +68,9 @@ namespaces:
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
 	want := []string{
 		"NAMESPACE   PATHS",
-		"acme     ~/work/acme/**",
 		"pet-game    ~/src/pet-game",
 		"            ~/src/pet-game/**",
+		"work        ~/work/acme/**",
 		"global      (shared; searched together with every namespace)",
 		"default: global",
 	}
@@ -82,7 +82,7 @@ namespaces:
 func TestListNamespaces_JSON(t *testing.T) {
 	p := writeNamespacesFile(t, `default: personal
 namespaces:
-  - namespace: acme
+  - namespace: work
     paths: ["~/work/acme/**"]
 `)
 	var buf bytes.Buffer
@@ -96,10 +96,10 @@ namespaces:
 	if got.Default != "personal" || len(got.Namespaces) != 3 {
 		t.Fatalf("got %+v", got)
 	}
-	if e := got.Namespaces[0]; e.Namespace != "acme" || e.IsDefault || len(e.Paths) != 1 {
+	if e := got.Namespaces[0]; e.Namespace != "personal" || !e.IsDefault {
 		t.Errorf("entry 0: %+v", e)
 	}
-	if e := got.Namespaces[1]; e.Namespace != "personal" || !e.IsDefault {
+	if e := got.Namespaces[1]; e.Namespace != "work" || e.IsDefault || len(e.Paths) != 1 {
 		t.Errorf("entry 1: %+v", e)
 	}
 	if !strings.Contains(buf.String(), `"paths": []`) {

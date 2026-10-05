@@ -12,13 +12,13 @@
 ## Similarity Distributions
 
 **Positive (paraphrase + identifier) similarity scores** (Similarity of the RRF rank-1 record, which is not necessarily the expected one or the max-similarity one; the hook filters each record by its own Similarity):
-- Min: 0.4317, Max: 0.7302, Mean: 0.6178
-- P50: 0.6168, P95: 0.7227
+- Min: 0.4336, Max: 0.7302, Mean: 0.6212
+- P50: 0.6191, P95: 0.7227
 **Negative (unrelated) similarity scores:**
-- Min: 0.2783, Max: 0.4568, Mean: 0.3768
+- Min: 0.2743, Max: 0.4568, Mean: 0.3761
 - P50: 0.4191, P95: 0.4568
 **Near-duplicate-store similarity scores:**
-- Min: 0.7900, Max: 0.8825, Mean: 0.8362 (n=2)
+- Min: 0.8004, Max: 0.8825, Mean: 0.8415 (n=2)
 
 ## Threshold Recommendations
 
@@ -28,51 +28,51 @@
 
 **Store thresholds (AC-15):** configured defaults ADD below 0.65, ASK 0.65-0.85, NOOP/UPDATE at/above 0.85
 - Derived ASK floor: 0.4598 (same signal as the hook threshold above)
-- Near-duplicate-store Similarity observed: min 0.7900 (n=2)
-- Derived NOOP/UPDATE floor: 0.7900 (lowest observed near-duplicate similarity, clamped at/above the ASK floor)
+- Near-duplicate-store Similarity observed: min 0.8004 (n=2)
+- Derived NOOP/UPDATE floor: 0.8004 (lowest observed near-duplicate similarity, clamped at/above the ASK floor)
 Justification: derived from this run's measured positive/negative/near-duplicate Similarity distributions (see Similarity Distributions above); configured defaults are shown for comparison only, never overwritten automatically.
 
 ## Store Latency (AC-48)
 
-- Min: 46.845626ms
-- Max: 179.938833ms
-- Mean: 111.414333ms
-- P50: 111.072375ms
-- P95: 179.938833ms
-- Budget (AC-48): < 3s at p95 ✓ (measured: 179.938833ms)
+- Min: 42.836292ms
+- Max: 196.34925ms
+- Mean: 123.775833ms
+- P50: 122.328167ms
+- P95: 196.34925ms
+- Budget (AC-48): < 3s at p95 ✓ (measured: 196.34925ms)
 
 ## Detailed Case Results
 
 **✓ paraphrase_001** (paraphrase)
-- Query: Where should I open pull requests in the billing-service service?
+- Query: Where should I open pull requests in billing-service?
 - Repo scope: "billing-service"
 - Top result (RRF rank 1): billing-service: Pull requests target master, not develop
-- Similarity: 0.6913, Score: 0.0328
+- Similarity: 0.6962, Score: 0.0328
 - Hit@3: true
-- Expected record: rank 1, Similarity 0.6913, Score 0.0328
-  - #1 [active] Similarity 0.6913, Score 0.0328 — billing-service: Pull requests target master, not develop (expected)
-  - #2 [active] Similarity 0.4979, Score 0.0323 — DECLINED/DECLINED is a terminal status in billing-service
-  - #3 [candidate] Similarity 0.4498, Score 0.0159 — Azure DevOps work item retry logic: never use bare exponential backoff
+- Expected record: rank 1, Similarity 0.6962, Score 0.0328
+  - #1 [active] Similarity 0.6962, Score 0.0328 — billing-service: Pull requests target master, not develop (expected)
+  - #2 [active] Similarity 0.5200, Score 0.0323 — REFUNDED/REFUNDED is a terminal status in billing-service
+  - #3 [candidate] Similarity 0.4440, Score 0.0159 — Azure DevOps work item retry logic: never use bare exponential backoff
 **✓ paraphrase_002** (paraphrase)
 - Query: How does the Kubernetes build pipeline handle branch names that are too long?
 - Repo scope: ""
 - Top result (RRF rank 1): Kubernetes label value 63-byte limit breaks long branch names
-- Similarity: 0.7222, Score: 0.0328
+- Similarity: 0.7211, Score: 0.0328
 - Hit@3: true
-- Expected record: rank 1, Similarity 0.7222, Score 0.0328
-  - #1 [active] Similarity 0.7222, Score 0.0328 — Kubernetes label value 63-byte limit breaks long branch names (expected)
+- Expected record: rank 1, Similarity 0.7211, Score 0.0328
+  - #1 [active] Similarity 0.7211, Score 0.0328 — Kubernetes label value 63-byte limit breaks long branch names (expected)
   - #2 [candidate] Similarity 0.4593, Score 0.0161 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag
   - #3 [active] Similarity 0.4534, Score 0.0159 — Tailscale CGNAT range is 100.64.0.0/10 for all installations
 **✓ paraphrase_003** (paraphrase)
-- Query: What happens when an order return is declined in billing-service?
+- Query: What happens when a payment is refunded in billing-service?
 - Repo scope: "billing-service"
-- Top result (RRF rank 1): DECLINED/DECLINED is a terminal status in billing-service
-- Similarity: 0.6095, Score: 0.0328
+- Top result (RRF rank 1): REFUNDED/REFUNDED is a terminal status in billing-service
+- Similarity: 0.6842, Score: 0.0328
 - Hit@3: true
-- Expected record: rank 1, Similarity 0.6095, Score 0.0328
-  - #1 [active] Similarity 0.6095, Score 0.0328 — DECLINED/DECLINED is a terminal status in billing-service (expected)
-  - #2 [active] Similarity 0.5966, Score 0.0323 — billing-service: Pull requests target master, not develop
-  - #3 [candidate] Similarity 0.4462, Score 0.0159 — Azure DevOps work item retry logic: never use bare exponential backoff
+- Expected record: rank 1, Similarity 0.6842, Score 0.0328
+  - #1 [active] Similarity 0.6842, Score 0.0328 — REFUNDED/REFUNDED is a terminal status in billing-service (expected)
+  - #2 [active] Similarity 0.5674, Score 0.0323 — billing-service: Pull requests target master, not develop
+  - #3 [candidate] Similarity 0.4567, Score 0.0159 — Azure DevOps work item retry logic: never use bare exponential backoff
 **✓ exact_identifier_001** (exact_identifier)
 - Query: pg_advisory_xact_lock
 - Repo scope: ""
@@ -91,8 +91,8 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Hit@3: true
 - Expected record: rank 1, Similarity 0.7047, Score 0.0328
   - #1 [candidate] Similarity 0.7047, Score 0.0328 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag (expected)
-  - #2 [active] Similarity 0.5143, Score 0.0323 — Semantic memory: Ollama runs on the laptop, not the server
-  - #3 [active] Similarity 0.3807, Score 0.0159 — Kubernetes label value 63-byte limit breaks long branch names
+  - #2 [active] Similarity 0.5185, Score 0.0323 — Semantic memory: Ollama runs on the laptop, not the server
+  - #3 [active] Similarity 0.3785, Score 0.0159 — Kubernetes label value 63-byte limit breaks long branch names
 **✓ exact_identifier_003** (exact_identifier)
 - Query: 100.64.0.0/10 Tailscale CGNAT
 - Repo scope: ""
@@ -102,7 +102,7 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Expected record: rank 1, Similarity 0.7176, Score 0.0328
   - #1 [active] Similarity 0.7176, Score 0.0328 — Tailscale CGNAT range is 100.64.0.0/10 for all installations (expected)
   - #2 [candidate] Similarity 0.4086, Score 0.0161 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag
-  - #3 [active] Similarity 0.3792, Score 0.0159 — Kubernetes label value 63-byte limit breaks long branch names
+  - #3 [active] Similarity 0.3791, Score 0.0159 — Kubernetes label value 63-byte limit breaks long branch names
 **✓ exact_identifier_004** (exact_identifier)
 - Query: bearer token Authorization scrubbing pattern
 - Repo scope: ""
@@ -111,18 +111,18 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Hit@3: true
 - Expected record: rank 1, Similarity 0.5897, Score 0.0328
   - #1 [candidate] Similarity 0.5897, Score 0.0328 — Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens (expected)
-  - #2 [active] Similarity 0.4439, Score 0.0161 — Kubernetes label value 63-byte limit breaks long branch names
+  - #2 [active] Similarity 0.4425, Score 0.0161 — Kubernetes label value 63-byte limit breaks long branch names
   - #3 [candidate] Similarity 0.4340, Score 0.0159 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag
 **✓ paraphrase_004** (paraphrase)
 - Query: Why does the memory service run locally instead of on the server?
 - Repo scope: ""
 - Top result (RRF rank 1): Semantic memory: Ollama runs on the laptop, not the server
-- Similarity: 0.5966, Score: 0.0328
+- Similarity: 0.5943, Score: 0.0328
 - Hit@3: true
-- Expected record: rank 1, Similarity 0.5966, Score 0.0328
-  - #1 [active] Similarity 0.5966, Score 0.0328 — Semantic memory: Ollama runs on the laptop, not the server (expected)
-  - #2 [active] Similarity 0.4105, Score 0.0318 — Kubernetes label value 63-byte limit breaks long branch names
-  - #3 [candidate] Similarity 0.4158, Score 0.0315 — Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens
+- Expected record: rank 1, Similarity 0.5943, Score 0.0328
+  - #1 [active] Similarity 0.5943, Score 0.0328 — Semantic memory: Ollama runs on the laptop, not the server (expected)
+  - #2 [active] Similarity 0.4112, Score 0.0318 — Kubernetes label value 63-byte limit breaks long branch names
+  - #3 [candidate] Similarity 0.4158, Score 0.0313 — Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens
 **✓ paraphrase_005** (paraphrase)
 - Query: How should I handle retries against Azure DevOps API endpoints?
 - Repo scope: ""
@@ -131,7 +131,7 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Hit@3: true
 - Expected record: rank 1, Similarity 0.6732, Score 0.0328
   - #1 [candidate] Similarity 0.6732, Score 0.0328 — Azure DevOps work item retry logic: never use bare exponential backoff (expected)
-  - #2 [active] Similarity 0.4952, Score 0.0323 — Kubernetes label value 63-byte limit breaks long branch names
+  - #2 [active] Similarity 0.4940, Score 0.0323 — Kubernetes label value 63-byte limit breaks long branch names
   - #3 [candidate] Similarity 0.4569, Score 0.0159 — Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens
 **✓ paraphrase_006** (paraphrase)
 - Query: What format are Claude Code session transcripts stored in?
@@ -141,7 +141,7 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Hit@3: true
 - Expected record: rank 1, Similarity 0.7227, Score 0.0328
   - #1 [candidate] Similarity 0.7227, Score 0.0328 — Claude Code session transcripts use JSON-lines format with message type field (expected)
-  - #2 [active] Similarity 0.4447, Score 0.0323 — Semantic memory: Ollama runs on the laptop, not the server
+  - #2 [active] Similarity 0.4435, Score 0.0323 — Semantic memory: Ollama runs on the laptop, not the server
   - #3 [candidate] Similarity 0.3983, Score 0.0159 — Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens
 **✓ negative_001** (negative)
 - Query: What is the best pizza topping for a Thursday dinner?
@@ -157,11 +157,11 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Query: What is the capital of France?
 - Repo scope: ""
 - Top result (RRF rank 1): Semantic memory: Ollama runs on the laptop, not the server
-- Similarity: 0.2783, Score: 0.0164
+- Similarity: 0.2743, Score: 0.0164
 **✓ near_duplicate_001** (near_duplicate_store)
 - Query: 
 - Top result (RRF rank 1): billing-service: Pull requests target master, not develop
-- Similarity: 0.7900, Score: 0.0164
+- Similarity: 0.8004, Score: 0.0164
 - Decision: ASK (judgment range, not written)
 **✓ near_duplicate_002** (near_duplicate_store)
 - Query: 
@@ -196,8 +196,8 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Hit@3: true
 - Expected record: rank 1, Similarity 0.6000, Score 0.0328
   - #1 [candidate] Similarity 0.6000, Score 0.0328 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag (expected)
-  - #2 [active] Similarity 0.4754, Score 0.0161 — Kubernetes label value 63-byte limit breaks long branch names
-  - #3 [active] Similarity 0.4612, Score 0.0159 — Semantic memory: Ollama runs on the laptop, not the server
+  - #2 [active] Similarity 0.4743, Score 0.0161 — Kubernetes label value 63-byte limit breaks long branch names
+  - #3 [active] Similarity 0.4609, Score 0.0159 — Semantic memory: Ollama runs on the laptop, not the server
 **✓ long_identifier_003** (long_prompt_identifier)
 - Query: for the firewall rules on the database host which source range do I need to allow so that every machine on the tailnet can connect, I vaguely remember 100.64.0.0/10 but I am not sure it applies to all of them
 - Repo scope: ""
@@ -206,7 +206,7 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Hit@3: true
 - Expected record: rank 1, Similarity 0.7302, Score 0.0328
   - #1 [active] Similarity 0.7302, Score 0.0328 — Tailscale CGNAT range is 100.64.0.0/10 for all installations (expected)
-  - #2 [active] Similarity 0.4978, Score 0.0161 — Kubernetes label value 63-byte limit breaks long branch names
+  - #2 [active] Similarity 0.4940, Score 0.0161 — Kubernetes label value 63-byte limit breaks long branch names
   - #3 [active] Similarity 0.4632, Score 0.0159 — RRF (Reciprocal Rank Fusion) ranking requires parameterized queries to avoid SQL injection
 **✓ long_identifier_004** (long_prompt_identifier)
 - Query: in the dedup path where we check candidates before inserting, where exactly should the lock acquisition live, inside db.WithTx or can it sit outside the transaction block
@@ -217,7 +217,7 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Expected record: rank 1, Similarity 0.6063, Score 0.0328
   - #1 [candidate] Similarity 0.6063, Score 0.0328 — pgx advisory locks: always use transaction scope with pg_advisory_xact_lock (expected)
   - #2 [candidate] Similarity 0.4379, Score 0.0161 — Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens
-  - #3 [active] Similarity 0.3908, Score 0.0159 — RRF (Reciprocal Rank Fusion) ranking requires parameterized queries to avoid SQL injection
+  - #3 [active] Similarity 0.3927, Score 0.0159 — Kubernetes label value 63-byte limit breaks long branch names
 **✓ paraphrase_007** (paraphrase)
 - Query: Why must user-supplied search text never be spliced into the statement and what do we pass instead?
 - Repo scope: ""
@@ -237,37 +237,37 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Expected record: rank 1, Similarity 0.4629, Score 0.0328
   - #1 [active] Similarity 0.4629, Score 0.0328 — Tailscale CGNAT range is 100.64.0.0/10 for all installations (expected)
   - #2 [candidate] Similarity 0.4314, Score 0.0320 — Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens
-  - #3 [active] Similarity 0.4046, Score 0.0313 — Semantic memory: Ollama runs on the laptop, not the server
+  - #3 [candidate] Similarity 0.4112, Score 0.0310 — pgx advisory locks: always use transaction scope with pg_advisory_xact_lock
 **✓ paraphrase_009** (paraphrase)
 - Query: How do we stop passwords and credentials from leaking into what gets saved long term?
 - Repo scope: ""
 - Top result (RRF rank 1): Kubernetes label value 63-byte limit breaks long branch names
-- Similarity: 0.4317, Score: 0.0318
+- Similarity: 0.4336, Score: 0.0318
 - Hit@3: true
 - Expected record: rank 2, Similarity 0.6485, Score 0.0164
-  - #1 [active] Similarity 0.4317, Score 0.0318 — Kubernetes label value 63-byte limit breaks long branch names
+  - #1 [active] Similarity 0.4336, Score 0.0318 — Kubernetes label value 63-byte limit breaks long branch names
   - #2 [candidate] Similarity 0.6485, Score 0.0164 — Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens (expected)
   - #3 [candidate] Similarity 0.4445, Score 0.0161 — pgx advisory locks: always use transaction scope with pg_advisory_xact_lock
 **✓ paraphrase_010** (paraphrase)
 - Query: Why is the embedding model hosted on my notebook and not on the home machine?
 - Repo scope: ""
 - Top result (RRF rank 1): Semantic memory: Ollama runs on the laptop, not the server
-- Similarity: 0.5890, Score: 0.0325
+- Similarity: 0.5848, Score: 0.0328
 - Hit@3: true
-- Expected record: rank 1, Similarity 0.5890, Score 0.0325
-  - #1 [active] Similarity 0.5890, Score 0.0325 — Semantic memory: Ollama runs on the laptop, not the server (expected)
-  - #2 [candidate] Similarity 0.4556, Score 0.0325 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag
-  - #3 [active] Similarity 0.3973, Score 0.0159 — Kubernetes label value 63-byte limit breaks long branch names
+- Expected record: rank 1, Similarity 0.5848, Score 0.0328
+  - #1 [active] Similarity 0.5848, Score 0.0328 — Semantic memory: Ollama runs on the laptop, not the server (expected)
+  - #2 [candidate] Similarity 0.4556, Score 0.0323 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag
+  - #3 [active] Similarity 0.3974, Score 0.0159 — Kubernetes label value 63-byte limit breaks long branch names
 **✓ confusable_001** (paraphrase)
 - Query: Which machine should run the embedding model for the synchronous hook, and why?
 - Repo scope: ""
 - Top result (RRF rank 1): Semantic memory: Ollama runs on the laptop, not the server
-- Similarity: 0.4578, Score: 0.0325
+- Similarity: 0.4557, Score: 0.0325
 - Hit@3: true
-- Expected record: rank 1, Similarity 0.4578, Score 0.0325
-  - #1 [active] Similarity 0.4578, Score 0.0325 — Semantic memory: Ollama runs on the laptop, not the server (expected)
+- Expected record: rank 1, Similarity 0.4557, Score 0.0325
+  - #1 [active] Similarity 0.4557, Score 0.0325 — Semantic memory: Ollama runs on the laptop, not the server (expected)
   - #2 [candidate] Similarity 0.4780, Score 0.0325 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag
-  - #3 [active] Similarity 0.3606, Score 0.0310 — Kubernetes label value 63-byte limit breaks long branch names
+  - #3 [active] Similarity 0.3600, Score 0.0310 — Kubernetes label value 63-byte limit breaks long branch names
 **✓ confusable_002** (paraphrase)
 - Query: Why are my long inputs to the embedding model cut off before the end?
 - Repo scope: ""
@@ -276,7 +276,7 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Hit@3: true
 - Expected record: rank 1, Similarity 0.6106, Score 0.0328
   - #1 [candidate] Similarity 0.6106, Score 0.0328 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag (expected)
-  - #2 [active] Similarity 0.5025, Score 0.0161 — Kubernetes label value 63-byte limit breaks long branch names
+  - #2 [active] Similarity 0.5026, Score 0.0161 — Kubernetes label value 63-byte limit breaks long branch names
   - #3 [candidate] Similarity 0.4673, Score 0.0159 — Azure DevOps work item retry logic: never use bare exponential backoff
 **✓ confusable_003** (paraphrase)
 - Query: How do I keep two concurrent writers from inserting the same duplicate record at once?
@@ -296,7 +296,7 @@ Justification: derived from this run's measured positive/negative/near-duplicate
 - Hit@3: true
 - Expected record: rank 1, Similarity 0.6191, Score 0.0328
   - #1 [active] Similarity 0.6191, Score 0.0328 — RRF (Reciprocal Rank Fusion) ranking requires parameterized queries to avoid SQL injection (expected)
-  - #2 [active] Similarity 0.3775, Score 0.0161 — Kubernetes label value 63-byte limit breaks long branch names
+  - #2 [active] Similarity 0.3791, Score 0.0161 — Kubernetes label value 63-byte limit breaks long branch names
   - #3 [candidate] Similarity 0.3616, Score 0.0159 — Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens
 **✓ negative_004** (negative)
 - Query: How do I configure an nginx reverse proxy with upstream load balancing and SSL termination?
@@ -334,12 +334,12 @@ Justification: derived from this run's measured positive/negative/near-duplicate
   - #2 [candidate] Similarity 0.4997, Score 0.0161 — pgx advisory locks: always use transaction scope with pg_advisory_xact_lock
   - #3 [candidate] Similarity 0.4720, Score 0.0159 — Secret scrubbing before persistence: redact JWTs, API keys, bearer tokens
 **✓ long_identifier_007** (long_prompt_identifier)
-- Query: the pipeline for the returns repo failed again during the Setup k8s step with an error complaining about metadata.labels being longer than allowed, and I have no idea what is going wrong with the branch
+- Query: the pipeline for the billing repo failed again during the Setup k8s step with an error complaining about metadata.labels being longer than allowed, and I have no idea what is going wrong with the branch
 - Repo scope: ""
 - Top result (RRF rank 1): Kubernetes label value 63-byte limit breaks long branch names
-- Similarity: 0.6453, Score: 0.0328
+- Similarity: 0.6614, Score: 0.0328
 - Hit@3: true
-- Expected record: rank 1, Similarity 0.6453, Score 0.0328
-  - #1 [active] Similarity 0.6453, Score 0.0328 — Kubernetes label value 63-byte limit breaks long branch names (expected)
-  - #2 [candidate] Similarity 0.4275, Score 0.0318 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag
-  - #3 [candidate] Similarity 0.4604, Score 0.0161 — Azure DevOps work item retry logic: never use bare exponential backoff
+- Expected record: rank 1, Similarity 0.6614, Score 0.0328
+  - #1 [active] Similarity 0.6614, Score 0.0328 — Kubernetes label value 63-byte limit breaks long branch names (expected)
+  - #2 [candidate] Similarity 0.4576, Score 0.0323 — Ollama num_batch truncation: input silently cut at 2048 tokens without the flag
+  - #3 [active] Similarity 0.4497, Score 0.0159 — Tailscale CGNAT range is 100.64.0.0/10 for all installations

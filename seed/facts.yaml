@@ -11,95 +11,9 @@
 # (markdown), repo (a specific repo name, or "*" for cross-repo), tags.
 facts:
   - kind: gotcha
-    title: "Kubernetes label values cap branch-derived version strings at 63 bytes"
-    content: |
-      The shared `acme/devops-pipelines` template builds the release version
-      from the branch name: `<semver>-<branch with "/" -> "-">.<build N>`,
-      e.g. `0.20.2-task-PRJ-218-add-seller-return-decision-endpoint.23`
-      (58 chars). That value becomes `Build.BuildNumber`, which goes into
-      the `ver:` labels in `k8s/*.yaml`. Kubernetes caps label values at 63
-      bytes, so a longer branch name makes the release's "Setup k8s" step
-      fail with `metadata.labels: Invalid value ... must be no more than 63
-      bytes`, and re-running the pipeline never helps -- only renaming the
-      branch (which means a new PR, since Azure DevOps can't change a PR's
-      source branch) fixes it. Keep branch names at roughly 50 characters
-      or fewer. Example that had to be renamed:
-      `task/PRJ-216/add-partner-and-checkup-statuses-to-internal-endpoint`
-      (75-char version) -> `task/PRJ-216/add-partner-checkup-statuses`.
-    repo: "*"
-    tags: [k8s, ci, branch-naming, azure-devops]
-
-  - kind: convention
-    title: "Branch naming convention across acme/ repos"
-    content: |
-      New branches follow `<type>/<TICKET-KEY>/<short-description>`, where
-      `<type>` comes from the ticket's real issue type (task, bugfix,
-      feature, hotfix -- check the actual field, don't assume), `<TICKET-
-      KEY>` is the exact ticket key as-is (e.g. `PRJ-130`), and
-      `<short-description>` is a short lowercase-kebab-case summary of the
-      change itself, not a restatement of the ticket title. Keep the whole
-      branch name at about 50 characters or fewer (see the k8s 63-byte
-      label gotcha for why).
-    repo: "*"
-    tags: [branch-naming, git, azure-devops]
-
-  - kind: convention
-    title: "billing-service branches from and opens PRs into master, not develop"
-    content: |
-      Exception to the shared acme/ default: in billing-service, feature
-      branches are cut from `master` and pull requests are opened into
-      `master`. Every other acme/ repo (catalog-service, orders-service,
-      admin-dashboard, inventory-service, etc.) defaults to branching
-      from and opening PRs into `develop` unless its own CLAUDE.md
-      documents a different exception. When unsure whether a repo is an
-      exception, default to `develop`.
-    repo: billing-service
-    tags: [git, pull-request, branching]
-
-  - kind: decision
-    title: "DECLINED/DECLINED is terminal in billing-service; the ERP lock is intended"
-    content: |
-      A return in `DECLINED` partner-status with `DECLINED` merchant-status
-      is a terminal state in billing-service. The lock that blocks ERP from
-      writing further updates into that state is intentional behavior, not
-      a bug -- do not "fix" it by loosening the lock without re-confirming
-      the decision with the owner first.
-    repo: billing-service
-    tags: [lifecycle, erp, returns]
-
-  - kind: convention
-    title: "Written artifacts at acme/ are Russian or English, never Ukrainian"
-    content: |
-      Jira/Azure DevOps ticket descriptions and comments, PR descriptions,
-      commit messages, code comments, and docs across every acme/ repo
-      are written in Russian or English only, never Ukrainian -- regardless
-      of what language the conversation with an assistant happens to be
-      conducted in.
-    repo: "*"
-    tags: [documentation, convention]
-
-  - kind: pattern
-    title: "SDD pipeline file layout: docs/specs/<feature-slug>/01..07"
-    content: |
-      Every acme/ repo doing Spec-Driven Development puts a feature's
-      whole pipeline output in one directory at the repo root:
-      `docs/specs/<feature-slug>/01-spec.md` (spec-creator),
-      `02-plan.md` (implementation-planner), `03-plan-review.md`
-      (plan-reviewer, overwritten on re-review), `04-implementation-
-      report.md` (implementer), `05-test-report.md` (test-writer),
-      `06-architecture-review.md` (architecture-reviewer), `07-
-      verification.md` (plan-verifier). A repo with real internal
-      sub-modules nests under `docs/specs/<module>/<feature-slug>/`
-      instead. A request with no real requirements ambiguity skips
-      straight to `docs/<feature-slug>-plan.md` at the docs root (not
-      under `docs/specs/`) instead of running spec-creator.
-    repo: "*"
-    tags: [sdd, documentation, process]
-
-  - kind: gotcha
     title: "Ollama silently truncates embedding input at num_batch (default 2048), not the model's context window"
     content: |
-      Verified 2026-10-01 on Ollama 0.35 / M1 Pro against bge-m3 (8192-token
+      Verified 2026-10-01 on Ollama 0.35 / an Apple M1 Pro against bge-m3 (8192-token
       context): the effective input cap for `/api/embed` is `options.
       num_batch` (default 2048), not the model's own context length.
       Without passing `num_batch` explicitly, input longer than 2048 tokens
@@ -188,8 +102,8 @@ facts:
   - kind: decision
     title: "Topology B: Ollama and the MCP process run on the laptop, not the server"
     content: |
-      AC-44 smoke test (2026-10-01): the home server (Mac Mini 2012,
-      AVX-only CPU, no AVX2) runs bge-m3 embeddings at ~17ms/token
+      AC-44 smoke test (2026-10-01): an older x86 home server
+      (CPU without AVX2) runs bge-m3 embeddings at ~17ms/token
       (linear) -- 12-60x slower than the laptop's Metal-accelerated
       Ollama (M1 Pro). That gap motivated moving Ollama and the claude-
       memory MCP process off the server entirely onto the laptop; the

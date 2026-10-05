@@ -14,7 +14,7 @@ func TestDeleteRecord(t *testing.T) {
 	t.Run("deletes and emits record_deleted via tool", func(t *testing.T) {
 		sink := &recSink{}
 		var deleted string
-		st := recStore(record.StatusActive, "acme")
+		st := recStore(record.StatusActive, "work")
 		st.DeleteFunc = func(_ context.Context, id string) error { deleted = id; return nil }
 		if err := eventSvc(st, sink).DeleteRecord(ctx, "r"); err != nil {
 			t.Fatal(err)
@@ -30,7 +30,7 @@ func TestDeleteRecord(t *testing.T) {
 
 	t.Run("referenced: error passes through, no event", func(t *testing.T) {
 		sink := &recSink{}
-		st := recStore(record.StatusActive, "acme")
+		st := recStore(record.StatusActive, "work")
 		st.DeleteFunc = func(context.Context, string) error { return &ErrReferenced{IDs: []string{"x"}} }
 		err := eventSvc(st, sink).DeleteRecord(ctx, "r")
 		var ref *ErrReferenced
@@ -52,9 +52,9 @@ func TestDeleteRecord(t *testing.T) {
 func TestSimilar(t *testing.T) {
 	ctx := context.Background()
 	withEmb := func(emb []float32) *mockStore {
-		st := recStore(record.StatusCandidate, "acme")
+		st := recStore(record.StatusCandidate, "work")
 		st.GetFunc = func(_ context.Context, id string) (*record.Record, error) {
-			return &record.Record{ID: id, Namespace: "acme", Repo: "svc", Embedding: emb}, nil
+			return &record.Record{ID: id, Namespace: "work", Repo: "svc", Embedding: emb}, nil
 		}
 		return st
 	}
@@ -89,7 +89,7 @@ func TestSimilar(t *testing.T) {
 		svc := New(st, &mockEmbeddingProvider{EmbedFunc: func(context.Context, string, int) ([]float32, error) {
 			t.Fatal("Embed called")
 			return nil, nil
-		}}, &mockScrubber{}, &mockClock{}, writepathCfg()).WithNamespace("acme")
+		}}, &mockScrubber{}, &mockClock{}, writepathCfg()).WithNamespace("work")
 		if _, err := svc.Similar(ctx, "r", 3); err != nil {
 			t.Fatal(err)
 		}

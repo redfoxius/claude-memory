@@ -61,14 +61,14 @@ func newImportFixture(t *testing.T) *importFixture {
 			t.Fatal(err)
 		}
 	}
-	f := &importFixture{cwdNS: "acme", cwdWhy: namespace.WhyRule + " x", projDir: proj}
+	f := &importFixture{cwdNS: "work", cwdWhy: namespace.WhyRule + " x", projDir: proj}
 	f.svc = &fakeImportSvc{out: func(req *memory.StoreRequest) (*memory.StoreResponse, error) {
 		return &memory.StoreResponse{ID: "3f2a91c0-0000-0000-0000-000000000000", Decision: memory.ActionAdd}, nil
 	}}
 	f.deps = importDeps{
 		Env: importer.Env{
 			FS:          readOnlyFS{},
-			NamespaceOf: func(string) string { return "acme" },
+			NamespaceOf: func(string) string { return "work" },
 			Toplevel:    func(string) (string, bool) { return "", false },
 			Decode:      func(string) (string, bool) { return home, true },
 		},
@@ -185,7 +185,7 @@ func TestImportNamespaceRules(t *testing.T) {
 	t.Run("explicit --namespace wins over the fallback", func(t *testing.T) {
 		f := newImportFixture(t)
 		f.cwdNS, f.cwdWhy = "global", namespace.WhyFallback
-		if err := runImport(context.Background(), f.deps, []string{"automem", "--dry-run", "--namespace", "acme", "--projects-dir", f.projDir}); err != nil {
+		if err := runImport(context.Background(), f.deps, []string{"automem", "--dry-run", "--namespace", "work", "--projects-dir", f.projDir}); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(f.out.String(), "2 to import") {
@@ -204,7 +204,7 @@ func TestImportNamespaceRules(t *testing.T) {
 		if err := runImport(context.Background(), f.deps, []string{"automem", "--dry-run", "--namespace", "pet", "--projects-dir", f.projDir}); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(f.out.String(), "other namespace (acme)") || !strings.Contains(f.out.String(), "0 to import, 2 skipped") {
+		if !strings.Contains(f.out.String(), "other namespace (work)") || !strings.Contains(f.out.String(), "0 to import, 2 skipped") {
 			t.Errorf("output:\n%s", f.out.String())
 		}
 	})

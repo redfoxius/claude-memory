@@ -22,13 +22,13 @@ func TestList(t *testing.T) {
 			Default: "scratch",
 			Namespaces: []Rule{
 				{Namespace: "pet-game", Paths: []string{"/a", "/a/**"}},
-				{Namespace: "acme", Paths: []string{"/c/**"}},
+				{Namespace: "work", Paths: []string{"/c/**"}},
 				{Namespace: "pet-game", Paths: []string{"/a", "/b"}},
 			},
 		}, []Entry{
-			{"acme", []string{"/c/**"}, false},
 			{"pet-game", []string{"/a", "/a/**", "/b"}, false},
 			{"scratch", []string{}, true},
+			{"work", []string{"/c/**"}, false},
 			{"global", []string{}, false},
 		}},
 		{"global with rules stays last and keeps paths", Config{

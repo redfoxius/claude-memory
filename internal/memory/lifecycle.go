@@ -80,7 +80,7 @@ func (s *Service) Feedback(ctx context.Context, req *FeedbackRequest) (*Feedback
 		reason := formatDeprecationReason(req.Outcome, req.Note)
 
 		updates := map[string]interface{}{
-			"status":              record.StatusDeprecated,
+			"status":             record.StatusDeprecated,
 			"deprecation_reason": reason,
 		}
 

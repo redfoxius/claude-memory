@@ -9,7 +9,7 @@
 
 ## Topology B (v0.2)
 
-**Laptop** (macOS, arm64): Ollama + `bge-m3` (Homebrew, Metal GPU), `claude-memory` MCP server (stdio), and all CLI subcommands. Embedding and extraction run locally; all data writes reach the server over Tailscale. **Server** (home Mac Mini/Ubuntu 26.04): Postgres 16 + pgvector only, bound to Tailscale IP, reachable only via password auth (scram-sha-256) and network-restricted to `100.64.0.0/10` CGNAT. No Ollama, no MCP listener on the server. This topology is why we measure acceptable performance on the laptop (12–60× faster than server's AVX-only CPU); see AC-44 baseline below.
+**Laptop** (macOS, arm64): Ollama + `bge-m3` (Homebrew, Metal GPU), `claude-memory` MCP server (stdio), and all CLI subcommands. Embedding and extraction run locally; all data writes reach the server over Tailscale. **Server** (home x86 server, Ubuntu 26.04): Postgres 16 + pgvector only, bound to Tailscale IP, reachable only via password auth (scram-sha-256) and network-restricted to `100.64.0.0/10` CGNAT. No Ollama, no MCP listener on the server. This topology is why we measure acceptable performance on the laptop (12–60× faster than server's AVX-only CPU); see AC-44 baseline below.
 
 ## Server Prerequisites
 
@@ -87,7 +87,7 @@ The container is configured with:
 - **Restart policy**: `unless-stopped` (auto-restart on crash or server reboot)
 - **Healthcheck**: `pg_isready -U postgres -d postgres -h 127.0.0.1` every 10s (5s timeout, 5 retries, 20s start grace period)
 
-These limits leave ample headroom for pre-existing host services (game server, Node/PM2 app, MongoDB, Redis, Caddy) on the 7.2 GiB home server. Verify with `docker stats postgres` over a 24-hour window; there should be no OOM-kill or sustained CPU throttle.
+These limits leave ample headroom for other pre-existing host services on the 7.2 GiB home server. Verify with `docker stats postgres` over a 24-hour window; there should be no OOM-kill or sustained CPU throttle.
 
 ## Laptop Side Configuration
 
@@ -223,7 +223,7 @@ The container restarts and runs any new migrations on startup (via `docker-entry
 
 `claude-memory` applies its own (idempotent) migrations when `serve`, `seed`, `cleanup`, `ingest-pr` or `extract` start — but **not** the prompt hook, which skips the check to stay inside its latency budget. After installing a new binary, run one of those once before relying on the hook (`claude-memory cleanup` is harmless), or just start Claude Code (the MCP server runs `serve`).
 
-Migration 0002 adds `records.namespace` and backfills every existing record to `acme`. **Before** starting Claude Code on the new binary, run `claude-memory namespaces init acme='<path>/**'` (or `namespaces add`) on the laptop (see `integration/INSTALL.md` step 2a) so those records are visible from your Acme directories and new facts don't land in `global`; if some already did, use the re-home SQL below. Rolling back to an older binary after migrating requires `ALTER TABLE records ALTER COLUMN namespace SET DEFAULT 'global';` (or restoring the backup), because the old inserts don't supply a namespace.
+Migration 0002 adds `records.namespace` and backfills every existing record to `work`. **Before** starting Claude Code on the new binary, run `claude-memory namespaces init work='<path>/**'` (or `namespaces add`) on the laptop (see `integration/INSTALL.md` step 2a) so those records are visible from your Acme directories and new facts don't land in `global`; if some already did, use the re-home SQL below. Rolling back to an older binary after migrating requires `ALTER TABLE records ALTER COLUMN namespace SET DEFAULT 'global';` (or restoring the backup), because the old inserts don't supply a namespace.
 
 ### Usage events (migration 0003)
 
@@ -234,7 +234,7 @@ Migration 0003 adds the `events` table (ids, enums and numbers only; no record t
 ```sql
 -- review first
 SELECT id, title, repo FROM records WHERE namespace = 'global' AND repo = 'billing-service';
-UPDATE records SET namespace = 'acme' WHERE namespace = 'global' AND repo IN ('billing-service', 'catalog-service');
+UPDATE records SET namespace = 'work' WHERE namespace = 'global' AND repo IN ('billing-service', 'catalog-service');
 ```
 
 ### Major Postgres Version Upgrade (if needed in the future)
@@ -288,7 +288,7 @@ The superuser (`postgres`) password is not used by any client; if you forget it,
 
 **Measured 2026-10-01** on the topology this spec mandates:
 
-- **Mac Mini 2012 server (AVX-only, Ollama `bge-m3` F16)**: 
+- **older x86 home server (AVX-only, Ollama `bge-m3` F16)**: 
   - 15 tokens: p50 0.23s
   - 150 tokens: p50 2.3s
   - 600 tokens: p50 12.3s (~17 ms/token, linear)

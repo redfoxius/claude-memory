@@ -15,11 +15,11 @@
 # care about, or company-specific facts will end up shared. You can also
 # write to it explicitly with memory_store namespace="global".
 #
-# NOTE: existing records were backfilled to "acme" by the upgrade
+# NOTE: existing records were backfilled to "work" by the upgrade
 # migration; map your Acme directories to it or they stay invisible.
 default: global
 namespaces:
-  - namespace: acme
+  - namespace: work
     paths: ["~/work/acme/**"]
   - namespace: pet-game
     paths: ["~/src/pet-game", "~/src/pet-game/**"]

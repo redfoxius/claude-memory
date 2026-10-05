@@ -89,7 +89,7 @@ func TestMigration0005IdempotentAndUpgrade(t *testing.T) {
 	if got := constraintNames(t, ctx, s); !slices.Equal(got, want0005) {
 		t.Errorf("after upgrade constraints = %v, want %v", got, want0005)
 	}
-	if err := s.Append(ctx, relEvent("acme", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassTimeout, "", time.Now())); err != nil {
+	if err := s.Append(ctx, relEvent("work", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassTimeout, "", time.Now())); err != nil {
 		t.Errorf("append after upgrade: %v", err)
 	}
 }
@@ -136,13 +136,13 @@ func TestReliabilityAppendValues(t *testing.T) {
 
 	var evs []memory.Event
 	for _, o := range []memory.FeedbackOutcome{memory.OutcomeOK, memory.OutcomeDegraded} {
-		evs = append(evs, relEvent("acme", memory.EventSearchCalled, memory.ViaMCP, o, "", "sess", now))
+		evs = append(evs, relEvent("work", memory.EventSearchCalled, memory.ViaMCP, o, "", "sess", now))
 	}
 	for _, o := range []memory.FeedbackOutcome{memory.OutcomeAdded, memory.OutcomeUpdated, memory.OutcomeSuperseded, memory.OutcomeNoop, memory.OutcomeNeedsJudgment} {
-		evs = append(evs, relEvent("acme", memory.EventStoreAttempted, memory.ViaMCP, o, "", "sess", now))
+		evs = append(evs, relEvent("work", memory.EventStoreAttempted, memory.ViaMCP, o, "", "sess", now))
 	}
 	for _, c := range []memory.ErrorClass{memory.ErrClassDBUnavailable, memory.ErrClassEmbeddingUnavailable, memory.ErrClassInvalidRequest, memory.ErrClassTimeout, memory.ErrClassInternal} {
-		evs = append(evs, relEvent("acme", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, c, "", now))
+		evs = append(evs, relEvent("work", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, c, "", now))
 	}
 	if err := s.Append(ctx, evs...); err != nil {
 		t.Fatalf("append: %v", err)
@@ -151,14 +151,14 @@ func TestReliabilityAppendValues(t *testing.T) {
 		t.Errorf("rows without class = %d, want 7", n)
 	}
 	// An old-type event still inserts with a NULL class.
-	if err := s.Append(ctx, ev("acme", memory.EventCardInjected, uuid.New().String(), time.Minute)); err != nil {
+	if err := s.Append(ctx, ev("work", memory.EventCardInjected, uuid.New().String(), time.Minute)); err != nil {
 		t.Errorf("old event: %v", err)
 	}
 
 	bad := []memory.Event{
-		relEvent("acme", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, "bogus", "", now),
-		relEvent("acme", memory.EventSearchCalled, memory.ViaHook, "weird", "", "", now),
-		relEvent("acme", memory.EventSearchCalled, "weird", memory.OutcomeOK, "", "", now),
+		relEvent("work", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, "bogus", "", now),
+		relEvent("work", memory.EventSearchCalled, memory.ViaHook, "weird", "", "", now),
+		relEvent("work", memory.EventSearchCalled, "weird", memory.OutcomeOK, "", "", now),
 	}
 	for i, e := range bad {
 		if err := s.Append(ctx, e); !errors.Is(err, memory.ErrEventRejected) {
@@ -183,15 +183,15 @@ func TestReliabilityStats(t *testing.T) {
 	at := func(m int) time.Time { return hour.Add(-time.Duration(m) * time.Minute) }
 	sA, sB := uuid.New().String(), uuid.New().String()
 	evs := []memory.Event{
-		relEvent("acme", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", sA, at(200)),
-		relEvent("acme", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeDegraded, "", sA, at(190)),
-		relEvent("acme", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeAdded, "", sA, at(180)),
-		relEvent("acme", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeError, memory.ErrClassEmbeddingUnavailable, sA, at(170)),
+		relEvent("work", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", sA, at(200)),
+		relEvent("work", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeDegraded, "", sA, at(190)),
+		relEvent("work", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeAdded, "", sA, at(180)),
+		relEvent("work", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeError, memory.ErrClassEmbeddingUnavailable, sA, at(170)),
 		relEvent("other", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeError, memory.ErrClassDBUnavailable, sB, at(30)),
-		relEvent("acme", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassDBUnavailable, "", at(20)),
-		relEvent("acme", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeOK, "", "", at(10)),
+		relEvent("work", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeError, memory.ErrClassDBUnavailable, "", at(20)),
+		relEvent("work", memory.EventSearchCalled, memory.ViaHook, memory.OutcomeOK, "", "", at(10)),
 		// Outside the window below.
-		relEvent("acme", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "old", at(60*30)),
+		relEvent("work", memory.EventSearchCalled, memory.ViaMCP, memory.OutcomeOK, "", "old", at(60*30)),
 	}
 	if err := s.Append(ctx, evs...); err != nil {
 		t.Fatal(err)
@@ -226,7 +226,7 @@ func TestReliabilityStats(t *testing.T) {
 	}
 
 	// Two down hours.
-	if err := s.Append(ctx, relEvent("acme", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeError, memory.ErrClassDBUnavailable, sA, at(150))); err != nil {
+	if err := s.Append(ctx, relEvent("work", memory.EventStoreAttempted, memory.ViaMCP, memory.OutcomeError, memory.ErrClassDBUnavailable, sA, at(150))); err != nil {
 		t.Fatal(err)
 	}
 	all, _ = s.StatsCounts(ctx, since, "")

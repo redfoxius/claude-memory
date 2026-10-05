@@ -4,7 +4,7 @@
 - Spec ID: SPEC-2026-10-01-namespaces
 - Status: implemented (code + docs); integration tests pass locally; review follow-ups open — see docs/specs/README.md item 1. Original: draft, re-baselined after owner decisions
 - Version: 0.2
-- Owner: Oleksandr Kolomoiets (user@example.com)
+- Owner: Oleksandr Kolomoiets
 - Supersedes: none (extends SPEC-2026-10-01-memory-mvp)
 - Related: `docs/specs/README.md` backlog item 1 (input requirements, agreed
   with the owner 2026-10-01); `docs/specs/memory-mvp/01-spec.md` (AC-6, AC-10,
@@ -14,10 +14,10 @@
 ### Changes in v0.2
 Owner decisions taken during the architecture review (§13 #3, #6..#9)
 supersede v0.1:
-- The built-in fallback is the shared `global` namespace, not `acme`.
+- The built-in fallback is the shared `global` namespace, not `work`.
   No project is special-cased in code (`namespace.Fallback` =
   `memory.DefaultNamespace` = `"global"`). Migration 0002 still backfills
-  existing rows to `acme`; that is historic data, not a code default.
+  existing rows to `work`; that is historic data, not a code default.
 - "Nothing reaches `global` automatically" is dropped. Writes whose context
   cannot be resolved (inline store, session extraction, PR ingest) land in
   `global`. An explicit `memory_store(namespace="global")` also works.
@@ -61,7 +61,7 @@ every record carries its `repo`.
 
 | Term | Definition |
 |---|---|
-| Namespace | Lowercase name matching `^[a-z0-9][a-z0-9_-]{0,62}$` (e.g. `acme`, `pet-game`), stored on every record. Records in different namespaces never mix or merge. |
+| Namespace | Lowercase name matching `^[a-z0-9][a-z0-9_-]{0,62}$` (e.g. `work`, `pet-game`), stored on every record. Records in different namespaces never mix or merge. |
 | Current namespace | The namespace a process (or one call within it) is scoped to after resolution (§6.2). |
 | `global` | Reserved shared namespace. Every search also covers it. It is also the built-in fallback, so it receives unresolved-context writes as well as explicit `memory_store(namespace="global")` writes. |
 | Built-in fallback | `global` (`namespace.Fallback`, `memory.DefaultNamespace`): the result when neither `MEMORY_NAMESPACE`, a glob, nor `default:` applies, or when the file is absent or unusable. |
@@ -73,10 +73,10 @@ every record carries its `repo`.
 
 ### Scenario: Install
 During installation (INSTALL.md step 2a) the owner runs
-`claude-memory namespaces init acme='~/work/acme/**' pet-game='~/src/pet-game/**'`.
+`claude-memory namespaces init work='~/work/acme/**' pet-game='~/src/pet-game/**'`.
 No database, DSN or Ollama is needed for this step.
 `claude-memory namespaces which ~/work/acme/billing-service` prints
-`acme	(rule ~/work/acme/**)`.
+`work	(rule ~/work/acme/**)`.
 
 ### Scenario: Two projects, no cross-talk
 The owner works in `~/work/acme/billing-service` in the morning and in
@@ -99,15 +99,15 @@ records by `repo` (§10).
 
 ### Scenario: Per-repo override
 A Acme repo checked out outside `~/work/acme/` sets
-`"env": {"MEMORY_NAMESPACE": "acme"}` in its `.claude/settings.json`.
-The hook and the MCP server for that session use `acme`, whatever
+`"env": {"MEMORY_NAMESPACE": "work"}` in its `.claude/settings.json`.
+The hook and the MCP server for that session use `work`, whatever
 `namespaces.yaml` says.
 
 ### Scenario: Upgrade
 Before relying on the new binary, the owner runs `namespaces init` with the
-`acme` mapping (or writes the file by hand from the example). Then the
+`work` mapping (or writes the file by hand from the example). Then the
 first migrating subcommand (`claude-memory cleanup`, or a `serve` start)
-applies migration 0002, which sets `namespace = 'acme'` on every existing
+applies migration 0002, which sets `namespace = 'work'` on every existing
 record. Acme sessions then behave as before. Without the mapping,
 Acme directories would resolve to `global` and see none of their
 history until it is added.
@@ -158,10 +158,10 @@ on it in SQL.
   Verify: a stored record read back by id has the namespace of the service
   that wrote it.
 - AC-2 (Event-driven): WHEN migration `0002_namespaces.sql` runs on an MVP
-  database, every existing row shall get `namespace = 'acme'` (historic
+  database, every existing row shall get `namespace = 'work'` (historic
   data; not a code default). The column then becomes `TEXT NOT NULL` with
   **no** default. Verify: after the migration,
-  `SELECT count(*) FROM records WHERE namespace <> 'acme'` is 0, and an
+  `SELECT count(*) FROM records WHERE namespace <> 'work'` is 0, and an
   `INSERT` that leaves out `namespace` fails.
 - AC-3 (Ubiquitous): The migration shall create indexes
   `idx_records_namespace_repo (namespace, repo)` and
@@ -184,7 +184,7 @@ Resolution order for a directory `dir`. The first rule that applies wins:
 ```yaml
 default: global                   # optional; what `namespaces init` writes
 namespaces:
-  - namespace: acme
+  - namespace: work
     paths: ["~/work/acme/**"]
   - namespace: pet-game
     paths: ["~/src/pet-game", "~/src/pet-game/**"]
@@ -232,7 +232,7 @@ the first pattern in the file wins.
 - AC-10 (Ubiquitous): `serve` (MCP, stdio) shall resolve once at startup
   from its working directory and scope every tool call to that namespace.
   Verify: an MCP server started in a `pet-game` directory returns no
-  `acme` records from `memory_search` or `memory_list`.
+  `work` records from `memory_search` or `memory_list`.
 - AC-11 (Ubiquitous): `hook` shall resolve from the payload `cwd` on every
   call. Verify: with a stubbed resolver, two hook calls with different
   `cwd` values search `[ns(cwd1), global]` and `[ns(cwd2), global]`.
@@ -291,7 +291,7 @@ the first pattern in the file wins.
   Leaving it out (or passing `""`) writes to the current namespace (which
   may itself be `global`). Any other value is rejected with a validation
   error, and nothing is written. Verify: `namespace="global"` → row in
-  `global`; `namespace="pet-game"` from `acme` → error, no row.
+  `global`; `namespace="pet-game"` from `work` → error, no row.
 - AC-22 (Ubiquitous): No automatic writer (session extraction, PR ingest,
   seed, the hook) shall set `StoreRequest.Namespace`. Automatic writes go to
   the current namespace, which is `global` when the context resolves to the
@@ -351,7 +351,7 @@ before config loading, so it needs no database, DSN or Ollama.
   - `integration/INSTALL.md`: step 2a (`namespaces init`), the "Using
     namespaces" section (`which`, `add`, `MEMORY_NAMESPACE`, explicit
     `global`), and the re-home SQL.
-  - `DEPLOY.md`: the upgrade order (map `acme` before relying on the new
+  - `DEPLOY.md`: the upgrade order (map `work` before relying on the new
     binary; run `claude-memory cleanup` once to migrate, because the hook
     skips migrations), rollback with default `'global'`, and the re-home
     SQL.
@@ -411,7 +411,7 @@ before config loading, so it needs no database, DSN or Ollama.
   ```sql
   -- review first
   SELECT id, title, repo FROM records WHERE namespace = 'global' AND repo = 'billing-service';
-  UPDATE records SET namespace = 'acme'
+  UPDATE records SET namespace = 'work'
    WHERE namespace = 'global' AND repo IN ('billing-service', 'catalog-service');
   ```
 
@@ -451,7 +451,7 @@ All questions are resolved.
 | 3 | What happens on a broken config or `MEMORY_NAMESPACE=global`? | **Resolved**, owner, 2026-10-01 (review): no fail-closed. A broken file is logged and treated as absent; an invalid env value is ignored; `global` is a valid value. v0.1's spec-creator proposal (fail closed) is withdrawn. | AC-8, AC-9 (withdrawn) |
 | 4 | Can a non-`global` namespace mutate `global` records by id? | **Resolved**: yes (AC-20); confirmed by the review. Precondition: tool outputs show `namespace` (AC-23) so the model knows a record is shared, and the CLAUDE.md snippet says not to add project detail to a `global` record. | AC-19, AC-20, AC-23 |
 | 5 | How is "most specific" defined? | **Resolved**: longest literal prefix before the first wildcard; an exact path scores `len+2`, so it beats `<path>/**`; ties go to file order. (v0.1's rule did not hold for `/a/b` vs `/a/b/**`; fixed.) | AC-6 |
-| 6 | Which namespace is used when none can be chosen? | **Resolved**, owner, 2026-10-01: `global`. No project is special-cased in code. 0002 still backfills legacy rows to `acme` as historic data. | AC-2, AC-5, AC-7, AC-8 |
+| 6 | Which namespace is used when none can be chosen? | **Resolved**, owner, 2026-10-01: `global`. No project is special-cased in code. 0002 still backfills legacy rows to `work` as historic data. | AC-2, AC-5, AC-7, AC-8 |
 | 7 | May anything reach `global` without an explicit argument? | **Resolved**, owner: yes. Unresolved-context writes (inline, session, PR) land in `global`; explicit `namespace="global"` also works. Recovery is the re-home SQL. | AC-22, AC-24, AC-28 |
 | 8 | Is cross-namespace leakage a security issue? | **Resolved**, owner: no. Local single-user database; leakage is a relevance concern. Visibility (provenance, Warn line) instead of gating. | §1, §7, AC-8, AC-27, AC-28 |
 | 9 | How is `namespaces.yaml` created? | **Resolved**, owner: at installation, with `claude-memory namespaces init|add|which` (INSTALL.md step 2a, "Using namespaces", DEPLOY.md upgrade note). | AC-24..AC-27 |
@@ -459,7 +459,7 @@ All questions are resolved.
 ## 14. Acceptance Criteria Summary (Definition of Done)
 
 - [ ] AC-1 — every record carries a non-empty namespace
-- [ ] AC-2 — migration backfills `acme` (historic), column NOT NULL without default
+- [ ] AC-2 — migration backfills `work` (historic), column NOT NULL without default
 - [ ] AC-3 — `(namespace, repo)` and `(namespace, status)` indexes
 - [ ] AC-4 — migration is idempotent
 - [ ] AC-5 — resolution order env > glob > `default:` > `global`

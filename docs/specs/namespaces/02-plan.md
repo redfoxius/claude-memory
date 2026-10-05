@@ -21,9 +21,9 @@ tests, no-`cwd` warning in `extract --run`, glob validation,
 ## Owner decisions (2026-10-01, supersede plan v0.1)
 1. No namespace can be chosen (no file, no match, unreadable/broken file,
    invalid `MEMORY_NAMESPACE`) → the shared `global` namespace. Never
-   `acme`, never fail-closed. No project is special-cased in code
+   `work`, never fail-closed. No project is special-cased in code
    (`namespace.Fallback` = `memory.DefaultNamespace` = `"global"`).
-   Migration 0002 still backfills existing rows to `acme` as historic
+   Migration 0002 still backfills existing rows to `work` as historic
    data.
 2. Unresolved-context writes (inline, session, PR) land in `global`;
    explicit `memory_store(namespace="global")` also works.
@@ -51,7 +51,7 @@ tests, no-`cwd` warning in `extract --run`, glob validation,
     `serve`, `hook`, `extract` and `ingest-pr`.
   - `memory_store` `namespace` input; example YAML; INSTALL.md section;
     unit tests; `TestNamespaceIsolation` (tag `integration`, never run).
-- `32a5d57` — fallback `acme` → `global` (`namespace.Fallback`,
+- `32a5d57` — fallback `work` → `global` (`namespace.Fallback`,
   `memory.DefaultNamespace`).
 - `e2cfbf3` — `namespaces init|add|which` (`cmd/claude-memory/namespaces.go`,
   `internal/namespace/file.go`: atomic 0600 save, refuses overwrite without
@@ -120,8 +120,8 @@ tests, no-`cwd` warning in `extract --run`, glob validation,
    `internal/postgres/migrations/0002_namespaces.sql`,
    `internal/postgres/store.go` (embeds both migrations, run in order).
    Satisfies AC-1..AC-4 (by reading; see WI-7 for execution).
-   Note: idempotent via `ADD COLUMN IF NOT EXISTS … DEFAULT 'acme'`,
-   then `DROP DEFAULT`, then `CREATE INDEX IF NOT EXISTS`. The `acme`
+   Note: idempotent via `ADD COLUMN IF NOT EXISTS … DEFAULT 'work'`,
+   then `DROP DEFAULT`, then `CREATE INDEX IF NOT EXISTS`. The `work`
    backfill is historic data only.
 
 2. **Store adapter scoping** — DONE (`5f21cb7`; search rows return
@@ -249,7 +249,7 @@ tests, no-`cwd` warning in `extract --run`, glob validation,
 
    Remaining:
    - **Migration test (AC-2..AC-4).** Apply `0001` only, insert rows,
-     apply all migrations twice, then check the `acme` backfill, that an
+     apply all migrations twice, then check the `work` backfill, that an
      INSERT without `namespace` fails, and the two indexes in `pg_indexes`.
    - **Lock test (AC-18).** Concurrent near-duplicate writes in `ns-a` and
      `ns-a` give 1 row; in `ns-a` and `ns-b` they give 2 rows.
@@ -268,14 +268,14 @@ tests, no-`cwd` warning in `extract --run`, glob validation,
    - Example YAML: format, resolution order, fallback `global`
      (`32a5d57`, `e2cfbf3`).
    - INSTALL.md: step 2a (`namespaces init`, upgrade note to map
-     `acme`, `which` check) and "Using namespaces" (`1d7deb6`).
+     `work`, `which` check) and "Using namespaces" (`1d7deb6`).
    - DEPLOY.md: upgrade note (hook skips migrations; run `cleanup` once;
-     0002 backfill; map `acme`), rollback default `'global'`, **(g)**
+     0002 backfill; map `work`), rollback default `'global'`, **(g)**
      re-home SQL keyed on `repo` (`1d7deb6`, `6b6638b`).
    - CLAUDE.md snippet: when `namespace="global"` is appropriate.
 
    Remaining:
-   - DEPLOY.md: state the order explicitly — map `acme`
+   - DEPLOY.md: state the order explicitly — map `work`
      (`namespaces init`) before relying on the new binary, then
      `claude-memory cleanup` to migrate, then the count check (review M1).
      Today the note says to map "then", after migrating.
@@ -345,10 +345,10 @@ tests, no-`cwd` warning in `extract --run`, glob validation,
   Mitigation: `namespaces which` provenance, the fallback Warn line
   (AC-28), and the re-home SQL (spec §10).
 - **Upgrade window hides Acme history.** If the new binary runs before
-  `acme` is mapped, Acme directories resolve to `global`: their
+  `work` is mapped, Acme directories resolve to `global`: their
   sessions see none of the backfilled records, and extraction/PR ingest
   write Acme facts to `global`. Mitigation: the rollout below maps
-  `acme` first; re-home anything that slipped through.
+  `work` first; re-home anything that slipped through.
 - **Hook before migration.** The hook skips migrations; until 0002 is
   applied its query fails and it stays silent (no cards). Mitigation: run
   `claude-memory cleanup` once right after installing the binary.
@@ -381,14 +381,14 @@ tests, no-`cwd` warning in `extract --run`, glob validation,
 3. Install the new binary.
 4. **Before relying on it** (before starting Claude Code), create the
    mapping with Acme mapped:
-   `claude-memory namespaces init acme='~/work/acme/**' [pet-game='~/src/pet-game/**' …]`
+   `claude-memory namespaces init work='~/work/acme/**' [pet-game='~/src/pet-game/**' …]`
    (or write the file by hand from `integration/namespaces.example.yaml`).
    Add `MEMORY_NAMESPACE` to any repo outside the mapped paths. Check with
-   `claude-memory namespaces which ~/work/acme/<repo>` → `acme (rule …)`.
+   `claude-memory namespaces which ~/work/acme/<repo>` → `work (rule …)`.
 5. Run `claude-memory cleanup` once. It applies migration 0002; the hook
    never migrates.
 6. Check `SELECT namespace, count(*) FROM records GROUP BY 1` shows only
-   `acme`.
+   `work`.
 7. Smoke test: one prompt in a Acme repo (cards as before) and one in a
    side project (no Acme cards); `memory_search` output shows
    `namespace`.

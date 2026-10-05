@@ -5,7 +5,7 @@
 - Status: v0.2 — plan review (Opus) PASS WITH FIXES; fixes applied, owner
   answered §9
 - Version: 0.2
-- Owner: Oleksandr Kolomoiets (user@example.com)
+- Owner: Oleksandr Kolomoiets
 - Input: `docs/specs/README.md` backlog item 3 ("management CLI (`review`) +
   import of existing knowledge"); builds on `namespaces/01-spec.md` and
   `staleness-metrics/01-spec.md` (events, stale hint).
@@ -76,8 +76,8 @@ import, 2 skipped (`MEMORY.md`, `type user`), 3 in another namespace. The
 real run adds 5 and skips 1 as `duplicate of 3f2a91c0`. A second run prints
 `skipped (already imported)` for all 5.
 
-**INSIGHTS.** `claude-memory import insights ~/work/example-org/example-project
---namespace example-project` walks three `INSIGHTS.md` files; each dated entry in
+**INSIGHTS.** `claude-memory import insights ~/work/pet-game
+--namespace pet-game` walks three `INSIGHTS.md` files; each dated entry in
 "What Works" becomes a `pattern` candidate with `files` from its
 `` `src/platform/sse.ts:63-68` `` references (no `commit_sha`: unchecked
 for staleness).
@@ -321,7 +321,7 @@ for staleness).
   without import key on the new schema.
 - Manual (owner's machine): `import automem --dry-run`, then a real run,
   then a second run (all `already imported`); `import insights` on
-  `example-project`; one `review` pass; `stats` shows `import` in
+  `pet-game`; one `review` pass; `stats` shows `import` in
   created-by-source.
 
 ## 8. Risks

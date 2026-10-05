@@ -4,7 +4,7 @@
 - Spec ID: SPEC-2026-10-01-staleness-metrics
 - Status: PR A (staleness) implemented and reviewed; PR B (events + stats) not started. Original: ready for implementation (all §13 questions resolved in v0.2)
 - Version: 0.2
-- Owner: Oleksandr Kolomoiets (user@example.com)
+- Owner: Oleksandr Kolomoiets
 - Supersedes: none (extends SPEC-2026-10-01-memory-mvp and
   SPEC-2026-10-01-namespaces)
 - Related: `docs/specs/README.md` backlog item 2 (input, agreed with the
@@ -366,8 +366,8 @@ stats queries, cleanup CTE).
 - AC-15 (Ubiquitous): Every event shall carry a non-empty `namespace`: for
   usage events (`card_injected`, `feedback`) the namespace the card was
   shown in or the feedback was given from; for lifecycle events the
-  record's namespace. Verify: a `global` record injected in `acme`
-  yields `card_injected` with `acme`; its creation yields
+  record's namespace. Verify: a `global` record injected in `work`
+  yields `card_injected` with `work`; its creation yields
   `record_created` with `global`.
 - ~~AC-16~~ **Withdrawn in v0.2.** The source-scan test for `UPDATE events`
   / `DELETE FROM events` is dropped as brittle; "append-only, the only

@@ -4,7 +4,7 @@
 # Manage with: claude-memory namespaces add|which|init
 default: global
 namespaces:
-    - namespace: acme
+    - namespace: work
       paths:
         - ~/work/acme/**
     - namespace: pet-game

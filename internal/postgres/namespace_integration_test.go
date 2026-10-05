@@ -13,7 +13,7 @@ import (
 )
 
 // A pre-namespace database (only 0001 applied) with a legacy row: the
-// migrations backfill it to 'acme', re-running them changes nothing, and
+// migrations backfill it to 'work', re-running them changes nothing, and
 // afterwards an INSERT without a namespace is refused (the default is dropped).
 func TestMigration0002_BackfillAndIdempotent(t *testing.T) {
 	ctx := context.Background()
@@ -55,8 +55,8 @@ func TestMigration0002_BackfillAndIdempotent(t *testing.T) {
 		if err := store.runMigrations(ctx); err != nil {
 			t.Fatalf("migrations run %d: %v", run, err)
 		}
-		if got := namespaceOf(); got != "acme" {
-			t.Errorf("after run %d legacy namespace = %q, want acme", run, got)
+		if got := namespaceOf(); got != "work" {
+			t.Errorf("after run %d legacy namespace = %q, want work", run, got)
 		}
 	}
 

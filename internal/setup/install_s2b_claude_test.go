@@ -125,7 +125,7 @@ func TestYesKeepsModifiedSkillAndBlock(t *testing.T) {
 func TestYesClaudeMDGitRule(t *testing.T) {
 	t.Run("explicit in git: skipped", func(t *testing.T) {
 		r := newFullRig(t)
-		repo := filepath.Join(r.p.Cwd, "acme")
+		repo := filepath.Join(r.p.Cwd, "work")
 		if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
 			t.Fatal(err)
 		}

@@ -2,7 +2,7 @@
   {
     "id": "paraphrase_001",
     "repo": "billing-service",
-    "query": "Where should I open pull requests in the billing-service service?",
+    "query": "Where should I open pull requests in billing-service?",
     "category": "paraphrase",
     "expectedRecordIdx": 0,
     "description": "Paraphrase of 'billing-service: Pull requests target master' record"
@@ -17,10 +17,10 @@
   {
     "id": "paraphrase_003",
     "repo": "billing-service",
-    "query": "What happens when an order return is declined in billing-service?",
+    "query": "What happens when a payment is refunded in billing-service?",
     "category": "paraphrase",
     "expectedRecordIdx": 2,
-    "description": "Paraphrase of DECLINED/DECLINED terminal status record"
+    "description": "Paraphrase of REFUNDED/REFUNDED terminal status record"
   },
   {
     "id": "exact_identifier_001",
@@ -238,7 +238,7 @@
   },
   {
     "id": "long_identifier_007",
-    "query": "the pipeline for the returns repo failed again during the Setup k8s step with an error complaining about metadata.labels being longer than allowed, and I have no idea what is going wrong with the branch",
+    "query": "the pipeline for the billing repo failed again during the Setup k8s step with an error complaining about metadata.labels being longer than allowed, and I have no idea what is going wrong with the branch",
     "category": "long_prompt_identifier",
     "expectedRecordIdx": 1,
     "description": "metadata.labels/Setup k8s identifiers buried in a long natural-language prompt (seed 1)"

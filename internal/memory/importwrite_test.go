@@ -60,7 +60,7 @@ func TestStoreImport_KeyHitSkipsWithoutWriteOrEvent(t *testing.T) {
 	var created []*record.Record
 	st := importStore(&created)
 	st.ImportKeyExistsFunc = func(_ context.Context, ns, key string) (bool, error) {
-		if ns != "acme" || key != "automem:abc" {
+		if ns != "work" || key != "automem:abc" {
 			t.Errorf("ImportKeyExists(%q, %q)", ns, key)
 		}
 		return true, nil

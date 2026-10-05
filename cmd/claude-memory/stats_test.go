@@ -136,7 +136,7 @@ func TestRunStatsTextBlocksAndSpoolLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &fakeStats{
-		nss: []string{"acme", "global"},
+		nss: []string{"work", "global"},
 		byNS: map[string]memory.EventCounts{
 			"": {Cards: 3, CardRecords: 2, Feedback: map[string]int{"useful": 1},
 				CreatedBySource:    map[string]int{"pr": 2},
@@ -146,7 +146,7 @@ func TestRunStatsTextBlocksAndSpoolLine(t *testing.T) {
 				CandidatesPromoted: 1,
 				ImportCreated:      6,
 				ImportPromoted:     3},
-			"acme": {Cards: 3, CardRecords: 2},
+			"work": {Cards: 3, CardRecords: 2},
 		},
 	}
 	var out bytes.Buffer
@@ -155,7 +155,7 @@ func TestRunStatsTextBlocksAndSpoolLine(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{
-		"== all namespaces ==", "== namespace acme ==", "== namespace global ==",
+		"== all namespaces ==", "== namespace work ==", "== namespace global ==",
 		"cards injected:      3 (2 distinct records)", "feedback:            useful=1 outdated=0 wrong=0",
 		"records created:     inline=0 session=0 pr=2", "pr[candidate=0 active=5 deprecated=0]",
 		"promotion rate:      25.0% (1/4)", "import promotion:    50.0% (3/6)", "pr=2 import=0", "deprecated(tool=0 feedback=1)",
@@ -168,7 +168,7 @@ func TestRunStatsTextBlocksAndSpoolLine(t *testing.T) {
 }
 
 func TestRunStatsJSONAndErrors(t *testing.T) {
-	fake := &fakeStats{nss: []string{"acme"}, byNS: map[string]memory.EventCounts{"": {Cards: 2, CardRecords: 1, UsefulWithin: 1}}}
+	fake := &fakeStats{nss: []string{"work"}, byNS: map[string]memory.EventCounts{"": {Cards: 2, CardRecords: 1, UsefulWithin: 1}}}
 	var out bytes.Buffer
 	if err := runStats(context.Background(), fake, statsOptions{Since: time.Hour, JSON: true}, time.Now(), t.TempDir(), &out); err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestRunStatsJSONAndErrors(t *testing.T) {
 		t.Fatalf("bad json: %v\n%s", err, out.String())
 	}
 	if rep.Total.Cards != 2 || rep.Total.PrecisionProxy.Ratio == nil || *rep.Total.PrecisionProxy.Ratio != 1 ||
-		rep.Total.PromotionRate.Ratio != nil || len(rep.Namespaces) != 1 || rep.Namespaces[0].Namespace != "acme" {
+		rep.Total.PromotionRate.Ratio != nil || len(rep.Namespaces) != 1 || rep.Namespaces[0].Namespace != "work" {
 		t.Errorf("report = %+v", rep)
 	}
 

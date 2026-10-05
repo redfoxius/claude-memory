@@ -9,7 +9,7 @@
 
 Everything under `integration/` is produced by this repo but installs
 into **user-level** config (`~/.local/bin`, `~/.config/claude-memory`,
-`~/.claude/`, `~/Library/LaunchAgents`, `acme/CLAUDE.md`). None of it
+`~/.claude/`, `~/Library/LaunchAgents`, your shared `CLAUDE.md`). None of it
 is applied automatically — every step below is something you run
 yourself. Follow them in order.
 
@@ -75,25 +75,25 @@ Create the mapping file (`~/.config/claude-memory/namespaces.yaml`, mode
 
 ```bash
 # map project areas to namespaces right away (globs: ** = any depth, ~ = home)
-claude-memory namespaces init acme='~/work/acme/**' pet-game='~/src/pet-game/**'
+claude-memory namespaces init work='~/work/acme/**' pet-game='~/src/pet-game/**'
 
 # or start with only the shared default and add projects later
 claude-memory namespaces init
 ```
 
 Directories matching no mapping use `default:` — `global` unless you pass
-`--default NAME` (e.g. `init --default acme` to make one project the
+`--default NAME` (e.g. `init --default work` to make one project the
 catch-all). Nothing is special-cased in code; any name works
 (lowercase letters, digits, `-`, `_`).
 
 **Upgrading from a pre-namespace install:** the migration backfilled
-existing records to `acme`. Map your Acme directories to it or those
-records stay invisible: `claude-memory namespaces add acme '<path>/**'`.
+existing records to `work`. Map your Acme directories to it or those
+records stay invisible: `claude-memory namespaces add work '<path>/**'`.
 
 Check the result:
 
 ```bash
-claude-memory namespaces which ~/work/acme/billing-service   # -> acme
+claude-memory namespaces which ~/work/acme/billing-service   # -> work
 claude-memory namespaces which /tmp                         # -> global (the default)
 ```
 
@@ -134,10 +134,10 @@ arrays for those events instead of replacing the key outright — merge
 by hand or with `jq -s '.[0] * .[1]'` against a throwaway copy, then
 review the diff before saving over the real file.
 
-## 6. Paste the `acme/CLAUDE.md` snippet
+## 6. Paste the `CLAUDE.md` snippet
 
 Open `integration/claude-md-snippet.md`, copy everything from the `---`
-separator onward, and paste it into `acme/CLAUDE.md` under its own
+separator onward, and paste it into your shared `CLAUDE.md` under its own
 heading. This is a manual copy — review it like any other edit to a
 shared file before committing.
 
@@ -222,7 +222,7 @@ time (echo '{"transcript_path":"/nonexistent","cwd":"'"$PWD"'","session_id":"smo
 # real time should be well under 100ms; exit code 0 either way.
 ```
 
-**End-to-end in Claude Code**: open a new session in any `acme/`
+**End-to-end in Claude Code**: open a new session in any
 repo, type a prompt related to something you've stored, and confirm the
 injected context card appears with only title/repo/id — this confirms
 the hooks are actually wired through `~/.claude/settings.json`, not
@@ -246,7 +246,7 @@ rm -rf ~/.claude/hooks/claude-memory
 # skills
 rm -rf ~/.claude/skills/remember ~/.claude/skills/memory-digest
 
-# CLAUDE.md: manually remove the pasted section from acme/CLAUDE.md
+# CLAUDE.md: manually remove the pasted section from your shared CLAUDE.md
 
 # binary + config (keep ~/.config/claude-memory/env and namespaces.yaml if
 # you plan to reinstall later; otherwise remove them too)

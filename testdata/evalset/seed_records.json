@@ -2,7 +2,7 @@
   {
     "kind": "convention",
     "title": "billing-service: Pull requests target master, not develop",
-    "content": "In the billing-service repository, all feature branches are cut from `master` and pull requests are opened back into `master`, not `develop`. This is a repo-specific exception to the shared acme/CLAUDE.md convention. Branch format: `<type>/<TICKET-KEY>/<short-description>`, max 50 chars for k8s label compatibility.",
+    "content": "In the billing-service repository, all feature branches are cut from `master` and pull requests are opened back into `master`, not `develop`. This is a repo-specific exception to the shared team convention. Branch format: `<type>/<TICKET-KEY>/<short-description>`, max 50 chars for k8s label compatibility.",
     "repo": "billing-service",
     "tags": ["git", "convention", "billing-service"],
     "source": "pr"
@@ -17,10 +17,10 @@
   },
   {
     "kind": "decision",
-    "title": "DECLINED/DECLINED is a terminal status in billing-service",
-    "content": "In the billing-service order management system, when a return is marked as DECLINED with a DECLINED substatus (lock blocking ERP), this is an intended, terminal state. The system prevents further transitions out of DECLINED/DECLINED to maintain data consistency with ERP. This is not a bug and should not be changed without coordinating with operations.",
+    "title": "REFUNDED/REFUNDED is a terminal status in billing-service",
+    "content": "In the billing-service payment system, when a payment is marked as REFUNDED with a REFUNDED substatus (manager lock blocking the ERP), this is an intended, terminal state. The system prevents further transitions out of REFUNDED/REFUNDED to maintain data consistency with the ERP. This is not a bug and should not be changed without coordinating with operations.",
     "repo": "billing-service",
-    "tags": ["order-management", "status-transitions", "erp"],
+    "tags": ["payments", "status-transitions", "erp"],
     "source": "pr"
   },
   {
@@ -66,7 +66,7 @@
   {
     "kind": "decision",
     "title": "Semantic memory: Ollama runs on the laptop, not the server",
-    "content": "After smoke-testing bge-m3 embeddings on both the laptop (M1 Pro, Metal GPU) and the home server (Mac Mini 2012, AVX-only), the laptop is 12-60x faster: ~0.02-0.21s for 15-600 tokens vs. ~0.23-12.3s on the server (~17ms/token). For a synchronous read-path hook (AC-30), moving Ollama to the laptop was non-negotiable. The server runs only Postgres in Docker, bound to its Tailscale IP. The `claude-memory` MCP server also runs on the laptop as a stdio process, registered in Claude Code's user-level config.",
+    "content": "After smoke-testing bge-m3 embeddings on both the laptop (M1 Pro, Metal GPU) and the home server (an older x86 machine without AVX2), the laptop is 12-60x faster: ~0.02-0.21s for 15-600 tokens vs. ~0.23-12.3s on the server (~17ms/token). For a synchronous read-path hook (AC-30), moving Ollama to the laptop was non-negotiable. The server runs only Postgres in Docker, bound to its Tailscale IP. The `claude-memory` MCP server also runs on the laptop as a stdio process, registered in Claude Code's user-level config.",
     "repo": "*",
     "tags": ["architecture", "performance", "embedding"],
     "source": "pr"
