@@ -341,7 +341,7 @@ func generateReport(results *AggregatedResults, cfg *config.Config) string {
 		posMin, posMax, posMean := stats(results.PositiveSimilarities)
 		posP50 := results.PositiveSimilarities[len(results.PositiveSimilarities)/2]
 		posP95 := percentile(results.PositiveSimilarities, 0.95)
-		sb.WriteString("**Positive (paraphrase + identifier) similarity scores:**\n")
+		sb.WriteString("**Positive (paraphrase + identifier) similarity scores** (Similarity of the RRF rank-1 record, which is not necessarily the expected one or the max-similarity one; the hook filters each record by its own Similarity):\n")
 		fmt.Fprintf(&sb, "- Min: %.4f, Max: %.4f, Mean: %.4f\n", posMin, posMax, posMean)
 		fmt.Fprintf(&sb, "- P50: %.4f, P95: %.4f\n", posP50, posP95)
 	}
@@ -456,7 +456,7 @@ func generateReport(results *AggregatedResults, cfg *config.Config) string {
 			fmt.Fprintf(&sb, "- Repo scope: %q\n", cr.Repo)
 		}
 		if cr.TopRecordTitle != "" {
-			fmt.Fprintf(&sb, "- Top result: %s\n", cr.TopRecordTitle)
+			fmt.Fprintf(&sb, "- Top result (RRF rank 1): %s\n", cr.TopRecordTitle)
 		}
 		fmt.Fprintf(&sb, "- Similarity: %.4f, Score: %.4f\n", cr.TopSimilarity, cr.TopScore)
 		switch cr.Category {
