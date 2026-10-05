@@ -1,4 +1,4 @@
-.PHONY: build test test-integration lint clean cross-build install
+.PHONY: build test test-integration lint eval clean cross-build install
 
 # Default target
 all: build lint test
@@ -40,6 +40,18 @@ cross-build:
 	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/claude-memory-darwin-amd64 ./cmd/claude-memory
 	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/claude-memory-linux-amd64 ./cmd/claude-memory
 	GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/claude-memory-linux-arm64 ./cmd/claude-memory
+
+# Retrieval quality eval (hit@3, hook-threshold negatives, near-duplicate
+# verdicts). Needs REAL services: Ollama with bge-m3 (MEMORY_OLLAMA_URL, default
+# localhost:11434) and the Postgres from ~/.config/claude-memory/env.
+# Fixtures (testdata/evalset) live in the `eval` namespace, never in a real
+# one, unless MEMORY_NAMESPACE is set. The report is tracked in git, so
+# `git diff` after a run shows regressions. Override the report path with
+#   make eval EVAL_OUTPUT=/tmp/eval.md
+EVAL_OUTPUT ?= docs/specs/memory-mvp/eval-results.md
+eval: build
+	@echo "Running retrieval eval (needs Ollama + Postgres)..."
+	bin/claude-memory eval-retrieval --output=$(EVAL_OUTPUT)
 
 # Clean up build artifacts.
 clean:

@@ -147,5 +147,100 @@
     "category": "long_prompt_identifier",
     "expectedRecordIdx": 3,
     "description": "Identifier buried in a long natural-language prompt (backlog item 5); AND-style full-text returned nothing for these"
+  },
+  {
+    "id": "paraphrase_007",
+    "query": "Why must user-supplied search text never be spliced into the statement and what do we pass instead?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 10,
+    "description": "Low-overlap paraphrase of the RRF / parameterized queries record (seed 10)"
+  },
+  {
+    "id": "paraphrase_008",
+    "query": "Which network block should the database listener trust when only our private mesh VPN peers may reach it?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 7,
+    "description": "Low-overlap paraphrase of the Tailscale CGNAT record (seed 7)"
+  },
+  {
+    "id": "paraphrase_009",
+    "query": "How do we stop passwords and credentials from leaking into what gets saved long term?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 9,
+    "description": "Low-overlap paraphrase of the secret scrubbing record (seed 9)"
+  },
+  {
+    "id": "paraphrase_010",
+    "query": "Why is the embedding model hosted on my notebook and not on the home machine?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 8,
+    "description": "Low-overlap paraphrase of the Ollama-on-laptop decision (seed 8); confusable with the num_batch record (seed 4)"
+  },
+  {
+    "id": "confusable_001",
+    "query": "Which machine should run the embedding model for the synchronous hook, and why?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 8,
+    "description": "Confusable pair: Ollama topology (seed 8) vs num_batch (seed 4); expect seed 8 at hit@3"
+  },
+  {
+    "id": "confusable_002",
+    "query": "Why are my long inputs to the embedding model cut off before the end?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 4,
+    "description": "Confusable pair: num_batch truncation (seed 4) vs Ollama topology (seed 8); expect seed 4 at hit@3"
+  },
+  {
+    "id": "confusable_003",
+    "query": "How do I keep two concurrent writers from inserting the same duplicate record at once?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 3,
+    "description": "Confusable pair: advisory locks (seed 3) vs RRF/SQL (seed 10); expect seed 3 at hit@3"
+  },
+  {
+    "id": "confusable_004",
+    "query": "How is the combined vector and keyword ranking score computed for search results?",
+    "category": "paraphrase",
+    "expectedRecordIdx": 10,
+    "description": "Confusable pair: RRF (seed 10) vs advisory locks (seed 3); expect seed 10 at hit@3"
+  },
+  {
+    "id": "negative_004",
+    "query": "How do I configure an nginx reverse proxy with upstream load balancing and SSL termination?",
+    "category": "negative",
+    "description": "Hard negative: technical but unrelated (nginx); must stay below the hook threshold"
+  },
+  {
+    "id": "negative_005",
+    "query": "How do I clean up subscriptions in a React useEffect cleanup function?",
+    "category": "negative",
+    "description": "Hard negative: technical but unrelated (React useEffect); must stay below the hook threshold"
+  },
+  {
+    "id": "negative_006",
+    "query": "How does Terraform state locking work with an S3 backend and DynamoDB?",
+    "category": "negative",
+    "description": "Hard negative: technical but unrelated (Terraform locking, close to 'lock' wording); must stay below the hook threshold"
+  },
+  {
+    "id": "long_identifier_005",
+    "query": "we are reviewing how the service persists notes from chat sessions and someone asked whether we redact things like AKIA access keys or ghp_ tokens before anything touches the database, where is that policy defined",
+    "category": "long_prompt_identifier",
+    "expectedRecordIdx": 9,
+    "description": "AKIA/ghp_ identifiers buried in a long natural-language prompt (secret scrubbing, seed 9)"
+  },
+  {
+    "id": "long_identifier_006",
+    "query": "when I paste the sql for the hybrid search into a review the reviewer keeps asking why we use pgx.Query with $1 placeholders instead of building the string by hand, can you remind me of the reasoning",
+    "category": "long_prompt_identifier",
+    "expectedRecordIdx": 10,
+    "description": "pgx.Query/$1 identifiers buried in a long natural-language prompt (seed 10)"
+  },
+  {
+    "id": "long_identifier_007",
+    "query": "the pipeline for the returns repo failed again during the Setup k8s step with an error complaining about metadata.labels being longer than allowed, and I have no idea what is going wrong with the branch",
+    "category": "long_prompt_identifier",
+    "expectedRecordIdx": 1,
+    "description": "metadata.labels/Setup k8s identifiers buried in a long natural-language prompt (seed 1)"
   }
 ]
