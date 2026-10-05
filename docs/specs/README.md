@@ -10,7 +10,7 @@
 
 ## Backlog (next, in order)
 
-### 1. namespaces — IMPLEMENTED (2026-10-01); follow-ups open
+### 1. namespaces — IMPLEMENTED (2026-10-01); follow-ups done (2026-10-05)
 
 **Done:** namespace on every record, scoped search/dedup/list/lock/by-id,
 `global` fallback and explicit writes, `namespaces.yaml` resolver wired into
@@ -22,7 +22,7 @@ tests pass on a local Postgres+pgvector (`make test-integration`).
 and per-namespace advisory-lock integration tests; ingest-pr two-repo routing,
 hook payload-cwd and eval scope tests; `extract --run` warns when the
 transcript has no `cwd`; `SupersededBy` must be an accessible record.
-**Still open:** per-namespace `pr_ingest` config (item 4).
+Per-namespace `pr_ingest` (`enabled`/`provider`) shipped with item 4 (pr-providers); only its YAGNI cuts (`auth.token_env`, `host`, namespace-derived ingest roots) remain unbuilt.
 
 
 Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
