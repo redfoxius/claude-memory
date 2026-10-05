@@ -294,3 +294,21 @@ func TestScrubContent(t *testing.T) {
 		t.Errorf("Expected DSN to be redacted in content, got: %s", result.Text)
 	}
 }
+
+func TestScrub_ExtraShapes(t *testing.T) {
+	s := New()
+	for _, in := range []string{
+		"export DB_PASSWORD=hunter2hunter2",
+		"key sk-" + strings.Repeat("a", 30),
+		"gho_" + strings.Repeat("x", 36),
+		"github_pat_" + strings.Repeat("A", 40),
+	} {
+		r := s.Scrub(in)
+		if !r.Redacted || r.Text == in {
+			t.Errorf("not redacted: %q -> %q", in, r.Text)
+		}
+	}
+	if r := s.Scrub("password=short and token=abc"); r.Redacted {
+		t.Errorf("short values must not be redacted: %q", r.Text)
+	}
+}

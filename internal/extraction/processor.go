@@ -132,18 +132,29 @@ type StoreWriter interface {
 // Returns a Result with the number of records stored, or zero if gating fails (AC-22).
 // Errors in parsing or subprocess execution are logged but do not fail the call;
 // instead, zero records are returned (AC-24, AC-25).
-// If runner is nil, a default CLIHaikuRunner is created.
+// If runner is nil, a default CLIHaikuRunner is created. scrubber (nil =
+// none, same contract as ProcessPR) redacts the transcript text before it
+// reaches haiku; redaction runs inside the parser, ahead of the per-result
+// cap and the char-budget cut, so a secret cannot be split into a surviving
+// fragment.
 func ProcessSession(
 	ctx context.Context,
 	writer StoreWriter,
 	transcriptPath string,
 	cfg Config,
 	runner HaikuRunner,
+	scrubber memory.Scrubber,
 ) (*Result, error) {
 	result := &Result{}
 
 	// Parse the transcript (AC-24).
 	transcriptCfg := transcript.Config{CharBudget: cfg.CharBudget}
+	if scrubber != nil {
+		transcriptCfg.Redact = func(s string) string {
+			out, _ := scrubber.Scrub(s)
+			return out
+		}
+	}
 	tr, err := transcript.Parse(transcriptPath, transcriptCfg)
 	if err != nil {
 		slog.Error("failed to parse transcript", "path", transcriptPath, "error", err)

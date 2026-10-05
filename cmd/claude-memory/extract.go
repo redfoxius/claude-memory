@@ -16,6 +16,7 @@ import (
 	"claude-memory/internal/config"
 	"claude-memory/internal/extraction"
 	"claude-memory/internal/memory"
+	"claude-memory/internal/scrub"
 	"claude-memory/internal/transcript"
 )
 
@@ -131,6 +132,10 @@ func launchDetached(executable, logPath string, args ...string) error {
 	return nil
 }
 
+// sessionScrubber is the redactor handed to extraction.ProcessSession so
+// transcript text is scrubbed before it is sent to haiku.
+func sessionScrubber() memory.Scrubber { return scrub.NewAdapter(scrub.New()) }
+
 // runExtract implements the --run mode: gating (AC-22, inside ProcessSession)
 // and extraction against the real claude-memory service and the real
 // `claude -p` haiku runner (nil runner -> extraction.ProcessSession
@@ -166,7 +171,7 @@ func runExtract(cfg *config.Config, transcriptPath string) error {
 		Repo:         extractionRepo,
 	}
 
-	result, err := extraction.ProcessSession(ctx, svc, transcriptPath, extractionCfg, nil)
+	result, err := extraction.ProcessSession(ctx, svc, transcriptPath, extractionCfg, nil, sessionScrubber())
 	if err != nil {
 		slog.Error("extract --run failed", "transcript", transcriptPath, "error", err)
 		return nil

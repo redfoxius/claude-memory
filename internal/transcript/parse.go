@@ -34,6 +34,12 @@ type Config struct {
 	// CharBudget is the maximum character length for CompactText.
 	// If exceeded, the tail is kept and the head is truncated.
 	CharBudget int
+
+	// Redact, when non-nil, is applied to every piece of raw text (user and
+	// assistant text, tool_result bodies, tool file paths) BEFORE any
+	// truncation, so a per-result cap or the head cut can never leave half
+	// of a secret behind. nil means no redaction.
+	Redact func(string) string
 }
 
 // toolResultCharCap bounds an individual tool_result body inside the
@@ -148,7 +154,7 @@ func Parse(path string, cfg Config) (*Transcript, error) {
 			if b.Type == "tool_use" && fileEditTools[b.Name] {
 				t.HasFileEdits = true
 			}
-			if rendered := b.render(line.Type); rendered != "" {
+			if rendered := b.render(line.Type, cfg.Redact); rendered != "" {
 				renderedLines = append(renderedLines, rendered)
 			}
 		}
@@ -198,10 +204,13 @@ func decodeContentBlocks(msg *rawMessage) []contentBlock {
 // CompactText, or "" if the block is noise that should be skipped
 // (thinking, image, empty text, ...). lineType is the enclosing line's
 // "user"/"assistant" type, used to label plain text turns.
-func (b contentBlock) render(lineType string) string {
+func (b contentBlock) render(lineType string, redact func(string) string) string {
+	if redact == nil {
+		redact = func(s string) string { return s }
+	}
 	switch b.Type {
 	case "text":
-		text := strings.TrimSpace(b.Text)
+		text := strings.TrimSpace(redact(b.Text))
 		if text == "" {
 			return ""
 		}
@@ -214,13 +223,13 @@ func (b contentBlock) render(lineType string) string {
 	case "tool_use":
 		marker := "[tool: " + b.Name
 		if fp, ok := b.Input["file_path"].(string); ok && fp != "" {
-			marker += " " + fp
+			marker += " " + redact(fp)
 		}
 		marker += "]"
 		return marker
 
 	case "tool_result":
-		body := strings.TrimSpace(toolResultText(b.Content))
+		body := strings.TrimSpace(redact(toolResultText(b.Content)))
 		if body == "" {
 			return ""
 		}

@@ -38,7 +38,7 @@ func DefaultPatterns() []*Pattern {
 		},
 		{
 			Name:    "GitHub Token",
-			Regex:   regexp.MustCompile(`gh[ps]_[A-Za-z0-9]{36,}`),
+			Regex:   regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}`),
 			Replace: "***GITHUB_TOKEN_REDACTED***",
 		},
 		{
@@ -65,6 +65,18 @@ func DefaultPatterns() []*Pattern {
 			Name:    "Azure DevOps PAT (new format, AZDO-suffixed)",
 			Regex:   regexp.MustCompile(`\b[A-Za-z0-9]{76}AZDO[A-Za-z0-9]{4}\b`),
 			Replace: "***AZDO_PAT_REDACTED***",
+		},
+		{
+			Name:    "Provider API Key (sk- prefix)",
+			Regex:   regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}`),
+			Replace: "***API_KEY_REDACTED***",
+		},
+		{
+			// Unquoted NAME=value assignments as printed by shells, env dumps
+			// and .env files (the quoted form is handled below).
+			Name:    "Unquoted Secret Assignment (NAME=value)",
+			Regex:   regexp.MustCompile(`(?i)\b[\w-]*(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)[\w-]*=[^\s'"]{8,}`),
+			Replace: "***SECRET_REDACTED***",
 		},
 		{
 			Name:    "Generic Secret/Key/Token/Password Assignment",
