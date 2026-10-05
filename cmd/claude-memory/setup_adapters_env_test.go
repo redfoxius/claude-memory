@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 func writeScript(t *testing.T, body string) string {

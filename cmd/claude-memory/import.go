@@ -11,11 +11,11 @@ import (
 	"time"
 	"unicode"
 
-	"claude-memory/internal/importer"
-	"claude-memory/internal/memory"
-	"claude-memory/internal/namespace"
-	"claude-memory/internal/record"
-	"claude-memory/internal/scrub"
+	"github.com/redfoxius/claude-memory/internal/importer"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/scrub"
 )
 
 // importUsage is the usage text of the import subcommand.

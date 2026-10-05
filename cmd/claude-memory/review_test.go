@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // reviewHarness has four candidates, newest first, plus an active record.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 func TestNormalizeFiles(t *testing.T) {

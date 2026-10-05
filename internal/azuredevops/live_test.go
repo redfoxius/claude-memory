@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"claude-memory/internal/prsource"
+	"github.com/redfoxius/claude-memory/internal/prsource"
 )
 
 // TestLiveReviewComments is opt-in (go test -tags live): it needs a logged-in

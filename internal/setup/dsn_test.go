@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/config"
 )
 
 func TestPctEncode(t *testing.T) {

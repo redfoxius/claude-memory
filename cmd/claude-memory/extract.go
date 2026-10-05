@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/extraction"
-	"claude-memory/internal/memory"
-	"claude-memory/internal/scrub"
-	"claude-memory/internal/transcript"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/extraction"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/scrub"
+	"github.com/redfoxius/claude-memory/internal/transcript"
 )
 
 // defaultHaikuTimeout bounds a single `claude -p` subprocess call made by

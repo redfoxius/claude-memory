@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // toToolError maps a service-layer error to the error returned from a tool

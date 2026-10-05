@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 // These tests need MEMORY_TEST_PG_ADMIN_DSN: a superuser DSN of a

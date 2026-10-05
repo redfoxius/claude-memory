@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/config"
 )
 
 // Tests for WI-S2-5: the envfile step, its goldens (AC-64) and the Seed

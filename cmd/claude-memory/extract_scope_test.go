@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 type scopeHistory struct {

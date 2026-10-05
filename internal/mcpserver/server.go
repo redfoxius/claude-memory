@@ -7,7 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // Server wires the 7 claude-memory MCP tools onto the go-sdk, backed by a

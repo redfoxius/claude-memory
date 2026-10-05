@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/integration"
+	"github.com/redfoxius/claude-memory/integration"
 )
 
 // Doctor tests (plan WI-S1-11): one fixture HOME that passes every check,

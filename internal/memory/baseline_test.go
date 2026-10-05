@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 const headSHA = "0123456789abcdef0123456789abcdef01234567"

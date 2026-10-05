@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/namespace"
 )
 
 // namespacesFile is the per-user path→namespace mapping.

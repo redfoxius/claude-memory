@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // eventColumns is the column list of the events table, in INSERT order.

@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/namespace"
 	"encoding/json"
 	"os"
 	"path/filepath"

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 func importReq() *StoreRequest {

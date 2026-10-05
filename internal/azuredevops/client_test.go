@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/prsource"
+	"github.com/redfoxius/claude-memory/internal/prsource"
 )
 
 // fakeRunner is a scripted Runner for testing: it maps a key derived from

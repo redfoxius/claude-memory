@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/eventspool"
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/eventspool"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // defaultStatsSince is the reporting window when --since is not given.

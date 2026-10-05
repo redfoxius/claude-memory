@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // fakeHookStore implements memory.Store for hook tests. Only Search is

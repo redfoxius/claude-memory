@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
-	"claude-memory/internal/transcript"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/transcript"
 )
 
 // Config controls extraction behavior.

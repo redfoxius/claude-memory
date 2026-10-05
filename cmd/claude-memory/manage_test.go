@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // fakeMgmt is an in-memory mgmtService.

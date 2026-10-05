@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/config"
 )
 
 // Env-file model for the envfile step (plan WI-S2-5, Design 16): which keys

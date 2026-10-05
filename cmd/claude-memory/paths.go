@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 // errBadHome means HOME is unset or relative: doctor exits 3 and install

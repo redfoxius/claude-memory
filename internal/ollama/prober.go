@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 // Prober is the setup.OllamaProber adapter (spec AC-32, plan WI-S1-5): it

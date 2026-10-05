@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 func TestDeleteRecord(t *testing.T) {

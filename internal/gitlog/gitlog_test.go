@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 func git(t *testing.T, dir string, args ...string) string {

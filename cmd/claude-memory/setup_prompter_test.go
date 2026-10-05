@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 // pipeFile returns the read end of a pipe whose write end is returned too;

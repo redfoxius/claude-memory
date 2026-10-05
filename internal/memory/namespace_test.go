@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 func nsService(store *mockStore, ns string) *Service {

@@ -9,8 +9,8 @@ package mcpserver
 import (
 	"context"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // Service is the subset of memory.Service's exported behaviour the MCP

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/config"
 )
 
 // Regression tests for the slice-2 review findings (branch

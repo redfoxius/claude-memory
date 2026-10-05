@@ -14,11 +14,11 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/memory"
-	"claude-memory/internal/ollama"
-	"claude-memory/internal/postgres"
-	"claude-memory/internal/scrub"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/ollama"
+	"github.com/redfoxius/claude-memory/internal/postgres"
+	"github.com/redfoxius/claude-memory/internal/scrub"
 )
 
 // clockImpl is a simple clock implementation for testing.

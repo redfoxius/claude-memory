@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 func TestDoctorExit(t *testing.T) {

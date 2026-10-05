@@ -5,7 +5,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // autoMemKinds maps an auto-memory metadata.type to a record kind. Types

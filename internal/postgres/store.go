@@ -16,8 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 //go:embed migrations/0001_init.sql

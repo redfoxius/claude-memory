@@ -3,7 +3,7 @@ package mcpserver
 import (
 	"time"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // recordToOutput converts a domain record to its wire shape, omitting the

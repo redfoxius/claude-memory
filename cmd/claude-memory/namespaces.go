@@ -11,7 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/namespace"
 )
 
 const namespacesUsage = `usage:

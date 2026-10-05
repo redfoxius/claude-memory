@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // DraftRecord is the JSON schema haiku emits for a single extracted candidate

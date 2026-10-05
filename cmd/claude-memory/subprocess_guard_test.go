@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"claude-memory/internal/extraction"
+	"github.com/redfoxius/claude-memory/internal/extraction"
 )
 
 // With the guard set, hook and extract must return before touching cfg (nil

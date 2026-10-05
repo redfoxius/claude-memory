@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // A pre-namespace database (only 0001 applied) with a legacy row: the

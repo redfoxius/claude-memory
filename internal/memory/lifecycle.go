@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // Feedback records user feedback on a record and applies lifecycle transitions.

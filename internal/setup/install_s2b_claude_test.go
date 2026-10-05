@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/integration"
+	"github.com/redfoxius/claude-memory/integration"
 )
 
 // Engine-level tests of the skills and claude-md steps (WI-S2-11, WI-S2-12)

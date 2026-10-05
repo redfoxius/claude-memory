@@ -11,14 +11,14 @@ import (
 // Extractability rule: the install engine should stay extractable into its
 // own module later. The "generic core" files below must therefore import
 // only the stdlib and third-party packages, never a package of this module
-// (import paths starting with "claude-memory/"). Add a file to the list
+// (import paths starting with "github.com/redfoxius/claude-memory/"). Add a file to the list
 // when it becomes domain-free.
 //
 // ports.go is intentionally NOT listed because it imports internal/namespace;
 // runstate.go is not listed because it holds claude-memory-specific state
 // fields.
 
-const projectImportPrefix = "claude-memory/"
+const projectImportPrefix = "github.com/redfoxius/claude-memory/"
 
 var genericCoreFiles = []string{
 	"engine.go",
@@ -66,12 +66,12 @@ func TestGenericCoreHasNoProjectImports(t *testing.T) {
 }
 
 func TestGenericCoreCheckerDetectsViolation(t *testing.T) {
-	src := "package x\n\nimport (\n\t\"fmt\"\n\t\"claude-memory/internal/x\"\n)\n"
+	src := "package x\n\nimport (\n\t\"fmt\"\n\t\"github.com/redfoxius/claude-memory/internal/x\"\n)\n"
 	bad, err := projectImports("fake.go", src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bad) != 1 || bad[0] != "claude-memory/internal/x" {
+	if len(bad) != 1 || bad[0] != "github.com/redfoxius/claude-memory/internal/x" {
 		t.Fatalf("violation not detected, got %v", bad)
 	}
 	bad, err = projectImports("ok.go", "package x\n\nimport \"fmt\"\n")

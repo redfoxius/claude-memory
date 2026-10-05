@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 // Files and commands detectPlatform reads.

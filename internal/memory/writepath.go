@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // Store persists a new record, applying the dedup/merge logic:

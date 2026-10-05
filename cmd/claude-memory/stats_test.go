@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 func TestParseStatsFlags(t *testing.T) {

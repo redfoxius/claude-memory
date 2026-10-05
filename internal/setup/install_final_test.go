@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/integration"
+	"github.com/redfoxius/claude-memory/integration"
 )
 
 // Cross-cutting install tests (WI-S2-14b): a full 2a run over fakes. FakeFS

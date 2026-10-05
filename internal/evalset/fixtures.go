@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // SeedRecord is a test fixture record to be stored during evaluation.

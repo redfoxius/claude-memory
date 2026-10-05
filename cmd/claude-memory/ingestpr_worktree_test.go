@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/config"
 )
 
 func gitCmd(t *testing.T, dir string, args ...string) {

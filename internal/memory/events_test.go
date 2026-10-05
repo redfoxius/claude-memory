@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // recSink records appended events; err makes Append fail.

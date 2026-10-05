@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 func ev(t memory.EventType) memory.Event {

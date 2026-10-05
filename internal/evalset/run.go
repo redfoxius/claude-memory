@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // CaseResult is the evaluation result for a single query case.

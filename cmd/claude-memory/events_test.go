@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/eventspool"
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/eventspool"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 func spoolEvents(t *testing.T, dir string) []memory.Event {

@@ -7,8 +7,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // handleSearch implements memory_search (AC-4, AC-5, AC-6, AC-7).

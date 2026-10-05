@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"time"
 
-	"claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/namespace"
 )
 
 // Ports (spec §10). Every interface the package depends on is declared

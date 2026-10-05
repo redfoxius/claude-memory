@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // maxTitleRunes bounds an imported title.

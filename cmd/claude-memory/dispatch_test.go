@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // runChild runs this test binary as claude-memory (TestMain's runMainEnv

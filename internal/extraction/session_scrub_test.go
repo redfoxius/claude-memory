@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/memory/mock"
-	"claude-memory/internal/scrub"
+	"github.com/redfoxius/claude-memory/internal/memory/mock"
+	"github.com/redfoxius/claude-memory/internal/scrub"
 )
 
 // sessionSecretTranscript builds a transcript whose user text and tool output

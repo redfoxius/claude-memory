@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/namespace"
 )
 
 // NamespacesStepID is the id of the namespaces step (AC-7: after ollama).

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/integration"
+	"github.com/redfoxius/claude-memory/integration"
 )
 
 // ---- rendering (AC-44, AC-64) ---------------------------------------------

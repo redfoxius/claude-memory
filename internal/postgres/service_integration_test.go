@@ -13,10 +13,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/evalset"
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/evalset"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // These tests drive memory.Service end-to-end against real Postgres + pgvector

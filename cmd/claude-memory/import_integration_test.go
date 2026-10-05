@@ -11,10 +11,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/memory"
-	"claude-memory/internal/postgres"
-	"claude-memory/internal/scrub"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/postgres"
+	"github.com/redfoxius/claude-memory/internal/scrub"
 )
 
 // hashEmbedder gives every distinct text its own one-hot vector, so distinct
