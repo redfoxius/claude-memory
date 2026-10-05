@@ -44,8 +44,8 @@ const launchdDefaultPATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 // JobTools are the external programs the jobs execute; a job's PATH must
 // contain their directories (AC-43): session extraction runs claude,
-// ingest-pr runs git and az.
-var JobTools = []string{"claude", "git", "az"}
+// ingest-pr runs git and az, gh or glab.
+var JobTools = []string{"claude", "git", "az", "gh", "glab"}
 
 // DefaultJobSpecs returns the two jobs (AC-43) running binPath (from
 // ResolveBinPath) with jobPATH as their PATH and the log paths filled in.

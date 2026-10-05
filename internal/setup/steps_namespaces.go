@@ -200,17 +200,25 @@ func rerenderLoss(before, after []byte) string {
 				walk(c, depth)
 			}
 		case yaml.MappingNode:
-			known := map[string]bool{}
+			var known []string
 			switch depth {
 			case 0:
-				known = map[string]bool{"default": true, "namespaces": true}
+				known = namespace.KnownKeys.Top
 			case 2:
-				known = map[string]bool{"namespace": true, "paths": true}
+				known = namespace.KnownKeys.Rule
 			}
 			for i := 0; i+1 < len(n.Content); i += 2 {
 				k, v := n.Content[i], n.Content[i+1]
-				if (depth == 0 || depth == 2) && !known[k.Value] {
+				if (depth == 0 || depth == 2) && !slices.Contains(known, k.Value) {
 					unknown = true
+				}
+				// A rule's pr_ingest section has its own known keys.
+				if depth == 2 && k.Value == "pr_ingest" && v.Kind == yaml.MappingNode {
+					for j := 0; j+1 < len(v.Content); j += 2 {
+						if !slices.Contains(namespace.KnownKeys.PRIngest, v.Content[j].Value) {
+							unknown = true
+						}
+					}
 				}
 				walk(k, depth+1)
 				walk(v, depth+1)

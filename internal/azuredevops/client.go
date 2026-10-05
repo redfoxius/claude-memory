@@ -124,6 +124,7 @@ func (c *Client) ListCompleted(ctx context.Context, repo prsource.RepoRef, since
 			CompletedAt: completedAt,
 			URL:         it.URL,
 			MergeCommit: it.LastMergeCommit.CommitID,
+			Trusted:     true, // Azure DevOps access is already limited to the org's members.
 		})
 	}
 
@@ -173,6 +174,7 @@ func (c *Client) Get(ctx context.Context, repo prsource.RepoRef, id string) (*pr
 		CompletedAt:    completedAt,
 		URL:            item.URL,
 		MergeCommit:    item.LastMergeCommit.CommitID,
+		Trusted:        true,
 	}, nil
 }
 

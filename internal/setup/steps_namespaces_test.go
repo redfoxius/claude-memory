@@ -270,11 +270,13 @@ func TestNamespacesRerenderLossWarnsAndBacksUp(t *testing.T) {
 		body  string
 		lossy bool
 	}{
-		"comment":      {"# my note\ndefault: scratch\nnamespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n", true},
-		"line comment": {"default: scratch # why\nnamespaces: []\n", true},
-		"unknown top":  {"default: scratch\nextra: 1\nnamespaces: []\n", true},
-		"unknown rule": {"namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    note: hi\n", true},
-		"clean":        {"default: scratch\nnamespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n", false},
+		"comment":         {"# my note\ndefault: scratch\nnamespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n", true},
+		"line comment":    {"default: scratch # why\nnamespaces: []\n", true},
+		"unknown top":     {"default: scratch\nextra: 1\nnamespaces: []\n", true},
+		"unknown rule":    {"namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    note: hi\n", true},
+		"pr_ingest known": {"namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    pr_ingest:\n      enabled: false\n      provider: github\n", false},
+		"pr_ingest typo":  {"namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    pr_ingest:\n      enabeld: false\n", true},
+		"clean":           {"default: scratch\nnamespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n", false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newS23(t)
@@ -327,5 +329,16 @@ func TestNamespacesConfigureSkipsUnparseableAndCovered(t *testing.T) {
 		text("Add another mapping", "")
 	if err := h.nsStep().Configure(context.Background(), h.rp(), ui, st); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The install step re-renders through namespace.Marshal, which must keep a
+// rule's pr_ingest section.
+func TestNamespacesStepKeepsPRIngest(t *testing.T) {
+	h := newS23(t)
+	h.write(h.p.NamespacesFile(), "namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    pr_ingest:\n      enabled: false\n", 0o600)
+	r := h.nsRun(nsState(NSRule{"b", []string{"/y/**"}}))
+	if !strings.Contains(r.after, "pr_ingest:") || !strings.Contains(r.after, "enabled: false") || !strings.Contains(r.after, "/y/**") {
+		t.Errorf("after =\n%s", r.after)
 	}
 }

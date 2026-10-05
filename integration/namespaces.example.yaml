@@ -23,3 +23,15 @@ namespaces:
     paths: ["~/work/acme/**"]
   - namespace: pet-game
     paths: ["~/src/pet-game", "~/src/pet-game/**"]
+
+  # Optional PR-ingest settings per namespace (ingest-pr):
+  # - namespace: sandbox
+  #   paths: ["~/src/sandbox/**"]
+  #   pr_ingest:
+  #     enabled: false        # skip this namespace's repos
+  # - namespace: corp
+  #   paths: ["~/work/corp/**"]
+  #   pr_ingest:
+  #     provider: gitlab      # self-hosted GitLab (azuredevops|github|gitlab)
+  # Keep this section when you edit the file by hand; an old claude-memory
+  # binary re-rendering the file drops it (upgrade all binaries).

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"claude-memory/internal/namespace"
 )
@@ -69,13 +70,52 @@ func (d *doctor) checkToolClaude(context.Context) (Status, string, string) {
 
 func (d *doctor) checkToolAz(context.Context) (Status, string, string) {
 	if !d.prRepos() {
-		return StatusInfo, "not needed: MEMORY_PR_INGEST_REPOS is not set", ""
+		return StatusInfo, "not needed: MEMORY_PR_INGEST_REPOS is not set (az is needed only for Azure DevOps repos)", ""
 	}
 	if p, ok := d.lookTool("az"); ok {
 		return pass(p)
 	}
-	return StatusWarn, "az is not on PATH but MEMORY_PR_INGEST_REPOS is set: ingest-pr cannot fetch Azure DevOps PRs",
+	return StatusWarn, "az is not on PATH but MEMORY_PR_INGEST_REPOS is set: ingest-pr cannot fetch Azure DevOps PRs (az is needed only for Azure DevOps repos)",
 		"install the Azure CLI (az) with the azure-devops extension and run `az login`"
+}
+
+// loginCheckTimeout bounds the network `auth status` of tools.gh/tools.glab;
+// it stays below DefaultCheckTimeout so a slow network reads "could not
+// check" instead of a framework timeout turning the row into a fail.
+const loginCheckTimeout = 2 * time.Second
+
+func (d *doctor) checkToolGh(ctx context.Context) (Status, string, string) {
+	return d.checkLoginTool(ctx, "gh", []string{"gh", "auth", "status", "--hostname", "github.com"}, "gh auth login")
+}
+
+func (d *doctor) checkToolGlab(ctx context.Context) (Status, string, string) {
+	return d.checkLoginTool(ctx, "glab", []string{"glab", "auth", "status", "--hostname=gitlab.com"}, "glab auth login")
+}
+
+// checkLoginTool is info-only: whether a CLI used by ingest-pr for
+// GitHub/GitLab repos is on PATH and logged in. It runs the CLI's own
+// read-only status command (never --show-token) under its own timeout.
+func (d *doctor) checkLoginTool(ctx context.Context, tool string, argv []string, loginCmd string) (Status, string, string) {
+	p, ok := d.lookTool(tool)
+	if !ok {
+		return StatusInfo, "not on PATH (needed only for GitHub/GitLab repos)", ""
+	}
+	cctx, cancel := context.WithTimeout(ctx, loginCheckTimeout)
+	defer cancel()
+	res, err := d.Runner.Run(cctx, Cmd{Argv: argv})
+	if err != nil {
+		return StatusInfo, p + ": could not check login (" + d.redact(err.Error()) + ")", ""
+	}
+	if res.ExitCode == 0 {
+		return StatusInfo, p + ": logged in", ""
+	}
+	out := strings.ToLower(string(res.Stdout) + string(res.Stderr))
+	for _, offline := range []string{"error connecting", "dial tcp", "no such host", "timeout", "network is unreachable"} {
+		if strings.Contains(out, offline) {
+			return StatusInfo, p + ": could not check login (offline?)", ""
+		}
+	}
+	return StatusInfo, p + ": not logged in", "run `" + loginCmd + "` (only needed for GitHub/GitLab repos)"
 }
 
 // ---- namespaces -----------------------------------------------------------------
@@ -95,6 +135,14 @@ func (d *doctor) checkNamespaces(context.Context) (Status, string, string) {
 			return StatusWarn, err.Error() + " (every subcommand falls back to the global namespace)",
 				"fix " + p + " (format: integration/namespaces.example.yaml), or recreate it with `claude-memory namespaces init`"
 		}
+	}
+	if len(cfg.PRIngestProblems) > 0 {
+		var probs []string
+		for _, pr := range cfg.PRIngestProblems {
+			probs = append(probs, pr.Namespace+": "+pr.Reason)
+		}
+		return StatusWarn, "pr_ingest unusable, ingest-pr skips these namespaces: " + strings.Join(probs, "; "),
+			"fix pr_ingest in " + p + " (enabled: true|false, provider: azuredevops|github|gitlab)"
 	}
 	resolution := ""
 	if d.Paths.Cwd != "" {

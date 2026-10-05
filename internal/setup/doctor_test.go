@@ -287,7 +287,7 @@ var wantCheckIDs = []string{
 	"binary.version", "env.file", "env.perms", "env.format",
 	"pg.connect", "pg.latency", "pg.vector", "pg.schema",
 	"ollama.reachable", "ollama.model", "ollama.embed",
-	"tools.git", "tools.claude", "tools.az",
+	"tools.git", "tools.claude", "tools.az", "tools.gh", "tools.glab",
 	"mcp.registered", "hooks.scripts", "hooks.settings", "skills", "claude-md",
 	"namespaces", "jobs", "dirs.state", "manifest",
 }
@@ -295,7 +295,7 @@ var wantCheckIDs = []string{
 func TestDoctorCheckTable(t *testing.T) {
 	t.Parallel()
 	if got := CheckIDs(); !slices.Equal(got, wantCheckIDs) {
-		t.Fatalf("CheckIDs() =\n%v\nwant (AC-58, 23 checks)\n%v", got, wantCheckIDs)
+		t.Fatalf("CheckIDs() =\n%v\nwant (AC-58, 25 checks)\n%v", got, wantCheckIDs)
 	}
 	for _, s := range SkillNames {
 		if !slices.Contains(integration.Skills, s) {
@@ -317,10 +317,10 @@ func TestDoctorHealthy(t *testing.T) {
 	if el := time.Since(start); el > time.Second {
 		t.Errorf("healthy run took %s, want well under 1s (AC-59)", el)
 	}
-	if len(r.Checks) != 23 {
-		t.Fatalf("%d checks, want 23", len(r.Checks))
+	if len(r.Checks) != 25 {
+		t.Fatalf("%d checks, want 25", len(r.Checks))
 	}
-	wantInfo := map[string]bool{"tools.az": true, "jobs": true, "manifest": true}
+	wantInfo := map[string]bool{"tools.az": true, "tools.gh": true, "tools.glab": true, "jobs": true, "manifest": true}
 	for _, c := range r.Checks {
 		want := StatusPass
 		if wantInfo[c.ID] {
@@ -469,6 +469,29 @@ func TestDoctorBranches(t *testing.T) {
 			f.runner.SetPath("az", "/usr/bin/az")
 		}, want: map[string]Status{"tools.az": StatusPass}},
 
+		{name: "tools: gh absent", mutate: func(f *doctorFixture) {},
+			want: map[string]Status{"tools.gh": StatusInfo, "tools.glab": StatusInfo}, detail: map[string]string{"tools.gh": "not on PATH (needed only for GitHub/GitLab repos)"}},
+		{name: "tools: gh logged in", mutate: func(f *doctorFixture) {
+			f.runner.SetPath("gh", "/usr/bin/gh")
+			f.runner.Script(ArgvPrefix("gh", "auth", "status", "--hostname", "github.com"), Result{})
+		}, want: map[string]Status{"tools.gh": StatusInfo}, detail: map[string]string{"tools.gh": "logged in"}},
+		{name: "tools: gh not logged in", mutate: func(f *doctorFixture) {
+			f.runner.SetPath("gh", "/usr/bin/gh")
+			f.runner.Script(ArgvPrefix("gh", "auth", "status"), Result{ExitCode: 1, Stderr: []byte("You are not logged into any GitHub hosts.")})
+		}, want: map[string]Status{"tools.gh": StatusInfo}, detail: map[string]string{"tools.gh": "not logged in"}, remedy: map[string]string{"tools.gh": "gh auth login"}},
+		{name: "tools: gh offline", mutate: func(f *doctorFixture) {
+			f.runner.SetPath("gh", "/usr/bin/gh")
+			f.runner.Script(ArgvPrefix("gh", "auth", "status"), Result{ExitCode: 1, Stderr: []byte("error connecting to api.github.com")})
+		}, want: map[string]Status{"tools.gh": StatusInfo}, detail: map[string]string{"tools.gh": "could not check"}},
+		{name: "tools: gh timeout never fails the row", mutate: func(f *doctorFixture) {
+			f.runner.SetPath("gh", "/usr/bin/gh")
+			f.runner.ScriptError(ArgvPrefix("gh", "auth", "status"), context.DeadlineExceeded)
+		}, want: map[string]Status{"tools.gh": StatusInfo}, detail: map[string]string{"tools.gh": "could not check"}},
+		{name: "tools: glab logged in", mutate: func(f *doctorFixture) {
+			f.runner.SetPath("glab", "/usr/bin/glab")
+			f.runner.Script(ArgvPrefix("glab", "auth", "status", "--hostname=gitlab.com"), Result{})
+		}, want: map[string]Status{"tools.glab": StatusInfo}, detail: map[string]string{"tools.glab": "logged in"}},
+
 		// mcp.registered
 		{name: "mcp: no .claude.json", mutate: func(f *doctorFixture) { rm(f, f.p.ClaudeJSON) },
 			want: map[string]Status{"mcp.registered": StatusFail}, remedy: map[string]string{"mcp.registered": "claude mcp add --scope user claude-memory"}},
@@ -557,6 +580,9 @@ func TestDoctorBranches(t *testing.T) {
 		{name: "namespaces: invalid name", mutate: func(f *doctorFixture) {
 			writeFile(f.t, f.p.NamespacesFile(), []byte("namespaces:\n  - namespace: Bad Name\n    paths: [x]\n"), 0o600)
 		}, want: map[string]Status{"namespaces": StatusWarn}},
+		{name: "namespaces: pr_ingest problem", mutate: func(f *doctorFixture) {
+			writeFile(f.t, f.p.NamespacesFile(), []byte("namespaces:\n  - namespace: w\n    paths: [x]\n    pr_ingest: {provider: bitbucket}\n"), 0o600)
+		}, want: map[string]Status{"namespaces": StatusWarn}, detail: map[string]string{"namespaces": "w: pr_ingest.provider"}},
 		{name: "namespaces: cwd matches a rule", mutate: func(f *doctorFixture) {
 			writeFile(f.t, f.p.NamespacesFile(), []byte(fmt.Sprintf("namespaces:\n  - namespace: proj\n    paths: [%q]\n", f.p.Cwd)), 0o600)
 		}, want: map[string]Status{"namespaces": StatusPass}, detail: map[string]string{"namespaces": "→ proj (rule"}},

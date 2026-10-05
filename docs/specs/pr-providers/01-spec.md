@@ -13,38 +13,26 @@
   verified against fixtures only.
 
 ## 0.1 Changes in v0.2 (Opus review)
-Security: GitLab auto-detected for `gitlab.com` only, self-hosted only via
-explicit `provider: gitlab` (D3, AC-2, AC-3); token/debug env vars stripped,
-`--hostname=H` one argument, host check + `auth status` before a non-
-gitlab.com host (AC-16, AC-22); strict path-segment allowlist (new AC-32);
-userinfo stripped from logged remotes (new AC-33); trusted-author filter
-against prompt injection (new AC-34, D13); stdout cap (AC-22). Config:
-`pr_ingest` problems never fail `Parse` (AC-6, AC-8). Cursor keyed by
-effective provider + remote path for GitHub/GitLab (D6, AC-4); page-cap
-remedy names the cursor file, PRs de-duplicated by id (AC-13, AC-17).
-Extraction: scrub → cap → head-first truncation (AC-25, AC-26). Doctor:
-own 2 s timeout, `could not check` (AC-29). **Cuts (minimal):** namespace-
-derived roots (D8 narrowed, AC-9 withdrawn, AC-31 trimmed), reviews/files/
-diffs calls (AC-15, AC-19 narrowed), `PR INGEST` column (AC-8), richer
-dry run (AC-28), error classification (AC-23). Owner decisions §9 taken
-as proposed, with #2 resolved to env-only.
+Security: GitLab auto-detect `gitlab.com` only (D3, AC-2/3); env
+stripping, stdout cap, `--hostname=H`, `auth status` gate (AC-16, AC-22);
+path allowlist (AC-32), userinfo stripping (AC-33), trusted authors (AC-34,
+D13). `pr_ingest` never fails `Parse` (AC-6/8). Cursor by provider + path
+(D6, AC-4); cap remedy names the cursor file, de-dup by id (AC-13/17).
+Scrub → cap → head-first truncation (AC-25/26). Doctor 2 s, `could not
+check` (AC-29). **Cuts:** namespace roots (D8, AC-9 withdrawn, AC-31),
+reviews/files/diffs (AC-15/19/24), list column (AC-8), rich dry run
+(AC-28), error classes (AC-23). §9: env-only repo source.
 
 ## 1. Problem
 `ingest-pr` implements only Azure DevOps; repos with a GitHub or GitLab
-`origin` are skipped (`cmd/claude-memory/ingestpr.go:92`). The repo list
-comes only from `MEMORY_PR_INGEST_REPOS`; namespaces cannot opt in or out.
-Also, the Azure client fetches review comments but `extraction.PRInput`
-has no field for them (`internal/extraction/processor.go:47`), so they never
-reach extraction, and PR text goes to haiku unscrubbed and uncapped.
-
-This feature adds:
-1. `PRSource` adapters for GitHub (`gh api`) and GitLab (`glab api`).
-2. An optional `pr_ingest` section per namespace in `namespaces.yaml`
-   (`enabled: false` opt-out, `provider` override), preserved by every
-   writer of that file. `MEMORY_PR_INGEST_REPOS` stays the only repo source.
-3. PR comments in the PR document for all providers, scrubbed and
-   size-capped before haiku.
-4. `doctor`/`install` rows for `gh`/`glab`.
+`origin` are skipped (`cmd/claude-memory/ingestpr.go:92`); namespaces
+cannot opt out. The Azure client fetches review comments but
+`extraction.PRInput` (`processor.go:47`) has no field for them, and PR text
+goes to haiku unscrubbed and uncapped. This feature adds GitHub (`gh api`)
+and GitLab (`glab api`) adapters; an optional per-namespace `pr_ingest`
+(`enabled: false` opt-out, `provider` override) kept by every writer of
+`namespaces.yaml`; scrubbed, capped PR comments for all providers; and
+`doctor`/`install` rows for `gh`/`glab`.
 
 ## 2. Glossary
 | Term | Definition |
@@ -76,19 +64,11 @@ This feature adds:
 | D13 | **(v0.2) Trusted authors only**: ingest only PRs by trusted authors and keep only their comments. GitHub comments = issue comments + inline review comments (one call each, both carry `author_association`); no `/reviews`, `/files`, `/diffs`. | On public repos PR text comes from strangers and becomes `active` records injected into the owner's sessions (indirect prompt injection). |
 
 ## 4. User Scenarios
-**GitHub pet repo.** `MEMORY_PR_INGEST_REPOS=~/work/acme,~/src`.
-The nightly job finds `~/src/pet-game` (origin `git@github.com:example-user/pet-game.git`,
-namespace `pet-game`), lists merged PRs since the cursor via `gh api`,
-extracts two records into `pet-game` with `commit_sha` = the squash commit,
-and saves `github__example-user_pet-game.json`.
-
-**Opt-out.** `acme` keeps Azure via `MEMORY_PR_INGEST_REPOS=~/work/acme`;
-a personal fork under that root on GitHub belongs to namespace `sandbox` with
-`pr_ingest: {enabled: false}` and is skipped with an info log.
-
-**GitLab later.** The owner clones a `gitlab.com/group/sub/project` repo
-under an ingest root; nothing else changes except `glab auth login`. A
-self-hosted `git.example.org` repo needs `pr_ingest: {provider: gitlab}`.
+With `MEMORY_PR_INGEST_REPOS=~/work/acme,~/src`, the nightly job ingests
+`~/src/pet-game` (`git@github.com:example-user/pet-game.git`) into `pet-game`
+via `gh api` (cursor `github__example-user_pet-game.json`, `commit_sha` = squash
+commit); a fork in namespace `sandbox` with `pr_ingest: {enabled: false}` is
+skipped; a self-hosted GitLab repo needs `pr_ingest: {provider: gitlab}`.
 
 ## 5. Requirements (EARS)
 
@@ -112,37 +92,33 @@ self-hosted `git.example.org` repo needs `pr_ingest: {provider: gitlab}`.
   the cursor shall be keyed by the effective provider and `Path` with `/`
   replaced by `_`, and the adapters shall address the API only by `Path`
   (and `Host` for GitLab), never by `Name`.
-- **AC-5** All providers shall keep MVP AC-26/27/28: completion order,
-  cursor saved only after the whole batch, per-repo failure isolation,
-  `MEMORY_PR_INGEST_LOOKBACK` on first run.
+- **AC-5** All providers shall keep MVP AC-26/27/28 (completion order,
+  cursor after the whole batch, per-repo isolation, first-run lookback).
 
 ### 5.2 `pr_ingest` config
 - **AC-6** `namespace.Rule` shall accept an optional
   `pr_ingest: {enabled: bool, provider: azuredevops|github|gitlab}` (both
   keys optional). `Parse` shall **never fail** because of `pr_ingest`: an
-  unknown provider, a wrongly typed value, or two rules of one namespace
-  whose `pr_ingest` values differ shall be collected in
-  `Config.PRIngestProblems` (file, namespace, reason) while `Resolve` keeps
-  working. `ingest-pr` shall skip every repo of an affected namespace with a
-  warning. Unknown keys inside `pr_ingest` are ignored by `Parse` (no
-  `KnownFields`) and reported by the install loss check (AC-7).
+  unknown provider, a wrongly typed value, or differing `pr_ingest` on two
+  rules of one namespace go to `Config.PRIngestProblems` (namespace,
+  reason), `Resolve` keeps working, and `ingest-pr` skips that namespace's
+  repos with a warning. Unknown keys inside `pr_ingest` are ignored (no
+  `KnownFields`).
 - **AC-7** `namespace.Marshal` shall emit `pr_ingest` exactly when set, so
-  `namespaces add`, `namespaces init --force` (new file, nothing to keep) and
-  the install `namespaces` step preserve it byte-for-byte in meaning.
-  `rerenderLoss` shall treat `pr_ingest` (depth 2) and its keys (depth 3)
-  as known, from `namespace.KnownKeys`, so a valid section raises no
-  "unknown keys" warning and a misspelled one still does.
+  `namespaces add` and the install `namespaces` step keep it. `rerenderLoss`
+  shall take known keys, incl. `pr_ingest` (depth 2) and its keys (depth 3),
+  from `namespace.KnownKeys`: a valid section raises no "unknown keys"
+  warning, a misspelled key still does.
 - **AC-8** (v0.2, narrowed) `doctor`'s `namespaces` row shall `warn` with
   each `PRIngestProblems` entry. (`namespaces list` column cut.)
-- **AC-9** *Withdrawn (v0.2).* Namespace-derived ingest roots are cut;
-  `MEMORY_PR_INGEST_REPOS` is the only repo source (D8).
+- **AC-9** *Withdrawn (v0.2)* — namespace-derived roots cut (D8).
 - **AC-10** `ingest-pr` shall resolve each repo's namespace once
   (`resolveNamespace(repoPath)`, incl. `MEMORY_NAMESPACE`) and use it for
   both the `pr_ingest` lookup and the write scope. When that namespace has
   `enabled: false`, the repo shall be skipped with an info log, cursor
   untouched.
-- **AC-11** With no `pr_ingest` section anywhere, the repo set and routing
-  shall equal today's (except GitHub/GitLab now being ingested).
+- **AC-11** With no `pr_ingest` anywhere, repo set and routing equal
+  today's (plus GitHub/GitLab now ingested).
 
 ### 5.3 GitHub adapter (`internal/github`)
 - **AC-12** The adapter shall run `gh api --hostname github.com -X GET
@@ -193,9 +169,8 @@ self-hosted `git.example.org` repo needs `pr_ingest: {provider: gitlab}`.
   continue with comments empty (D12). When the list, members or PR detail
   call fails or returns unparseable JSON, the repo's batch shall fail
   (cursor unchanged), as MVP AC-26/27.
-- **AC-21** Bot-authored or untrusted-author PRs shall be listed (so the
-  cursor passes them) but `ingest-pr` shall not call `Get` or extraction
-  for them.
+- **AC-21** Bot or untrusted PRs shall be listed (the cursor passes them)
+  but get no `Get` or extraction call.
 - **AC-22** The exec runner shall remove `GH_TOKEN`, `GITHUB_TOKEN`,
   `GH_DEBUG` (gh) and `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, `OAUTH_TOKEN`,
   `GITLAB_HOST`, `GLAB_DEBUG` (glab) from the child env; cap stdout at
@@ -270,63 +245,56 @@ self-hosted `git.example.org` repo needs `pr_ingest: {provider: gitlab}`.
 
 ## 6. Out of Scope (YAGNI)
 - GitHub Enterprise / custom GitHub hosts; a `host` key; SSH host aliases
-  for GitLab (use the real host in origin).
+  for GitLab (use the real host in origin); auto-detecting self-hosted GitLab.
 - `auth.token_env`, any token handling, REST clients, new Go modules.
-- Bitbucket or other providers; issue/PR-conversation ingest beyond review
-  comments (GitHub issue comments are not fetched).
-- Closed-unmerged PRs; draft PRs; per-author allow/deny lists.
-- A CLI to edit `pr_ingest` (hand-edit `namespaces.yaml`); web UI.
-- Changed paths as draft `files` (staleness AC-33 stays separate/optional).
-- Scrubbing session transcripts before haiku (only the PR document here).
-- Rate-limit back-off/retry: a limited repo fails and retries next run.
+- Bitbucket etc.; `/reviews`, `/files`, `/diffs`; namespace-derived ingest
+  roots; `pr_ingest` in `namespaces list`; a richer dry run.
+- Closed-unmerged or draft PRs; author allow/deny lists beyond AC-34.
+- A CLI to edit `pr_ingest`; web UI; changed paths as draft `files`
+  (staleness AC-33); scrubbing session transcripts before haiku;
+  rate-limit back-off (a limited repo fails and retries next run).
 
 ## 7. Verification
-- Unit (`go test ./...`, no network): `Detect` table (github https/ssh/
-  scp/`ssh.github.com:443`, gitlab nested groups, Host/Path); github and
-  gitlab clients driven by a fake `Runner` that maps argv → recorded JSON
-  fixtures under `internal/{github,gitlab}/testdata/` (paging stop, page cap
-  error, merged vs closed, bot author/comments, merge/squash/ff commit
-  selection, comment/diff fetch failure → empty, list failure → error,
-  stderr redaction); `namespace` parse/validate/Marshal round-trip with
-  `pr_ingest`, duplicate-rule conflict, `rerenderLoss` known/misspelled
-  keys, install `namespaces` step re-render keeps the section; ingest
-  routing (provider map, override, enabled true/false, union + de-dup,
-  glob roots); `ProcessPR` rendering, caps, scrubbing, no logins; doctor
-  rows with fake Runner; jobs gating.
-- Fixtures: GitHub — captured once with `gh api` from a public repo,
-  trimmed to the used fields and anonymised; GitLab — hand-written from the
-  GitLab REST API docs examples. No live network in tests.
-- Manual (owner, GitHub only): `ingest-pr --dry-run` on one enabled GitHub
-  repo; one real run; re-run is a no-op; `git merge-base --is-ancestor
-  <commit_sha> origin/<default>` for a squash-merged PR; `doctor` shows
-  `tools.gh: logged in`.
+- Unit (`go test ./...`, no network), per AC: `Detect`/path-allowlist/
+  userinfo tables; github and gitlab clients via a fake `Runner` mapping
+  argv → JSON fixtures in `internal/{github,gitlab}/testdata/` (paging,
+  cap, de-dup, merged filter, bot/untrusted, members fail-closed, commit
+  fallback, `--hostname=` single arg, `auth status` gate); exec runner env
+  stripping and caps; `PRIngestProblems` with `Resolve` intact; install
+  re-render keeps `pr_ingest`; routing/cursor keys; scrub → cap → head-first
+  truncation; doctor rows incl. internal timeout.
+- Fixtures: GitHub captured once via `gh api` (trimmed, anonymised); GitLab hand-written from the REST docs.
+- Manual (owner, GitHub only): `ingest-pr --dry-run`, one real run, re-run
+  no-op, `git merge-base --is-ancestor <commit_sha> origin/<default>` on a
+  squash PR, `doctor` shows `tools.gh: logged in`.
 - **GitLab is not verified against a live instance** (owner has no GitLab
   account): correctness rests on doc-derived fixtures only; first real use
   must start with `--dry-run`.
 
 ## 8. Risks
 - **GitLab fixtures may drift** from real `glab api` output (field names,
-  pagination headers ignored, `/diffs` availability on older self-hosted
-  versions); mitigated by dry-run-first and D12 degradation.
-- **Other people's text** (PR descriptions, review comments) reaches haiku
-  (`claude -p`, as today for Azure titles/descriptions) and the owner's DB;
-  scrubbing is pattern-based; records are `active` (MVP AC-29). Logins are
-  kept out of the document.
-- **Azure behaviour change**: review comments now reach extraction —
-  more haiku input, possibly more records per Azure PR.
-- **Old binaries** re-rendering `namespaces.yaml` drop `pr_ingest`; they
-  warn "unknown keys" and keep a backup (installer). Upgrade all binaries.
-- **Job PATH frozen at install**: `gh`/`glab` installed later is not on the
-  job PATH until `install --upgrade`; doctor `jobs` does not detect it.
-- **gh under launchd** needs keychain access from the user agent; verify
-  once with the manual run of the job.
-- Root derivation from globs (AC-9) may pick up unwanted sibling repos
-  under `<root>/*`; `enabled: false` on their namespace or a narrower glob.
+  pagination headers ignored, members endpoint permissions on self-hosted);
+  mitigated by dry-run-first and D12 degradation.
+- **Indirect prompt injection from strangers**: on public GitHub repos PR
+  bodies and comments are written by anyone; extracted records are
+  `active` (MVP AC-29) and return in the owner's sessions. Mitigation:
+  trusted-author filter for PRs and comments (AC-34), the extraction
+  prompt's data-not-instructions framing, scrubbing. A trusted collaborator
+  can still write misleading text — review via `claude-memory review`.
+- **Teammates' text** reaches haiku (`claude -p`, as for Azure today) and
+  the DB; scrubbing is pattern-based; no identity fields are added.
+- **Credentials to an unexpected host**: see AC-2, AC-16, AC-22.
+- **Azure change**: review comments now reach extraction (more input).
+- **Old binaries** re-rendering `namespaces.yaml` drop `pr_ingest` (with
+  an "unknown keys" warning and a backup); an invalid `pr_ingest` value is
+  dropped on re-render by the new binary too.
+- **Job PATH frozen at install** (`gh` installed later needs `install
+  --upgrade`); **gh under launchd** needs keychain access — verify once.
 
-## 9. Owner Decisions (open — proposed defaults in bold)
+## 9. Owner Decisions (v0.2 — taken via the review's minimal cuts)
 1. Closed-unmerged PRs: **skip** (D4).
-2. Repo source: **union of env + enabled namespaces** (D8) vs env only.
-3. Bot PRs/comments: **skip** (D10).
-4. Azure review comments into extraction: **yes** (AC-24).
-5. Doctor calls `gh auth status` (network): **yes, info only** (D11).
+2. Repo source: **env only** (D8, v0.2); `pr_ingest` = opt-out + override.
+3. Bot PRs/comments: **skip** (D10); untrusted authors skipped (D13).
+4. Azure review comments into extraction: **yes**, scrub then cap (AC-24/25).
+5. Doctor calls `gh auth status` (network): **yes, info only, 2 s** (D11).
 6. `token_env`, GHE/`host`: **deferred** (D2, D3).

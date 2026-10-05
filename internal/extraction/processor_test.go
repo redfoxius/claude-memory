@@ -556,7 +556,7 @@ func TestProcessPR_StoresWithSourcePR(t *testing.T) {
 		URL:         "https://dev.azure.com/acme/billing-service/_git/billing-service/pullrequest/1",
 	}
 
-	result, err := ProcessPR(context.Background(), svc, pr, cfg, fakeRunner)
+	result, err := ProcessPR(context.Background(), svc, pr, cfg, fakeRunner, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -662,7 +662,7 @@ func TestProcessPR_CarriesMergeCommitAsCommitSHA(t *testing.T) {
 			{output: []byte(`{"action":"ADD"}`)},
 		}}
 		pr := PRInput{Title: "t", Description: "d", Repo: "billing-service", URL: "u", CommitSHA: tc.sha}
-		if _, err := ProcessPR(context.Background(), svc, pr, Config{HaikuTimeout: 5 * time.Second}, fakeRunner); err != nil {
+		if _, err := ProcessPR(context.Background(), svc, pr, Config{HaikuTimeout: 5 * time.Second}, fakeRunner, nil); err != nil {
 			t.Fatal(err)
 		}
 		stored := svc.GetStoredRecords()

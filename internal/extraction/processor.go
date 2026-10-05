@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"claude-memory/internal/memory"
@@ -52,6 +53,60 @@ type PRInput struct {
 	// CommitSHA is the PR's provider merge commit, recorded as the
 	// staleness baseline (empty = none).
 	CommitSHA string
+	// ReviewComments are the PR's comment bodies (already filtered to
+	// trusted, non-bot authors by the adapter); they carry no identities.
+	ReviewComments []string
+}
+
+const (
+	maxPRComments       = 50
+	maxPRCommentRunes   = 1000
+	prCommentsSeparator = "\n\nComments:"
+)
+
+// buildPRDocument renders the text haiku sees: each field is scrubbed
+// first (so a secret cannot be split by a later cut), then comments are
+// capped (count and length), then the whole document is truncated head-first
+// to budget runes (the start — title, description — survives; the tail is
+// cut at a rune boundary). A nil scrubber skips scrubbing; budget <= 0 skips
+// the final cut.
+func buildPRDocument(pr PRInput, scrubber memory.Scrubber, budget int) string {
+	clean := func(s string) string {
+		if scrubber == nil {
+			return s
+		}
+		out, _ := scrubber.Scrub(s)
+		return out
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "PR Title: %s\n\nPR Description:\n%s\n\nPR URL: %s", clean(pr.Title), clean(pr.Description), pr.URL)
+	n := 0
+	for _, c := range pr.ReviewComments {
+		c = clean(c)
+		if strings.TrimSpace(c) == "" {
+			continue
+		}
+		if n == 0 {
+			b.WriteString(prCommentsSeparator)
+		}
+		if n++; n > maxPRComments {
+			break
+		}
+		fmt.Fprintf(&b, "\n- %s", truncateRunes(c, maxPRCommentRunes))
+	}
+	return truncateRunes(b.String(), budget)
+}
+
+// truncateRunes keeps the first max runes of s (max <= 0 keeps all).
+func truncateRunes(s string, max int) string {
+	if max <= 0 || len(s) <= max { // len(s) >= rune count, so this is a cheap exit
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
 }
 
 // StoreWriter is the interface extraction needs against the memory service:
@@ -123,20 +178,22 @@ func ProcessSession(
 	return result, nil
 }
 
-// ProcessPR extracts facts from a PR (Azure DevOps).
+// ProcessPR extracts facts from a PR (any provider).
 // This is the entry point for the ingest-pr CLI (AC-26/AC-27/AC-28).
-// If runner is nil, a default CLIHaikuRunner is created.
+// If runner is nil, a default CLIHaikuRunner is created. scrubber (nil =
+// none) redacts the PR text before it reaches haiku; cfg.CharBudget caps the
+// document (see buildPRDocument).
 func ProcessPR(
 	ctx context.Context,
 	writer StoreWriter,
 	pr PRInput,
 	cfg Config,
 	runner HaikuRunner,
+	scrubber memory.Scrubber,
 ) (*Result, error) {
 	result := &Result{}
 
-	// Combine PR text into a single document for extraction.
-	prText := fmt.Sprintf("PR Title: %s\n\nPR Description:\n%s\n\nPR URL: %s", pr.Title, pr.Description, pr.URL)
+	prText := buildPRDocument(pr, scrubber, cfg.CharBudget)
 
 	if runner == nil {
 		runner = NewCLIHaikuRunner(cfg.HaikuTimeout)

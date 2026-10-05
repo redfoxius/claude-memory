@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,14 +13,33 @@ import (
 
 	"claude-memory/internal/config"
 	"claude-memory/internal/extraction"
+	"claude-memory/internal/memory"
+	"claude-memory/internal/namespace"
 	"claude-memory/internal/prcursor"
 	"claude-memory/internal/prsource"
 )
 
-// scopeFunc returns the writer scoped to the namespace a repo path resolves
-// to. The composition root supplies it (it knows the concrete service); nil
-// means "use svc unchanged" (dry runs, tests).
-type scopeFunc func(repoPath string) extraction.StoreWriter
+// scopeFunc returns the writer scoped to a namespace. The composition root
+// supplies it (it knows the concrete service); nil means "use svc
+// unchanged" (dry runs, tests).
+type scopeFunc func(namespace string) extraction.StoreWriter
+
+// ingestPorts are the already-constructed ports ingest-pr works against;
+// main.go's cmdIngestPR is the composition root that builds them.
+type ingestPorts struct {
+	// Sources maps a provider to its PR source (azuredevops, github, gitlab).
+	Sources map[prsource.Provider]prsource.Source
+	Cursors *prcursor.Store
+	// Settings resolves a repo's namespace once and returns that
+	// namespace's pr_ingest section (problem != "" means it is unusable).
+	// nil means no namespaces: namespace "", no section.
+	Settings func(repoPath string) (ns string, p namespace.PRIngest, problem string)
+	Scope    scopeFunc
+	Scrubber memory.Scrubber
+	// Haiku is nil in production: extraction.ProcessPR then builds the real
+	// `claude -p` runner itself; tests inject a fake.
+	Haiku extraction.HaikuRunner
+}
 
 // runIngestPR implements the "ingest-pr" subcommand's work (AC-26, AC-27,
 // AC-28, AC-58): for each configured local repo, detect its PR provider
@@ -27,31 +47,16 @@ type scopeFunc func(repoPath string) extraction.StoreWriter
 // persisted cursor (or a lookback window on first run), process them
 // through extraction in completion order, and persist the cursor only
 // after the whole batch succeeds. One repo's failure never blocks the
-// others. svc, cursorStore, and client are already-constructed ports —
-// main.go's cmdIngestPR is the composition root that builds them (a
-// *memory.Service via buildService when dryRun is false, a
-// *prcursor.Store, and an *azuredevops.Client).
-func runIngestPR(
-	ctx context.Context,
-	cfg *config.Config,
-	svc extraction.StoreWriter,
-	cursorStore *prcursor.Store,
-	client prsource.Source,
-	scope scopeFunc,
-	dryRun bool,
-) error {
+// others.
+func runIngestPR(ctx context.Context, cfg *config.Config, svc extraction.StoreWriter, d ingestPorts, dryRun bool) error {
 	repos := discoverRepos(cfg.PRIngestRepos)
 	if len(repos) == 0 {
 		slog.Warn("ingest-pr: no repos configured or discovered (MEMORY_PR_INGEST_REPOS)")
 		return nil
 	}
-
 	for _, repoPath := range repos {
-		// nil runner -> extraction.ProcessPR constructs the real `claude -p`
-		// haiku runner itself; tests inject a fake runner instead.
-		ingestOneRepo(ctx, svc, client, cursorStore, cfg, repoPath, scope, dryRun, nil)
+		ingestOneRepo(ctx, svc, d, cfg, repoPath, dryRun)
 	}
-
 	return nil
 }
 
@@ -59,56 +64,105 @@ func runIngestPR(
 // returns an error: every failure mode is logged and causes this repo to
 // be skipped, so one repo's trouble never blocks the others in the same
 // run (AC-27).
-func ingestOneRepo(
-	ctx context.Context,
-	svc extraction.StoreWriter,
-	client prsource.Source,
-	cursorStore *prcursor.Store,
-	cfg *config.Config,
-	repoPath string,
-	scope scopeFunc,
-	dryRun bool,
-	haikuRunner extraction.HaikuRunner,
-) {
-	remote, err := gitRemoteURL(ctx, repoPath)
-	if err != nil {
-		slog.Warn("ingest-pr: could not determine git origin remote; skipping repo", "repo", repoPath, "error", err)
+func ingestOneRepo(ctx context.Context, svc extraction.StoreWriter, d ingestPorts, cfg *config.Config, repoPath string, dryRun bool) {
+	name := filepath.Base(repoPath)
+	// skip logs why a repo is not ingested and, in a dry run, prints it
+	// (AC-28). Cursors are untouched on every skip.
+	skip := func(reason string, args ...any) {
+		slog.Warn("ingest-pr: skipping repo ("+reason+")", append([]any{"repo", name}, args...)...)
+		if dryRun {
+			fmt.Printf("%s: skipped (%s)\n", name, reason)
+		}
+	}
+
+	// The namespace is resolved once and used for the pr_ingest lookup and
+	// the write scope (AC-10).
+	ns, settings, problem := "", namespace.PRIngest{}, ""
+	if d.Settings != nil {
+		ns, settings, problem = d.Settings(repoPath)
+	}
+	if problem != "" {
+		skip("pr_ingest problem", "namespace", ns, "reason", problem)
 		return
 	}
+	if !settings.IsEnabled() {
+		slog.Info("ingest-pr: namespace opted out via pr_ingest.enabled=false; skipping repo", "repo", name, "namespace", ns)
+		if dryRun {
+			fmt.Printf("%s: skipped (disabled)\n", name)
+		}
+		return
+	}
+
+	remote, err := gitRemoteURL(ctx, repoPath)
+	if err != nil {
+		skip("no origin remote", "error", err)
+		return
+	}
+	safeRemote := prsource.RedactRemote(remote) // AC-33: never log userinfo
 
 	provider, ref, err := prsource.Detect(remote)
 	if err != nil {
-		slog.Warn("ingest-pr: provider detection failed; skipping repo", "repo", repoPath, "error", err)
+		skip("provider detection failed", "error", err)
 		return
 	}
 	ref.LocalPath = repoPath
-	ref.Name = filepath.Base(repoPath)
+	ref.Name = name
 
-	// Each repo is ingested into the namespace its path maps to.
-	if scope != nil {
-		svc = scope(repoPath)
+	// AC-3: the namespace's provider replaces the detected one (the only
+	// way to reach a self-hosted GitLab); Host/Path come from the origin.
+	if settings.Provider != "" {
+		host, path, ok := prsource.ParseRemote(remote)
+		if !ok || path == "" {
+			skip("invalid path", "remote", safeRemote)
+			return
+		}
+		provider = prsource.Provider(settings.Provider)
+		ref.Provider, ref.Host, ref.Path, ref.Remote = provider, host, path, safeRemote
 	}
 
-	if provider != prsource.ProviderAzureDevOps {
-		// AC-58: unsupported provider (GitHub, GitLab, or unknown) is
-		// skipped with a warning; its cursor is left untouched, and the
-		// rest of this run's repos still proceed.
-		slog.Warn("ingest-pr: provider not supported, skipping repo",
-			"repo", ref.Name, "provider", provider, "remote", remote)
+	source, ok := d.Sources[provider]
+	if !ok {
+		// AC-58: an unsupported or unknown provider is skipped, cursor untouched.
+		skip("unsupported provider", "provider", provider, "remote", safeRemote)
 		return
 	}
 
-	cur, hasCursor := cursorStore.Load(string(provider), ref.Name)
+	// AC-32: nothing derived from the remote reaches gh/glab unvalidated.
+	cursorRepo := ref.Name
+	if provider != prsource.ProviderAzureDevOps {
+		if err := prsource.ValidAPIPath(provider, ref.Path); err != nil {
+			skip("invalid path", "remote", safeRemote, "error", err)
+			return
+		}
+		if provider == prsource.ProviderGitLab {
+			if err := prsource.ValidHost(ref.Host); err != nil {
+				skip("invalid path", "remote", safeRemote, "error", err)
+				return
+			}
+		}
+		// AC-4: two clones with one basename must not share a cursor.
+		cursorRepo = strings.ReplaceAll(ref.Path, "/", "_")
+	}
+
+	if d.Scope != nil {
+		svc = d.Scope(ns)
+	}
+
+	cur, hasCursor := d.Cursors.Load(string(provider), cursorRepo)
 	since := time.Now().Add(-cfg.PRIngestLookback) // AC-28: first-run lookback default.
 	if hasCursor {
 		since = cur.Since
 	}
 
-	prs, err := client.ListCompleted(ctx, ref, since)
+	prs, err := source.ListCompleted(ctx, ref, since)
 	if err != nil {
 		// AC-27: auth/API failure for this repo never advances its cursor
 		// and never blocks the other configured repos.
-		slog.Warn("ingest-pr: listing PRs failed; cursor left unchanged", "repo", ref.Name, "error", err)
+		if errors.Is(err, prsource.ErrPageCap) {
+			err = fmt.Errorf("%w; move \"since\" forward in %s or shorten MEMORY_PR_INGEST_LOOKBACK",
+				err, d.Cursors.File(string(provider), cursorRepo))
+		}
+		skip("listing PRs failed; cursor left unchanged", "error", err)
 		return
 	}
 
@@ -118,8 +172,18 @@ func ingestOneRepo(
 	}
 
 	latest := since
+	skipped := 0
 	for _, pr := range prs {
-		full, err := client.Get(ctx, ref, pr.ID)
+		// AC-21/AC-34: bot and untrusted PRs are never fetched or extracted,
+		// but the cursor passes them.
+		if pr.Bot || !pr.Trusted {
+			skipped++
+			if pr.CompletedAt.After(latest) {
+				latest = pr.CompletedAt
+			}
+			continue
+		}
+		full, err := source.Get(ctx, ref, pr.ID)
 		if err != nil {
 			// AC-26: abort this repo's batch without persisting a cursor,
 			// so an interrupted run leaves the previous cursor intact and
@@ -129,32 +193,39 @@ func ingestOneRepo(
 			return
 		}
 
-		input := extraction.PRInput{
-			Title:       full.Title,
-			Description: full.Description,
-			Repo:        ref.Name,
-			URL:         full.URL,
-			CommitSHA:   full.MergeCommit,
-		}
-		extractionCfg := extraction.Config{
-			MinMessages:  cfg.ExtractMinMessages,
-			CharBudget:   cfg.MaxContentChars,
-			HaikuTimeout: defaultHaikuTimeout,
-		}
-
-		if _, err := extraction.ProcessPR(ctx, svc, input, extractionCfg, haikuRunner); err != nil {
-			slog.Warn("ingest-pr: processing PR failed; continuing with the rest of this repo's batch",
-				"repo", ref.Name, "pr_id", pr.ID, "error", err)
+		if full.Bot || !full.Trusted {
+			skipped++
+		} else {
+			input := extraction.PRInput{
+				Title:          full.Title,
+				Description:    full.Description,
+				Repo:           ref.Name,
+				URL:            full.URL,
+				CommitSHA:      full.MergeCommit,
+				ReviewComments: full.ReviewComments,
+			}
+			extractionCfg := extraction.Config{
+				MinMessages:  cfg.ExtractMinMessages,
+				CharBudget:   cfg.MaxContentChars,
+				HaikuTimeout: defaultHaikuTimeout,
+			}
+			if _, err := extraction.ProcessPR(ctx, svc, input, extractionCfg, d.Haiku, d.Scrubber); err != nil {
+				slog.Warn("ingest-pr: processing PR failed; continuing with the rest of this repo's batch",
+					"repo", ref.Name, "pr_id", pr.ID, "error", err)
+			}
 		}
 
 		if pr.CompletedAt.After(latest) {
 			latest = pr.CompletedAt
 		}
 	}
+	if skipped > 0 {
+		slog.Info("ingest-pr: skipped bot or untrusted-author PRs", "repo", ref.Name, "count", skipped)
+	}
 
 	// The whole batch succeeded (or there was nothing to process): persist
 	// the cursor now, never mid-batch (AC-26).
-	if err := cursorStore.Save(prcursor.Cursor{Provider: string(provider), Repo: ref.Name, Since: latest}); err != nil {
+	if err := d.Cursors.Save(prcursor.Cursor{Provider: string(provider), Repo: cursorRepo, Since: latest}); err != nil {
 		slog.Error("ingest-pr: failed to persist cursor", "repo", ref.Name, "error", err)
 	}
 }

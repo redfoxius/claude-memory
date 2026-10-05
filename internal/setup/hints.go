@@ -10,6 +10,8 @@ const (
 	CompPostgres = "postgres"
 	CompOllama   = "ollama"
 	CompAz       = "az"
+	CompGh       = "gh"
+	CompGlab     = "glab"
 )
 
 // hints is the AC-18 table keyed by (package manager, component). The text is
@@ -23,6 +25,8 @@ var hints = map[string]map[string]string{
 		CompPostgres: "brew install postgresql@16 pgvector && brew services start postgresql@16",
 		CompOllama:   "brew install ollama (or download from https://ollama.com/download)",
 		CompAz:       "brew install azure-cli",
+		CompGh:       "brew install gh",
+		CompGlab:     "brew install glab",
 	},
 	"apt-get": {
 		CompGit:      "sudo apt-get install -y git",
@@ -31,6 +35,8 @@ var hints = map[string]map[string]string{
 		CompPostgres: "sudo apt-get install -y postgresql-16 postgresql-16-pgvector",
 		CompOllama:   "see https://ollama.com/download/linux",
 		CompAz:       "see https://learn.microsoft.com/cli/azure/install-azure-cli-linux",
+		CompGh:       "see https://github.com/cli/cli/blob/trunk/docs/install_linux.md",
+		CompGlab:     "see https://gitlab.com/gitlab-org/cli#installation",
 	},
 	"dnf": {
 		CompGit:      "sudo dnf install -y git",
@@ -39,6 +45,8 @@ var hints = map[string]map[string]string{
 		CompPostgres: "sudo dnf install -y postgresql16-server pgvector_16 (needs the PGDG repository)",
 		CompOllama:   "see https://ollama.com/download/linux",
 		CompAz:       "see https://learn.microsoft.com/cli/azure/install-azure-cli-linux",
+		CompGh:       "see https://github.com/cli/cli/blob/trunk/docs/install_linux.md",
+		CompGlab:     "see https://gitlab.com/gitlab-org/cli#installation",
 	},
 	"pacman": {
 		CompGit:      "sudo pacman -S git",
@@ -47,6 +55,8 @@ var hints = map[string]map[string]string{
 		CompPostgres: "sudo pacman -S postgresql (pgvector from the AUR)",
 		CompOllama:   "sudo pacman -S ollama",
 		CompAz:       "see https://learn.microsoft.com/cli/azure/install-azure-cli-linux",
+		CompGh:       "see https://github.com/cli/cli/blob/trunk/docs/install_linux.md",
+		CompGlab:     "see https://gitlab.com/gitlab-org/cli#installation",
 	},
 	"": {
 		CompGit:      "install git from https://git-scm.com/downloads",
@@ -55,6 +65,8 @@ var hints = map[string]map[string]string{
 		CompPostgres: "install PostgreSQL 16 and the pgvector extension for your system",
 		CompOllama:   "see https://ollama.com/download",
 		CompAz:       "see https://learn.microsoft.com/cli/azure/install-azure-cli",
+		CompGh:       "see https://cli.github.com",
+		CompGlab:     "see https://gitlab.com/gitlab-org/cli#installation",
 	},
 }
 

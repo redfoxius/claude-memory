@@ -18,14 +18,16 @@ type prereq struct {
 }
 
 // prereqTools is the AC-18 list. git and claude block: the claude-md and
-// mcp steps cannot do their job without them. psql, az and ollama only warn
-// or inform: psql is run by the user for bootstrap.sql, az serves the
+// mcp steps cannot do their job without them. psql, az, gh, glab and ollama only warn
+// or inform: psql is run by the user for bootstrap.sql, az, gh and glab serve the
 // ingest-pr job, and the ollama step reports its own blocked state.
 var prereqTools = []prereq{
 	{Tool: "git", Component: CompGit, Required: true},
 	{Tool: "claude", Component: CompClaude, Required: true},
 	{Tool: "psql", Component: CompPsql, Why: "needed to run bootstrap.sql when install creates the database", Level: NoteWarn},
-	{Tool: "az", Component: CompAz, Why: "needed by the ingest-pr job", Level: NoteInfo},
+	{Tool: "az", Component: CompAz, Why: "needed by the ingest-pr job for Azure DevOps repos", Level: NoteInfo},
+	{Tool: "gh", Component: CompGh, Why: "needed by the ingest-pr job for GitHub repos", Level: NoteInfo},
+	{Tool: "glab", Component: CompGlab, Why: "needed by the ingest-pr job for GitLab repos", Level: NoteInfo},
 	{Tool: "ollama", Component: CompOllama, Why: "the ollama step needs it for a local embedder", Level: NoteInfo},
 }
 

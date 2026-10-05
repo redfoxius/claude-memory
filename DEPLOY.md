@@ -365,6 +365,10 @@ All three should fail cleanly. If they succeed, the server security posture is c
 
 Also: (a) `import`, `ls`, `show`, `stats`, `cleanup` and the other long-running commands apply the schema too, so the first command after upgrading applies 0004. (b) A concurrent first start used to be able to fail once on `CREATE`; migrations now run under a Postgres advisory lock on one connection, so starters are serialized. (c) After rolling back to the old binary, imported rows stay as ordinary candidates with source `import`; the old binary ignores the column.
 
+### PR ingest: GitHub and GitLab
+
+`ingest-pr` now also ingests GitHub (`gh`) and GitLab (`glab`) repos (see `integration/USAGE.md`, "PR ingest"). Upgrade steps: `gh auth login` and/or `glab auth login` as the user the job runs as, then `claude-memory install --upgrade` so the jobs' PATH includes the CLIs. The job needs keychain access for `gh`/`glab` from the launchd user agent: run `launchctl kickstart gui/$(id -u)/io.github.claude-memory.ingest-pr` once and check `ingest-pr.log`. GitLab is verified only against fixtures: run `claude-memory ingest-pr --dry-run` first. `namespaces.yaml` may now carry a `pr_ingest` section; a binary older than this version drops it when it re-renders the file (`namespaces add`, `install`), so upgrade every binary that can write the file. No database migration.
+
 ### Management commands
 
 `claude-memory ls|show|rm|edit|promote|review` manage records from the terminal (see `integration/USAGE.md`). They need no schema change or migration; `rm --hard` deletes a row for good and refuses a record that another record's `superseded_by` points at. Short ids (8 hex) resolve only inside the namespace; use the full UUID for `global` records.

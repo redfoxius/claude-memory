@@ -1,0 +1,8 @@
+[
+ {"iid": 7, "title": "Squash MR", "description": "Squashed.", "web_url": "https://gitlab.com/grp/sub/proj/-/merge_requests/7", "merged_at": "2026-09-20T10:00:00Z", "updated_at": "2026-09-20T10:00:05Z", "merge_commit_sha": null, "squash_commit_sha": "sq777", "sha": "head777", "author": {"id": 1, "username": "alice"}},
+ {"iid": 8, "title": "Fast-forward MR", "description": "", "web_url": "https://gitlab.com/grp/sub/proj/-/merge_requests/8", "merged_at": "2026-09-21T10:00:00Z", "updated_at": "2026-09-21T10:00:05Z", "merge_commit_sha": null, "squash_commit_sha": null, "sha": "head888", "author": {"id": 2, "username": "bob"}},
+ {"iid": 6, "title": "Merge-commit MR", "description": "d", "web_url": "https://gitlab.com/grp/sub/proj/-/merge_requests/6", "merged_at": "2026-09-22T10:00:00Z", "updated_at": "2026-09-22T10:00:05Z", "merge_commit_sha": "mc666", "squash_commit_sha": "sq666", "sha": "head666", "author": {"id": 1, "username": "alice"}},
+ {"iid": 5, "title": "Guest MR", "description": "x", "web_url": "u", "merged_at": "2026-09-23T10:00:00Z", "updated_at": "2026-09-23T10:00:05Z", "merge_commit_sha": "mc555", "author": {"id": 3, "username": "guest-gina"}},
+ {"iid": 4, "title": "Bot MR", "description": "x", "web_url": "u", "merged_at": "2026-09-24T10:00:00Z", "updated_at": "2026-09-24T10:00:05Z", "merge_commit_sha": "mc444", "author": {"id": 9, "username": "project_12_bot_x1"}},
+ {"iid": 3, "title": "Old MR", "description": "x", "web_url": "u", "merged_at": "2026-01-01T10:00:00Z", "updated_at": "2026-09-25T10:00:05Z", "merge_commit_sha": "mc333", "author": {"id": 1, "username": "alice"}}
+]

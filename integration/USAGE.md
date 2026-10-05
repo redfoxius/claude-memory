@@ -30,7 +30,7 @@ For details: `MEMORY_DEBUG=1 claude-memory hook < input.json`.
 | Session extraction | on `SessionEnd`, sessions with file edits or > 20 messages | hooks; uses `claude -p` (haiku) |
 | `/remember` | when you ask | skill in `~/.claude/skills/` |
 | Inline capture by Claude | during work, without asking | the rules from `claude-md-snippet.md` pasted into the shared `CLAUDE.md` — **without them Claude does not store or search on its own** |
-| PR ingest | manual or launchd | `az` logged in, `MEMORY_PR_INGEST_REPOS` |
+| PR ingest | manual or launchd | `az` / `gh` / `glab` logged in, `MEMORY_PR_INGEST_REPOS` |
 
 `/memory-digest` summarizes what memory holds for a repo.
 
@@ -47,9 +47,42 @@ claude-memory ingest-pr                    # real run; cursors in ~/.local/state
 MEMORY_PR_INGEST_REPOS=$HOME/work/acme/billing-service claude-memory ingest-pr --dry-run
 ```
 
-Only Azure DevOps remotes are ingested today; GitHub/GitLab repos are
-skipped with a warning. Cursors only advance after a repo's full batch
-succeeds, so re-running after a failure is safe.
+Azure DevOps (`az`), GitHub (`gh`) and GitLab (`glab`) repos are ingested;
+the provider comes from the repo's `origin`. Log in once per CLI
+(`gh auth login`, `glab auth login`); `claude-memory doctor` shows the
+`tools.gh` / `tools.glab` rows. Cursors only advance after a repo's full
+batch succeeds, so re-running after a failure is safe.
+
+- **GitHub is `github.com` only** (no GitHub Enterprise).
+- **GitLab is auto-detected for `gitlab.com` only.** A self-hosted GitLab
+  needs an explicit opt-in on its namespace (see below). The GitLab adapter
+  is **not verified against a live GitLab** (tested with fixtures written
+  from the API docs): start with `--dry-run`.
+- **Only trusted authors are ingested** (GitHub: `OWNER`/`MEMBER`/
+  `COLLABORATOR`; GitLab: Developer or higher), and bots are skipped. PR text
+  from strangers on a public repo would otherwise become memory records that
+  are injected into your sessions. Only their comments are kept, and PR text
+  is scrubbed and capped before it reaches haiku.
+- The CLIs run with `GH_TOKEN`/`GITHUB_TOKEN`/`GITLAB_TOKEN` and similar
+  variables removed from their environment: they use their own login
+  (keychain), never a token from claude-memory's environment.
+- A first run on a busy repo can hit the page cap (1000 PRs updated since the
+  cursor); the error names the cursor file: move its `since` forward.
+
+Per-namespace opt-out or provider override in `namespaces.yaml`:
+
+```yaml
+namespaces:
+  - namespace: sandbox
+    paths: ["~/src/sandbox/**"]
+    pr_ingest: {enabled: false}        # skip this namespace's repos
+  - namespace: corp
+    paths: ["~/work/corp/**"]
+    pr_ingest: {provider: gitlab}      # self-hosted GitLab (host from origin)
+```
+
+A bad `pr_ingest` never breaks namespace resolution: ingest-pr skips that
+namespace with a warning and `doctor` reports it on the `namespaces` row.
 
 To schedule it daily instead, load the launchd job from `INSTALL.md` step 8.
 

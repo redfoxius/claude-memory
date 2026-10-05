@@ -11,10 +11,13 @@ import (
 // ("git@host:path") remotes, over https and ssh, for:
 //   - Azure DevOps: dev.azure.com, ssh.dev.azure.com, and *.visualstudio.com
 //     (https and the "v3/org/project/repo" ssh form).
-//   - GitHub: github.com.
-//   - GitLab: gitlab.com or any self-hosted gitlab.* host.
+//   - GitHub: github.com, www.github.com, ssh.github.com.
+//   - GitLab: gitlab.com only. A self-hosted GitLab is never auto-detected
+//     (credentials must not flow to a host a remote merely resembles); it is
+//     reached only through an explicit provider override (see ParseRemote).
 //
-// Any other host, or a remote that can't be parsed at all, resolves to
+// RepoRef.Remote holds the remote with any userinfo removed, so it is safe
+// to log. Any other host, or a remote that can't be parsed at all, resolves to
 // ProviderUnknown with no error — an unrecognized provider is a normal,
 // expected outcome the caller skips (AC-58), not a failure. The error
 // return exists for a genuinely malformed/empty remote string; it is
@@ -25,23 +28,63 @@ func Detect(remoteURL string) (Provider, RepoRef, error) {
 		return ProviderUnknown, RepoRef{Remote: remote}, nil
 	}
 
-	host, path, ok := splitHostPath(remote)
+	safe := RedactRemote(remote)
+	hostLower, path, ok := ParseRemote(remote)
 	if !ok {
-		return ProviderUnknown, RepoRef{Remote: remote}, nil
+		return ProviderUnknown, RepoRef{Remote: safe}, nil
 	}
-	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
-	hostLower := strings.ToLower(host)
 
+	var ref RepoRef
+	var provider Provider
 	switch {
 	case isAzureHost(hostLower):
-		return ProviderAzureDevOps, parseAzureRef(hostLower, path, remote), nil
-	case hostLower == "github.com":
-		return ProviderGitHub, parseTwoSegmentRef(path, remote), nil
-	case hostLower == "gitlab.com" || strings.HasPrefix(hostLower, "gitlab."):
-		return ProviderGitLab, parseTwoSegmentRef(path, remote), nil
+		provider, ref = ProviderAzureDevOps, parseAzureRef(hostLower, path, safe)
+	case isGitHubHost(hostLower):
+		provider, ref = ProviderGitHub, parseTwoSegmentRef(path, safe)
+	case hostLower == "gitlab.com":
+		provider, ref = ProviderGitLab, parseTwoSegmentRef(path, safe)
 	default:
-		return ProviderUnknown, RepoRef{Remote: remote}, nil
+		return ProviderUnknown, RepoRef{Remote: safe}, nil
 	}
+	ref.Provider = provider
+	ref.Host = hostLower
+	ref.Path = path
+	return provider, ref, nil
+}
+
+// ParseRemote returns the lower-case host (no port, no userinfo) and the
+// path (no leading/trailing "/", no ".git" suffix) of a URL-style or
+// SCP-style remote. It is exported for the explicit provider-override path,
+// where the host is not one Detect recognises.
+func ParseRemote(remote string) (host, path string, ok bool) {
+	h, p, ok := splitHostPath(strings.TrimSpace(remote))
+	if !ok {
+		return "", "", false
+	}
+	path = strings.TrimSuffix(strings.Trim(p, "/"), ".git")
+	return strings.ToLower(h), path, true
+}
+
+// RedactRemote removes userinfo ("user:token@") from a remote URL so it is
+// safe to log or print. SCP-style remotes ("git@host:path") only carry a
+// user name, which is dropped as well. An unparseable remote is returned
+// with everything up to the last "@" removed.
+func RedactRemote(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if strings.Contains(remote, "://") {
+		if u, err := url.Parse(remote); err == nil {
+			u.User = nil
+			return u.String()
+		}
+	}
+	if i := strings.LastIndex(remote, "@"); i >= 0 {
+		return remote[i+1:]
+	}
+	return remote
+}
+
+func isGitHubHost(host string) bool {
+	return host == "github.com" || host == "www.github.com" || host == "ssh.github.com"
 }
 
 func isAzureHost(host string) bool {
@@ -58,11 +101,11 @@ func splitHostPath(remote string) (host, path string, ok bool) {
 		if err != nil || u.Host == "" {
 			return "", "", false
 		}
-		return u.Host, u.Path, true
+		return u.Hostname(), u.Path, true
 	}
 
 	rest := remote
-	if idx := strings.Index(rest, "@"); idx >= 0 {
+	if idx := strings.LastIndex(rest, "@"); idx >= 0 {
 		rest = rest[idx+1:]
 	}
 	idx := strings.Index(rest, ":")
