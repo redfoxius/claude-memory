@@ -62,11 +62,13 @@ func startPostgresContainer(t *testing.T, ctx context.Context) (string, func()) 
 
 	dsn := fmt.Sprintf("postgres://test:testpass@%s:%s/claude_memory_test", host, port.Port())
 
-	// Wait for the database to accept connections
+	// Wait for the database to accept connections. A plain connection, not
+	// New: migrating here would hand tests a database that is no longer
+	// fresh (TestMigration0002 needs one with only 0001 applied).
 	for i := 0; i < 30; i++ {
-		s, err := New(ctx, dsn)
+		c, err := pgx.Connect(ctx, dsn)
 		if err == nil {
-			s.Close()
+			_ = c.Close(ctx)
 			break
 		}
 		if i == 29 {
