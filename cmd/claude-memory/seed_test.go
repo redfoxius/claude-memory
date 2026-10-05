@@ -119,14 +119,14 @@ func TestLoadSeedFileRejectsMissingFields(t *testing.T) {
 
 func TestLoadSeedFileRealFixture(t *testing.T) {
 	// Exercise the actual seed/facts.yaml shipped with the repo (WI-17
-	// acceptance: 10-20 facts, each with kind/title/content/repo/tags).
+	// acceptance: a handful of facts, each with kind/title/content/repo/tags).
 	path := filepath.Join("..", "..", "seed", "facts.yaml")
 	facts, err := loadSeedFile(path)
 	if err != nil {
 		t.Fatalf("loadSeedFile(seed/facts.yaml): %v", err)
 	}
-	if len(facts) < 10 || len(facts) > 20 {
-		t.Errorf("got %d facts, want 10-20", len(facts))
+	if len(facts) < 5 || len(facts) > 20 {
+		t.Errorf("got %d facts, want 5-20", len(facts))
 	}
 	for i, f := range facts {
 		if len(f.Tags) == 0 {

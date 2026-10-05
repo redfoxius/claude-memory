@@ -16,7 +16,7 @@ import (
 )
 
 func ev(t memory.EventType) memory.Event {
-	e := memory.NewEvent(time.Now(), "acme", t)
+	e := memory.NewEvent(time.Now(), "work", t)
 	e.RecordID = uuid.New().String()
 	return e
 }

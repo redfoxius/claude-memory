@@ -44,7 +44,7 @@ func TestNamespace_SearchCoversOwnAndGlobal(t *testing.T) {
 
 func TestNamespace_ListIsConfinedToOwnNamespace(t *testing.T) {
 	store := &mockStore{}
-	other := "acme"
+	other := "work"
 	_, err := nsService(store, "pet-game").ListRecords(context.Background(), ListFilters{Namespace: &other})
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestNamespace_IDLookupsHideOtherNamespaces(t *testing.T) {
 		"mine":   {ID: "mine", Namespace: "pet-game", Status: record.StatusActive},
 		"mine2":  {ID: "mine2", Namespace: "pet-game", Status: record.StatusActive},
 		"global": {ID: "global", Namespace: "global", Status: record.StatusActive},
-		"theirs": {ID: "theirs", Namespace: "acme", Status: record.StatusActive},
+		"theirs": {ID: "theirs", Namespace: "work", Status: record.StatusActive},
 	}
 	store := &mockStore{
 		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
@@ -128,7 +128,7 @@ func TestNamespace_StoreExplicitGlobal(t *testing.T) {
 
 func TestNamespace_StoreRejectsForeignNamespace(t *testing.T) {
 	req := baseStoreRequest()
-	req.Namespace = "acme"
+	req.Namespace = "work"
 	if _, err := nsService(&mockStore{}, "pet-game").Store(context.Background(), req); err == nil {
 		t.Fatal("expected an error for writing to another namespace")
 	}
@@ -139,7 +139,7 @@ func TestNamespace_DeprecateSupersededByMustBeAccessible(t *testing.T) {
 		"mine":   {ID: "mine", Namespace: "pet-game", Status: record.StatusActive},
 		"mine2":  {ID: "mine2", Namespace: "pet-game", Status: record.StatusActive},
 		"global": {ID: "global", Namespace: "global", Status: record.StatusActive},
-		"theirs": {ID: "theirs", Namespace: "acme", Status: record.StatusActive},
+		"theirs": {ID: "theirs", Namespace: "work", Status: record.StatusActive},
 	}
 	store := &mockStore{
 		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {

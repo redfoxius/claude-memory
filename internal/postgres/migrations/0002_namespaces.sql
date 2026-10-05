@@ -1,7 +1,7 @@
 -- Namespaces: isolate records between projects/companies. Existing rows are
--- backfilled to 'acme' via the column default, which is then dropped so
+-- backfilled to 'work' via the column default, which is then dropped so
 -- every future insert must state its namespace explicitly.
-ALTER TABLE records ADD COLUMN IF NOT EXISTS namespace TEXT NOT NULL DEFAULT 'acme';
+ALTER TABLE records ADD COLUMN IF NOT EXISTS namespace TEXT NOT NULL DEFAULT 'work';
 
 ALTER TABLE records ALTER COLUMN namespace DROP DEFAULT;
 

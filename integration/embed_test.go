@@ -66,7 +66,7 @@ func TestEmbeddedMatchesWorkingTree(t *testing.T) {
 }
 
 // TestAssetsAreLocationNeutral pins AC-66's wording rule: neither skill nor
-// the CLAUDE.md section names acme/ (the section goes to the user-level
+// the CLAUDE.md section names a specific work directory (the section goes to the user-level
 // CLAUDE.md by default, spec §13 #1).
 func TestAssetsAreLocationNeutral(t *testing.T) {
 	paths := []string{ClaudeMDSection}

@@ -193,12 +193,12 @@ func TestDiscoverAutoMem(t *testing.T) {
 		}
 	}
 	env := fixedEnv(
-		map[string]string{gitHome: "acme", plainHome: "acme", otherHome: "pet"},
+		map[string]string{gitHome: "work", plainHome: "work", otherHome: "pet"},
 		func(dir string) (string, bool) { return gitHome, dir == gitHome },
 		map[string]string{"-git": gitHome, "-plain": plainHome, "-other": otherHome},
 	)
 
-	items, skips, err := DiscoverAutoMem(env, projects, "acme")
+	items, skips, err := DiscoverAutoMem(env, projects, "work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,11 +251,11 @@ func TestDiscoverInsights(t *testing.T) {
 	write(t, filepath.Join(root, "plain", "insights.md"), "## What Works\n- 2026-05-05 — Non git entry. `a.go`\n")
 
 	env := fixedEnv(
-		map[string]string{top: "acme", filepath.Join(root, "plain"): "acme"},
+		map[string]string{top: "work", filepath.Join(root, "plain"): "work"},
 		func(dir string) (string, bool) { return top, strings.HasPrefix(dir, top) },
 		nil,
 	)
-	items, skips, err := DiscoverInsights(env, []string{top}, "acme")
+	items, skips, err := DiscoverInsights(env, []string{top}, "work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,9 +279,9 @@ func TestDiscoverInsights(t *testing.T) {
 
 	// A file outside any checkout: repo "*", absolute locator, no files.
 	plain := filepath.Join(root, "plain", "insights.md")
-	envPlain := fixedEnv(map[string]string{filepath.Join(root, "plain"): "acme"},
+	envPlain := fixedEnv(map[string]string{filepath.Join(root, "plain"): "work"},
 		func(string) (string, bool) { return "", false }, nil)
-	items, _, err = DiscoverInsights(envPlain, []string{plain}, "acme")
+	items, _, err = DiscoverInsights(envPlain, []string{plain}, "work")
 	if err != nil || len(items) != 1 {
 		t.Fatalf("plain: %v %+v", err, items)
 	}
@@ -291,7 +291,7 @@ func TestDiscoverInsights(t *testing.T) {
 
 	// Another namespace is skipped as a whole.
 	envOther := fixedEnv(map[string]string{top: "pet"}, env.Toplevel, nil)
-	items, skips, _ = DiscoverInsights(envOther, []string{top}, "acme")
+	items, skips, _ = DiscoverInsights(envOther, []string{top}, "work")
 	if len(items) != 0 || len(skips) != 1 || skips[0].Reason != "other namespace (pet)" {
 		t.Errorf("other ns: %+v %+v", items, skips)
 	}

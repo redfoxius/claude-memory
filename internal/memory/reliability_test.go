@@ -11,7 +11,7 @@ import (
 )
 
 func relEvent(t EventType, via EventVia, outcome FeedbackOutcome, class ErrorClass) Event {
-	e := NewEvent(time.Now(), "acme", t)
+	e := NewEvent(time.Now(), "work", t)
 	e.Via, e.Outcome, e.ErrorClass = via, outcome, class
 	return e
 }
@@ -70,7 +70,7 @@ func TestValidateReliability(t *testing.T) {
 func TestValidateOldTypesRejectReliabilityValues(t *testing.T) {
 	now := time.Now()
 	mk := func(mut func(*Event)) Event {
-		e := NewEvent(now, "acme", EventFeedback)
+		e := NewEvent(now, "work", EventFeedback)
 		e.RecordID = uuid.New().String()
 		mut(&e)
 		return e

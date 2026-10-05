@@ -13,9 +13,9 @@ type Kind string
 const GlobalNamespace = "global"
 
 const (
-	KindPattern   Kind = "pattern"
-	KindDecision  Kind = "decision"
-	KindGotcha    Kind = "gotcha"
+	KindPattern    Kind = "pattern"
+	KindDecision   Kind = "decision"
+	KindGotcha     Kind = "gotcha"
 	KindConvention Kind = "convention"
 )
 
@@ -82,7 +82,7 @@ type Record struct {
 	// Content is the full record text in markdown.
 	Content string
 
-	// Namespace isolates records between projects/companies (e.g. "acme",
+	// Namespace isolates records between projects/companies (e.g. "work",
 	// "pet-game"). All reads and writes are scoped to it; "global" holds
 	// explicitly-shared, stack-generic facts visible from every namespace.
 	Namespace string
@@ -154,17 +154,17 @@ func New(
 ) *Record {
 	now := time.Now().UTC()
 	return &Record{
-		ID:        id,
-		Kind:      kind,
-		Title:     title,
-		Content:   content,
-		Repo:      repo,
-		Files:     []string{},
-		Tags:      []string{},
-		Status:    StatusCandidate,
-		Source:    source,
+		ID:         id,
+		Kind:       kind,
+		Title:      title,
+		Content:    content,
+		Repo:       repo,
+		Files:      []string{},
+		Tags:       []string{},
+		Status:     StatusCandidate,
+		Source:     source,
 		Confidence: confidence,
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 }

@@ -49,7 +49,7 @@ func eqStrings(t *testing.T, got, want []string) {
 
 func eventSvc(store Store, sink EventSink) *Service {
 	return New(store, &mockEmbeddingProvider{}, &mockScrubber{}, &mockClock{}, writepathCfg()).
-		WithNamespace("acme").WithEvents(sink)
+		WithNamespace("work").WithEvents(sink)
 }
 
 // AC-14: Event holds ids, enums and numbers only.
@@ -71,7 +71,7 @@ func TestEventHasOnlyAllowedFields(t *testing.T) {
 func TestEventValidate(t *testing.T) {
 	now := time.Now()
 	ok := func() Event {
-		e := NewEvent(now, "acme", EventCardInjected)
+		e := NewEvent(now, "work", EventCardInjected)
 		e.RecordID = uuid.New().String()
 		return e
 	}
@@ -244,13 +244,13 @@ func TestFeedbackEvents(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recSink{}
-			// The record lives in "global"; feedback is given from "acme".
+			// The record lives in "global"; feedback is given from "work".
 			svc := eventSvc(recStore(tc.before, record.GlobalNamespace), sink)
 			if _, err := svc.Feedback(context.Background(), &FeedbackRequest{ID: "r", Outcome: tc.outcome}); err != nil {
 				t.Fatal(err)
 			}
 			eqStrings(t, sink.types(), tc.want)
-			if sink.evs[0].Namespace != "acme" || sink.evs[0].Outcome != tc.outcome {
+			if sink.evs[0].Namespace != "work" || sink.evs[0].Outcome != tc.outcome {
 				t.Errorf("feedback event = %+v", sink.evs[0])
 			}
 			if len(sink.evs) > 1 && sink.evs[1].Namespace != record.GlobalNamespace {
@@ -260,13 +260,13 @@ func TestFeedbackEvents(t *testing.T) {
 	}
 
 	// A failing sink changes nothing; a failed update records nothing.
-	resp, err := eventSvc(recStore(record.StatusActive, "acme"), &recSink{err: errors.New("x")}).
+	resp, err := eventSvc(recStore(record.StatusActive, "work"), &recSink{err: errors.New("x")}).
 		Feedback(context.Background(), &FeedbackRequest{ID: "r", Outcome: FeedbackUseful})
 	if err != nil || resp.NewStatus != record.StatusActive {
 		t.Errorf("failing sink: %v %+v", err, resp)
 	}
 	sink := &recSink{}
-	failing := recStore(record.StatusActive, "acme")
+	failing := recStore(record.StatusActive, "work")
 	failing.UpdateFunc = func(context.Context, string, map[string]interface{}) (*record.Record, error) {
 		return nil, errors.New("db")
 	}
@@ -295,7 +295,7 @@ func TestUpdateAndDeprecateEvents(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recSink{}
-			svc := eventSvc(recStore(tc.before, "acme"), sink)
+			svc := eventSvc(recStore(tc.before, "work"), sink)
 			if _, err := svc.UpdateRecord(ctx, &UpdateRequest{ID: "r", Status: tc.status, Ticket: ptrString("T-1")}); err != nil {
 				t.Fatal(err)
 			}
@@ -307,21 +307,21 @@ func TestUpdateAndDeprecateEvents(t *testing.T) {
 	}
 
 	sink := &recSink{}
-	svc := eventSvc(recStore(record.StatusActive, "acme"), sink)
+	svc := eventSvc(recStore(record.StatusActive, "work"), sink)
 	if _, err := svc.DeprecateRecord(ctx, &DeprecateRequest{ID: "r", Reason: "old"}); err != nil {
 		t.Fatal(err)
 	}
 	eqStrings(t, sink.types(), []string{"record_deprecated/tool"})
 
 	sink = &recSink{}
-	svc = eventSvc(recStore(record.StatusDeprecated, "acme"), sink)
+	svc = eventSvc(recStore(record.StatusDeprecated, "work"), sink)
 	if _, err := svc.DeprecateRecord(ctx, &DeprecateRequest{ID: "r", Reason: "old"}); err != nil {
 		t.Fatal(err)
 	}
 	eqStrings(t, sink.types(), nil)
 
 	// A failing sink never fails the operation.
-	svc = eventSvc(recStore(record.StatusActive, "acme"), &recSink{err: errors.New("x")})
+	svc = eventSvc(recStore(record.StatusActive, "work"), &recSink{err: errors.New("x")})
 	if _, err := svc.DeprecateRecord(ctx, &DeprecateRequest{ID: "r", Reason: "old"}); err != nil {
 		t.Errorf("DeprecateRecord with a failing sink: %v", err)
 	}
@@ -329,15 +329,15 @@ func TestUpdateAndDeprecateEvents(t *testing.T) {
 
 // A service with no sink (the default) works and records nothing.
 func TestNoSinkIsFine(t *testing.T) {
-	svc := New(recStore(record.StatusActive, "acme"), &mockEmbeddingProvider{}, &mockScrubber{}, &mockClock{}, writepathCfg()).
-		WithNamespace("acme")
+	svc := New(recStore(record.StatusActive, "work"), &mockEmbeddingProvider{}, &mockScrubber{}, &mockClock{}, writepathCfg()).
+		WithNamespace("work")
 	if _, err := svc.Feedback(context.Background(), &FeedbackRequest{ID: "r", Outcome: FeedbackUseful}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestEventValidateAcceptsImportSource(t *testing.T) {
-	e := NewEvent(time.Now(), "acme", EventRecordCreated)
+	e := NewEvent(time.Now(), "work", EventRecordCreated)
 	e.RecordID = uuid.New().String()
 	e.Source, e.Status = EventSourceImport, record.StatusCandidate
 	if err := e.Validate(time.Now()); err != nil {

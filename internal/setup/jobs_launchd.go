@@ -23,8 +23,8 @@ import (
 // launchctl call). LaunchdManager adds Install. There is no Remove: uninstall
 // is not part of this build.
 
-// LaunchdLabelPrefix is the label prefix of our jobs, kept from the manual
-// install so hand-installed jobs are recognized (§13 #6).
+// LaunchdLabelPrefix is the label prefix of our jobs, so hand-installed
+// jobs that follow the same naming are recognized (§13 #6).
 const LaunchdLabelPrefix = "io.github.claude-memory."
 
 // Job names.

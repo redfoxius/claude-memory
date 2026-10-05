@@ -71,7 +71,7 @@ func TestMigration0004Idempotent(t *testing.T) {
 	}
 
 	// An event with source=import is accepted; an unknown source is not.
-	e := ev("acme", memory.EventRecordCreated, uuid.New().String(), time.Minute)
+	e := ev("work", memory.EventRecordCreated, uuid.New().String(), time.Minute)
 	e.Source, e.Status = memory.EventSourceImport, record.StatusCandidate
 	if err := s.Append(ctx, e); err != nil {
 		t.Errorf("append import event: %v", err)

@@ -142,7 +142,7 @@ func TestCleanupCmdDrainFailureIsNotFatal(t *testing.T) {
 }
 
 func validEvent() memory.Event {
-	e := memory.NewEvent(time.Now(), "acme", memory.EventCardInjected)
+	e := memory.NewEvent(time.Now(), "work", memory.EventCardInjected)
 	e.RecordID = "11111111-1111-4111-8111-111111111111"
 	return e
 }

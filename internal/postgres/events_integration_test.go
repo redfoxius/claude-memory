@@ -95,10 +95,10 @@ func TestEventsAppend(t *testing.T) {
 	}
 	defer s.Close()
 
-	a := ev("acme", memory.EventCardInjected, uuid.New().String(), time.Hour)
+	a := ev("work", memory.EventCardInjected, uuid.New().String(), time.Hour)
 	sim, stale, commits := 0.8, true, 2
 	a.Similarity, a.Stale, a.StaleCommits, a.SessionID = &sim, &stale, &commits, "sess-1"
-	b := ev("acme", memory.EventRecordSuperseded, uuid.New().String(), time.Hour)
+	b := ev("work", memory.EventRecordSuperseded, uuid.New().String(), time.Hour)
 	b.RelatedID, b.Source = uuid.New().String(), memory.EventSourceInline
 
 	if err := s.Append(ctx); err != nil {
@@ -126,17 +126,17 @@ func TestEventsAppend(t *testing.T) {
 		t.Errorf("related_id = %v %v", related, err)
 	}
 
-	bad := ev("acme", memory.EventCardInjected, uuid.New().String(), time.Hour)
+	bad := ev("work", memory.EventCardInjected, uuid.New().String(), time.Hour)
 	bad.Via = "bogus" // violates events_via_check (23514)
 	if err := s.Append(ctx, bad); !errors.Is(err, memory.ErrEventRejected) {
 		t.Errorf("bad enum: err = %v, want ErrEventRejected", err)
 	}
-	badUUID := ev("acme", memory.EventCardInjected, "not-a-uuid", time.Hour) // 22P02
+	badUUID := ev("work", memory.EventCardInjected, "not-a-uuid", time.Hour) // 22P02
 	if err := s.Append(ctx, badUUID); !errors.Is(err, memory.ErrEventRejected) {
 		t.Errorf("bad uuid: err = %v, want ErrEventRejected", err)
 	}
 	// A batch with one bad row inserts none of it; the good row alone works.
-	good := ev("acme", memory.EventFeedback, uuid.New().String(), time.Hour)
+	good := ev("work", memory.EventFeedback, uuid.New().String(), time.Hour)
 	if err := s.Append(ctx, good, bad); !errors.Is(err, memory.ErrEventRejected) {
 		t.Errorf("mixed batch: err = %v", err)
 	}
@@ -172,12 +172,12 @@ func TestCleanupCTEAndPrune(t *testing.T) {
 
 	old := time.Now().UTC().AddDate(0, 0, -400)
 	expired := map[string]string{ // id -> namespace
-		createRecord(t, ctx, s, "acme", record.StatusCandidate, record.SourceSession): "acme",
-		createRecord(t, ctx, s, "acme", record.StatusCandidate, record.SourceInline):  "acme",
-		createRecord(t, ctx, s, "global", record.StatusCandidate, record.SourceInline):   "global",
+		createRecord(t, ctx, s, "work", record.StatusCandidate, record.SourceSession):  "work",
+		createRecord(t, ctx, s, "work", record.StatusCandidate, record.SourceInline):   "work",
+		createRecord(t, ctx, s, "global", record.StatusCandidate, record.SourceInline): "global",
 	}
-	activeOld := createRecord(t, ctx, s, "acme", record.StatusActive, record.SourcePR)
-	freshCandidate := createRecord(t, ctx, s, "acme", record.StatusCandidate, record.SourceSession)
+	activeOld := createRecord(t, ctx, s, "work", record.StatusActive, record.SourcePR)
+	freshCandidate := createRecord(t, ctx, s, "work", record.StatusCandidate, record.SourceSession)
 	for id := range expired {
 		if _, err := s.pool.Exec(ctx, "UPDATE records SET created_at = $1, updated_at = $1, last_used_at = $1 WHERE id = $2", old, id); err != nil {
 			t.Fatal(err)
@@ -219,8 +219,8 @@ func TestCleanupCTEAndPrune(t *testing.T) {
 
 	// Retention prune.
 	if err := s.Append(ctx,
-		ev("acme", memory.EventCardInjected, uuid.New().String(), 400*24*time.Hour),
-		ev("acme", memory.EventCardInjected, uuid.New().String(), 10*24*time.Hour)); err != nil {
+		ev("work", memory.EventCardInjected, uuid.New().String(), 400*24*time.Hour),
+		ev("work", memory.EventCardInjected, uuid.New().String(), 10*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	pruned, err := s.PruneEvents(ctx, time.Now().Add(-365*24*time.Hour))

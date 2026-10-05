@@ -51,7 +51,7 @@ func TestImportEndToEnd(t *testing.T) {
 	defer store.Close()
 	cfg := &config.Config{MaxContentChars: 20000, StoreSimAsk: 0.65, StoreSimUpdate: 0.85, EmbedMaxTokens: 2048}
 	svc := memory.New(store, hashEmbedder{}, scrub.NewAdapter(scrub.New()), &systemClock{}, cfg).
-		WithNamespace("acme").WithEvents(store)
+		WithNamespace("work").WithEvents(store)
 
 	f := newImportFixture(t)
 	f.deps.Open = func(string) (importService, time.Duration, func(), error) { return svc, 24 * time.Hour, func() {}, nil }
@@ -69,7 +69,7 @@ func TestImportEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close(ctx)
-	if n := queryInt(t, conn, `SELECT count(*) FROM records WHERE source = 'import' AND status = 'candidate' AND namespace = 'acme' AND import_key LIKE 'automem:%' AND commit_sha IS NULL AND confidence = 0.5`); n != 2 {
+	if n := queryInt(t, conn, `SELECT count(*) FROM records WHERE source = 'import' AND status = 'candidate' AND namespace = 'work' AND import_key LIKE 'automem:%' AND commit_sha IS NULL AND confidence = 0.5`); n != 2 {
 		t.Fatalf("imported candidate rows = %d, want 2", n)
 	}
 	if n := queryInt(t, conn, `SELECT count(*) FROM events WHERE type = 'record_created' AND source = 'import' AND status = 'candidate'`); n != 2 {

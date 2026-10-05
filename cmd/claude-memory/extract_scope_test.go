@@ -60,4 +60,3 @@ func TestScopeSessionService_NotACheckout(t *testing.T) {
 		t.Error("checkout set outside a git checkout")
 	}
 }
-

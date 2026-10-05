@@ -182,7 +182,7 @@ func (s *Service) DeprecateRecord(ctx context.Context, req *DeprecateRequest) (*
 	}
 
 	updates := map[string]interface{}{
-		"status":              record.StatusDeprecated,
+		"status":             record.StatusDeprecated,
 		"deprecation_reason": req.Reason,
 	}
 

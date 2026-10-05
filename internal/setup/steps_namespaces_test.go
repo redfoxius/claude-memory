@@ -81,7 +81,7 @@ func (h *s23) nsAssertIdempotent(st *RunState) {
 
 func TestNamespacesCreateFresh(t *testing.T) {
 	h := newS23(t)
-	st := nsState(NSRule{"acme", []string{"~/work/acme/**"}}, NSRule{"pet-game", []string{"~/src/pet-game", "~/src/pet-game/**"}})
+	st := nsState(NSRule{"work", []string{"~/work/acme/**"}}, NSRule{"pet-game", []string{"~/src/pet-game", "~/src/pet-game/**"}})
 	r := h.nsRun(st)
 	if r.det.State != StateAbsent {
 		t.Fatalf("detect = %s", r.det.State)
@@ -323,7 +323,7 @@ func TestNamespacesConfigureSkipsUnparseableAndCovered(t *testing.T) {
 		t.Fatalf("unparseable: %v %+v", err, st.NSRules.Get())
 	}
 
-	h.write(h.p.NamespacesFile(), "namespaces:\n  - namespace: acme\n    paths: [\"~/work/acme/**\"]\n", 0o600)
+	h.write(h.p.NamespacesFile(), "namespaces:\n  - namespace: work\n    paths: [\"~/work/acme/**\"]\n", 0o600)
 	ui := newPW(t, true).
 		conf("Map ~/src/** to its own namespace? (currently \"global\", fallback)", false).
 		text("Add another mapping", "")

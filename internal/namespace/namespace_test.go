@@ -19,7 +19,7 @@ func TestResolve(t *testing.T) {
 	c, err := Load(write(t, `
 default: scratch
 namespaces:
-  - namespace: acme
+  - namespace: work
     paths: ["/work/acme/**"]
   - namespace: acme-infra
     paths: ["/work/acme/infra/**"]
@@ -30,15 +30,15 @@ namespaces:
 		t.Fatal(err)
 	}
 	cases := map[string]string{
-		"/work/acme/billing-service":   "acme",
-		"/work/acme/infra/tf":     "acme-infra", // most specific wins
-		"/work/acme":              "acme",       // ** matches zero segments
+		"/work/acme/billing-service": "work",
+		"/work/acme/infra/tf":        "acme-infra", // most specific wins
+		"/work/acme":                 "work",       // ** matches zero segments
 		"/src/pet-game":              "pet-game",
 		"/src/pet-game/server/x":     "pet-game",
 		"/src/other-game":            "pet-game",
 		"/elsewhere/thing":           "scratch",
-		"/work/acmetwo/x":         "scratch",
-		"/work/acme/../acme/y": "acme",
+		"/work/acmetwo/x":            "scratch",
+		"/work/acme/../acme/y":       "work",
 	}
 	for dir, want := range cases {
 		if got := c.Resolve(dir); got != want {
@@ -88,7 +88,7 @@ func TestOverrideWins(t *testing.T) {
 
 func TestInitAddAndRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "sub", "namespaces.yaml")
-	if err := Init(p, "", []Rule{{Namespace: "acme", Paths: []string{"/work/acme/**"}}}, false); err != nil {
+	if err := Init(p, "", []Rule{{Namespace: "work", Paths: []string{"/work/acme/**"}}}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := Init(p, "", nil, false); err == nil {
@@ -145,10 +145,10 @@ func TestExplainAndTieBreak(t *testing.T) {
 
 func TestMarshalMatchesSave(t *testing.T) {
 	c := &Config{Default: Fallback, Namespaces: []Rule{}}
-	if err := c.Add("acme", "~/work/acme/**"); err != nil {
+	if err := c.Add("work", "~/work/acme/**"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Add("acme", "~/work/acme/**", "~/src/x"); err != nil { // duplicate glob skipped
+	if err := c.Add("work", "~/work/acme/**", "~/src/x"); err != nil { // duplicate glob skipped
 		t.Fatal(err)
 	}
 	got, err := Marshal(c)

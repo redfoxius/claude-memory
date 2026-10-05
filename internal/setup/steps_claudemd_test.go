@@ -383,7 +383,7 @@ func TestClaudeMDYesAndGit(t *testing.T) {
 	}
 	t.Run("yes + explicit in git: skipped", func(t *testing.T) {
 		c := newCMK(t)
-		repo := filepath.Join(c.root, "work", "acme")
+		repo := filepath.Join(c.root, "work", "work")
 		gitDir(c, repo)
 		st := NewRunState(Inputs{Yes: true, ClaudeMD: filepath.Join(repo, "CLAUDE.md")})
 		st.Auto = true
@@ -399,7 +399,7 @@ func TestClaudeMDYesAndGit(t *testing.T) {
 	})
 	t.Run("yes + explicit in git, block ok: nothing to skip", func(t *testing.T) {
 		c := newCMK(t)
-		repo := filepath.Join(c.root, "work", "acme")
+		repo := filepath.Join(c.root, "work", "work")
 		gitDir(c, repo)
 		c.write(filepath.Join(repo, "CLAUDE.md"), "<!-- BEGIN claude-memory -->\n"+testSection+"<!-- END claude-memory -->\n", 0o644)
 		st := NewRunState(Inputs{Yes: true, ClaudeMD: filepath.Join(repo, "CLAUDE.md")})
@@ -411,7 +411,7 @@ func TestClaudeMDYesAndGit(t *testing.T) {
 	})
 	t.Run("interactive + explicit in git: planned with a note", func(t *testing.T) {
 		c := newCMK(t)
-		repo := filepath.Join(c.root, "work", "acme")
+		repo := filepath.Join(c.root, "work", "work")
 		gitDir(c, repo)
 		st := NewRunState(Inputs{ClaudeMD: filepath.Join(repo, "CLAUDE.md")})
 		_, _ = ClaudeMDStep{}.Seed(context.Background(), c.rp(), st)
@@ -489,7 +489,7 @@ func autoState(c *cmk, in Inputs, m *Manifest) *RunState {
 // a block the user deleted is not re-added.
 func TestClaudeMDYesRecordedPathInGit(t *testing.T) {
 	c := newCMK(t)
-	repo := filepath.Join(c.root, "work", "acme")
+	repo := filepath.Join(c.root, "work", "work")
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +544,7 @@ func TestClaudeMDYesGitWalkErrorFailsClosed(t *testing.T) {
 // S3: a directory symlinked into a repository counts as inside it.
 func TestClaudeMDYesSymlinkedDirIntoRepo(t *testing.T) {
 	c := newCMK(t)
-	repo := filepath.Join(c.root, "work", "acme")
+	repo := filepath.Join(c.root, "work", "work")
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
