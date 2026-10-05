@@ -187,6 +187,9 @@ func (s *Service) DeprecateRecord(ctx context.Context, req *DeprecateRequest) (*
 	}
 
 	if req.SupersededBy != nil {
+		if _, err := s.getAccessible(ctx, *req.SupersededBy); err != nil {
+			return nil, fmt.Errorf("deprecate record: superseded_by: %w", err)
+		}
 		updates["superseded_by"] = *req.SupersededBy
 	}
 

@@ -560,8 +560,20 @@ func cmdEvalRetrieval(cfg *config.Config) error {
 	}
 	defer cleanup()
 
-	// Fixtures are synthetic: keep them out of every real namespace.
-	return evalCmd(ctx, args, svc.WithNamespace("eval"))
+	return evalCmd(ctx, args, evalScope(svc))
+}
+
+// evalNamespace is where eval-retrieval's synthetic fixtures live unless
+// MEMORY_NAMESPACE explicitly says otherwise.
+const evalNamespace = "eval"
+
+// evalScope keeps the fixtures out of every real namespace, unless the
+// operator set MEMORY_NAMESPACE (then the service already carries it).
+func evalScope(svc *memory.Service) *memory.Service {
+	if os.Getenv(config.NamespaceEnv) != "" {
+		return svc
+	}
+	return svc.WithNamespace(evalNamespace)
 }
 
 // newCodeHistory builds the git adapter for one-shot processes that need no
