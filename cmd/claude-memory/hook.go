@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -40,6 +41,10 @@ type hookDeps struct {
 	// written. It must be a local, append-only sink (the spool): the hook
 	// never writes events to Postgres. nil disables events.
 	Events memory.EventSink
+
+	// Classify maps a failed search to its error class for the reliability
+	// event. nil classifies everything as internal.
+	Classify func(error) memory.ErrorClass
 }
 
 // hookOutput is the top-level envelope Claude Code's UserPromptSubmit hook
@@ -109,18 +114,59 @@ func renderAdditionalContext(cards []card) string {
 	return strings.Join(lines, "\n")
 }
 
-// hookCmd implements the UserPromptSubmit hook (AC-30, AC-31, AC-32, AC-46, AC-56).
-// It reads stdin for Claude Code's UserPromptSubmit JSON, searches memory with the prompt,
-// and outputs additional context (at most 3 cards with title/repo/id) where Similarity >= threshold.
-// On error or timeout, it exits 0 with no output (silent failure per AC-31).
-func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, deps hookDeps, hookStart time.Time) error {
-	// Read JSON from stdin.
+// runHook reads the hook's stdin first (pure local work), then builds the
+// service and runs hookCmd. Reading first lets a service-build failure still
+// be attributed to a namespace and session: the only network step of build is
+// the Postgres ping, so every build failure is recorded as db_unavailable.
+// Output and exit code are unchanged: any failure exits 0 with no output
+// (silent failure per AC-31).
+func runHook(ctx context.Context, cfg *config.Config, stdin io.Reader, build func(context.Context) (*memory.Service, func(), error), deps hookDeps, hookStart time.Time) error {
 	input := &userPromptSubmitInput{}
-	if err := json.NewDecoder(os.Stdin).Decode(input); err != nil {
+	if err := json.NewDecoder(stdin).Decode(input); err != nil {
 		// Silent failure: malformed input is not an error to report.
 		slog.DebugContext(ctx, "failed to parse stdin", "error", err)
 		return nil
 	}
+
+	svc, cleanup, err := build(ctx)
+	if err != nil {
+		slog.DebugContext(ctx, "failed to build service", "error", err)
+		spoolHookEvents(ctx, deps, reliabilityEvent(resolveNamespaceQuiet(input.CWD), input.SessionID, time.Now(),
+			memory.OutcomeError, memory.ErrClassDBUnavailable))
+		return nil
+	}
+	defer cleanup()
+	return hookCmd(ctx, cfg, svc, input, deps, hookStart)
+}
+
+// reliabilityEvent builds the hook's one search_called event per run: enums
+// and ids only.
+func reliabilityEvent(namespace, sessionID string, now time.Time, outcome memory.FeedbackOutcome, class memory.ErrorClass) memory.Event {
+	if !sessionIDRe.MatchString(sessionID) {
+		sessionID = ""
+	}
+	e := memory.NewEvent(now, namespace, memory.EventSearchCalled)
+	e.Via, e.Outcome, e.ErrorClass, e.SessionID = memory.ViaHook, outcome, class, sessionID
+	return e
+}
+
+// spoolHookEvents appends evs in one write; a failure stays at Debug.
+func spoolHookEvents(ctx context.Context, deps hookDeps, evs ...memory.Event) {
+	if deps.Events == nil {
+		return
+	}
+	if err := deps.Events.Append(ctx, evs...); err != nil {
+		slog.DebugContext(ctx, "failed to spool events", "error", err)
+	}
+}
+
+// hookCmd implements the UserPromptSubmit hook (AC-30, AC-31, AC-32, AC-46, AC-56).
+// It searches memory with the already decoded prompt,
+// and outputs additional context (at most 3 cards with title/repo/id) where Similarity >= threshold.
+// On error or timeout, it exits 0 with no output (silent failure per AC-31).
+// Every run ends with one spool append: the search_called reliability event,
+// plus the card events when cards were rendered.
+func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, input *userPromptSubmitInput, deps hookDeps, hookStart time.Time) error {
 
 	// Scope the search to the namespace of the prompt's project directory.
 	svc = svc.WithNamespace(resolveNamespace(input.CWD))
@@ -154,7 +200,19 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, deps 
 	if err != nil {
 		// Silent failure: search error is not reported (AC-31).
 		slog.DebugContext(ctx, "search failed", "error", err)
+		if memory.IsCanceled(err) {
+			return nil // not a service failure: no reliability event
+		}
+		class := memory.ClassifyError(err, nil)
+		if deps.Classify != nil {
+			class = deps.Classify(err)
+		}
+		spoolHookEvents(ctx, deps, reliabilityEvent(svc.Namespace(), input.SessionID, time.Now(), memory.OutcomeError, class))
 		return nil
+	}
+	outcome := memory.OutcomeOK
+	if searchResult.Degraded {
+		outcome = memory.OutcomeDegraded
 	}
 
 	// Filter results by similarity threshold (compare Similarity, not Score, per AC-32).
@@ -181,6 +239,7 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, deps 
 	additionalContext := renderAdditionalContext(cards)
 	if additionalContext == "" {
 		// No cards above threshold: no output at all (AC-31/AC-46).
+		spoolHookEvents(ctx, deps, reliabilityEvent(svc.Namespace(), input.SessionID, time.Now(), outcome, ""))
 		return nil
 	}
 
@@ -194,18 +253,19 @@ func hookCmd(ctx context.Context, cfg *config.Config, svc *memory.Service, deps 
 	// Marshal to JSON and output to stdout.
 	if err := json.NewEncoder(os.Stdout).Encode(output); err != nil {
 		slog.DebugContext(ctx, "failed to encode output", "error", err)
+		// The cards were not delivered: record the search only.
+		spoolHookEvents(ctx, deps, reliabilityEvent(svc.Namespace(), input.SessionID, time.Now(), outcome, ""))
 		return nil
 	}
 
 	// After the output, so a failed spool write can never change what Claude
-	// Code receives (AC-22, AC-23). The append is sub-millisecond but still
-	// part of the hook's wall time.
-	if deps.Events != nil {
-		evs := cardEvents(cards, svc.Namespace(), input.SessionID, time.Now())
-		if err := deps.Events.Append(ctx, evs...); err != nil {
-			slog.DebugContext(ctx, "failed to spool card events", "error", err)
-		}
-	}
+	// Code receives (AC-22, AC-23). One append for the card events and the
+	// reliability event; the append is sub-millisecond but still part of the
+	// hook's wall time.
+	now := time.Now()
+	evs := cardEvents(cards, svc.Namespace(), input.SessionID, now)
+	evs = append(evs, reliabilityEvent(svc.Namespace(), input.SessionID, now, outcome, ""))
+	spoolHookEvents(ctx, deps, evs...)
 
 	return nil
 }

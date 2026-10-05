@@ -47,6 +47,11 @@ const (
 	EventRecordDeprecated EventType = "record_deprecated"
 	EventRecordPromoted   EventType = "record_promoted"
 	EventRecordDeleted    EventType = "record_deleted"
+
+	// Reliability events: one per memory_search / memory_store call (mcp) or
+	// per hook run. Enums and ids only.
+	EventSearchCalled   EventType = "search_called"
+	EventStoreAttempted EventType = "store_attempted"
 )
 
 // EventSource is where the change behind a lifecycle event came from: a
@@ -69,7 +74,73 @@ const (
 	ViaFeedback EventVia = "feedback" // memory_feedback
 	ViaSeen     EventVia = "seen"     // seen_count reached 2
 	ViaTTL      EventVia = "ttl"      // cleanup
+	ViaMCP      EventVia = "mcp"      // reliability events: serve's tool handler
+	ViaHook     EventVia = "hook"     // reliability events: the UserPromptSubmit hook
 )
+
+// Reliability outcomes share the events.outcome column with the feedback
+// outcomes. search_called: ok, degraded, error. store_attempted: added,
+// updated, superseded, noop, needs_judgment, error.
+const (
+	OutcomeOK            FeedbackOutcome = "ok"
+	OutcomeDegraded      FeedbackOutcome = "degraded"
+	OutcomeError         FeedbackOutcome = "error"
+	OutcomeAdded         FeedbackOutcome = "added"
+	OutcomeUpdated       FeedbackOutcome = "updated"
+	OutcomeSuperseded    FeedbackOutcome = "superseded"
+	OutcomeNoop          FeedbackOutcome = "noop"
+	OutcomeNeedsJudgment FeedbackOutcome = "needs_judgment"
+)
+
+// ErrorClass says why a reliability call failed. It is set iff the outcome is
+// error and never carries error text.
+type ErrorClass string
+
+const (
+	ErrClassDBUnavailable        ErrorClass = "db_unavailable"
+	ErrClassEmbeddingUnavailable ErrorClass = "embedding_unavailable"
+	ErrClassInvalidRequest       ErrorClass = "invalid_request"
+	ErrClassTimeout              ErrorClass = "timeout"
+	ErrClassInternal             ErrorClass = "internal"
+)
+
+// IsValid reports whether c is one of the five classes.
+func (c ErrorClass) IsValid() bool {
+	switch c {
+	case ErrClassDBUnavailable, ErrClassEmbeddingUnavailable, ErrClassInvalidRequest,
+		ErrClassTimeout, ErrClassInternal:
+		return true
+	}
+	return false
+}
+
+// ClassifyError maps a failed call to its ErrorClass. Order: embedding
+// sentinel, dbDown, invalid request, deadline, else internal. dbDown reports a
+// database-unavailable error (the postgres adapter's IsUnavailable, passed in
+// by the composition root); nil dbDown never matches. The embedding sentinel
+// comes first: an embedder's own network error (Ollama down) looks like a dial
+// error and must not be taken for a database outage. A bare deadline is
+// timeout: with pgx v5.7.1 a blackholed connect under a deadline surfaces as
+// `ping database: context deadline exceeded`, so in serve a timeout can hide an
+// unreachable database. A cancelled context is not a service failure; callers
+// skip the event (see IsCanceled) rather than classify it.
+func ClassifyError(err error, dbDown func(error) bool) ErrorClass {
+	switch {
+	case errors.Is(err, ErrEmbeddingUnavailable):
+		return ErrClassEmbeddingUnavailable
+	case dbDown != nil && dbDown(err):
+		return ErrClassDBUnavailable
+	case errors.Is(err, ErrInvalidRequest):
+		return ErrClassInvalidRequest
+	case errors.Is(err, context.DeadlineExceeded):
+		return ErrClassTimeout
+	}
+	return ErrClassInternal
+}
+
+// IsCanceled reports whether err is a cancelled context (the client gave up).
+// Such a call emits no reliability event: it is not a service failure.
+func IsCanceled(err error) bool { return errors.Is(err, context.Canceled) }
 
 // Event is one usage or lifecycle fact. Its fields are the columns of the
 // events table (migration 0003) and nothing else: no title, content, repo,
@@ -89,7 +160,8 @@ type Event struct {
 	Similarity   *float64        `json:"similarity,omitempty"`
 	Stale        *bool           `json:"stale,omitempty"`         // nil = unchecked
 	StaleCommits *int            `json:"stale_commits,omitempty"` // nil = unknown
-	SessionID    string          `json:"session_id,omitempty"`    // hook only
+	SessionID    string          `json:"session_id,omitempty"`    // hook, and serve for reliability events
+	ErrorClass   ErrorClass      `json:"error_class,omitempty"`   // reliability events with outcome error only
 }
 
 // NewEvent returns an event of the given type with a fresh client-generated
@@ -124,8 +196,13 @@ func (e Event) Validate(now time.Time) error {
 	switch e.Type {
 	case EventCardInjected, EventFeedback, EventRecordCreated, EventRecordUpdated,
 		EventRecordSuperseded, EventRecordDeprecated, EventRecordPromoted, EventRecordDeleted:
+	case EventSearchCalled, EventStoreAttempted:
+		return e.validateReliability()
 	default:
 		return fmt.Errorf("unknown type %q", e.Type)
+	}
+	if e.ErrorClass != "" {
+		return errors.New("error_class is only valid on reliability events")
 	}
 	if _, err := uuid.Parse(e.RecordID); err != nil {
 		return fmt.Errorf("invalid record_id: %w", err)
@@ -165,6 +242,45 @@ func (e Event) Validate(now time.Time) error {
 	return nil
 }
 
+// validateReliability checks a search_called / store_attempted event (the
+// common id, time and namespace rules already passed): enums only, nothing
+// that points at a record.
+func (e Event) validateReliability() error {
+	if e.RecordID != "" || e.RelatedID != "" || e.Source != "" || e.Status != "" {
+		return errors.New("reliability events carry no record_id, related_id, source or status")
+	}
+	if e.Similarity != nil || e.Stale != nil || e.StaleCommits != nil {
+		return errors.New("reliability events carry no similarity or stale fields")
+	}
+	if e.Via != ViaMCP && e.Via != ViaHook {
+		return fmt.Errorf("invalid via %q", e.Via)
+	}
+	switch e.Outcome {
+	case OutcomeError:
+	case OutcomeOK, OutcomeDegraded:
+		if e.Type != EventSearchCalled {
+			return fmt.Errorf("invalid outcome %q", e.Outcome)
+		}
+	case OutcomeAdded, OutcomeUpdated, OutcomeSuperseded, OutcomeNoop, OutcomeNeedsJudgment:
+		if e.Type != EventStoreAttempted {
+			return fmt.Errorf("invalid outcome %q", e.Outcome)
+		}
+	default:
+		return fmt.Errorf("invalid outcome %q", e.Outcome)
+	}
+	if e.Outcome == OutcomeError {
+		if !e.ErrorClass.IsValid() {
+			return fmt.Errorf("invalid error_class %q", e.ErrorClass)
+		}
+	} else if e.ErrorClass != "" {
+		return errors.New("error_class is only valid with outcome error")
+	}
+	if e.SessionID != "" && !eventSessionIDRe.MatchString(e.SessionID) {
+		return errors.New("invalid session_id")
+	}
+	return nil
+}
+
 // UsefulAttributionWindow is how long after a card was injected a
 // feedback(useful) on its record still counts as that card being useful
 // (the "precision proxy" in `stats`).
@@ -190,6 +306,39 @@ type EventCounts struct {
 	DeprecatedByVia    map[string]int            `json:"deprecated_by_via"`
 	TTLDeleted         int                       `json:"ttl_deleted"`
 	Inventory          map[string]map[string]int `json:"inventory"` // records now: source -> status -> rows
+	Reliability        ReliabilityCounts         `json:"reliability"`
+}
+
+// ReliabilityCounts are the counts of search_called / store_attempted events.
+type ReliabilityCounts struct {
+	Search      map[string]map[string]int `json:"search"`   // via -> outcome -> count
+	Store       map[string]int            `json:"store"`    // outcome -> count
+	Failures    map[string]int            `json:"failures"` // error class -> count (both types, both vias)
+	DBDownHours int                       `json:"db_down_hours"`
+	FirstDown   *time.Time                `json:"first_down"`
+	LastDown    *time.Time                `json:"last_down"`
+	// DownHours are the distinct UTC hours behind DBDownHours, kept so the
+	// spool-resident events can be merged without counting an hour twice.
+	DownHours []time.Time `json:"-"`
+}
+
+// NewReliabilityCounts returns counts with every map allocated.
+func NewReliabilityCounts() ReliabilityCounts {
+	return ReliabilityCounts{
+		Search:   map[string]map[string]int{},
+		Store:    map[string]int{},
+		Failures: map[string]int{},
+	}
+}
+
+// SessionCounts are the reliability counts of one serve session.
+type SessionCounts struct {
+	ID       string     `json:"id"`
+	First    *time.Time `json:"first"`
+	Last     *time.Time `json:"last"`
+	Searches int        `json:"searches"`
+	Stores   int        `json:"store_attempts"`
+	Failures int        `json:"failures"`
 }
 
 // WithEvents returns a copy of the service that records events through sink.

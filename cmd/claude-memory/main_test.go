@@ -18,5 +18,6 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	resolveNamespace = func(string) string { return "test-ns" }
+	resolveNamespaceQuiet = func(string) string { return "test-ns" }
 	os.Exit(m.Run())
 }

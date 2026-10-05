@@ -55,7 +55,7 @@ func eventSvc(store Store, sink EventSink) *Service {
 // AC-14: Event holds ids, enums and numbers only.
 func TestEventHasOnlyAllowedFields(t *testing.T) {
 	allowed := []string{"ID", "At", "Namespace", "Type", "RecordID", "RelatedID", "Source",
-		"Status", "Outcome", "Via", "Similarity", "Stale", "StaleCommits", "SessionID"}
+		"Status", "Outcome", "Via", "Similarity", "Stale", "StaleCommits", "SessionID", "ErrorClass"}
 	var got []string
 	rt := reflect.TypeOf(Event{})
 	for i := 0; i < rt.NumField(); i++ {

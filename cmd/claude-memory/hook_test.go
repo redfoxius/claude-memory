@@ -89,30 +89,23 @@ func runHookCmd(t *testing.T, ctx context.Context, cfg *config.Config, svc *memo
 func runHookCmdDeps(t *testing.T, ctx context.Context, cfg *config.Config, svc *memory.Service, stdinJSON string, deps hookDeps) (string, error) {
 	t.Helper()
 
-	origStdin, origStdout := os.Stdin, os.Stdout
+	build := func(context.Context) (*memory.Service, func(), error) { return svc, func() {}, nil }
+	return runHookBuild(t, ctx, cfg, stdinJSON, build, deps)
+}
 
-	inR, inW, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("failed to create stdin pipe: %v", err)
-	}
+// runHookBuild runs runHook with the given stdin and service builder and
+// captures what it writes to os.Stdout.
+func runHookBuild(t *testing.T, ctx context.Context, cfg *config.Config, stdinJSON string,
+	build func(context.Context) (*memory.Service, func(), error), deps hookDeps) (string, error) {
+	t.Helper()
+
+	origStdout := os.Stdout
 	outR, outW, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("failed to create stdout pipe: %v", err)
 	}
-
-	os.Stdin = inR
 	os.Stdout = outW
-	t.Cleanup(func() {
-		os.Stdin = origStdin
-		os.Stdout = origStdout
-	})
-
-	if _, err := inW.WriteString(stdinJSON); err != nil {
-		t.Fatalf("failed to write stdin fixture: %v", err)
-	}
-	if err := inW.Close(); err != nil {
-		t.Fatalf("failed to close stdin pipe writer: %v", err)
-	}
+	t.Cleanup(func() { os.Stdout = origStdout })
 
 	outCh := make(chan string, 1)
 	go func() {
@@ -120,7 +113,7 @@ func runHookCmdDeps(t *testing.T, ctx context.Context, cfg *config.Config, svc *
 		outCh <- string(data)
 	}()
 
-	hookErr := hookCmd(ctx, cfg, svc, deps, time.Now())
+	hookErr := runHook(ctx, cfg, strings.NewReader(stdinJSON), build, deps, time.Now())
 
 	if err := outW.Close(); err != nil {
 		t.Fatalf("failed to close stdout pipe writer: %v", err)
@@ -464,18 +457,15 @@ func TestHook_BudgetAlreadySpentStillRendersCards(t *testing.T) {
 	h := &fakeHookHistory{co: memory.Checkout{Dir: "/w/myrepo", Repo: "myrepo"}, head: "H1", changed: true}
 	deps := hookDeps{History: func(string) memory.CodeHistory { return h }}
 
-	origStdin, origStdout := os.Stdin, os.Stdout
-	defer func() { os.Stdin, os.Stdout = origStdin, origStdout }()
-	inR, inW, _ := os.Pipe()
+	origStdout := os.Stdout
+	defer func() { os.Stdout = origStdout }()
 	outR, outW, _ := os.Pipe()
-	os.Stdin, os.Stdout = inR, outW
-	inW.WriteString(`{"prompt":"x","cwd":"/w/myrepo","session_id":"s"}`)
-	inW.Close()
+	os.Stdout = outW
 	done := make(chan string, 1)
 	go func() { b, _ := io.ReadAll(outR); done <- string(b) }()
 
 	// hookStart 10s ago => the stale budget is long gone
-	err := hookCmd(context.Background(), hookCfgWithStale(), staleHookSvc([]*memory.SearchRecord{staleRec()}), deps, time.Now().Add(-10*time.Second))
+	err := hookCmd(context.Background(), hookCfgWithStale(), staleHookSvc([]*memory.SearchRecord{staleRec()}), &userPromptSubmitInput{Prompt: "x", CWD: "/w/myrepo", SessionID: "s"}, deps, time.Now().Add(-10*time.Second))
 	outW.Close()
 	out := <-done
 	if err != nil || !strings.Contains(out, "Retry policy") {

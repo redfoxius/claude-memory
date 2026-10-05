@@ -181,7 +181,7 @@ func (s *Service) FindCandidatesForText(ctx context.Context, title string, tags 
 
 	embedding, err := s.embeddingProvider.Embed(ctx, embedInput, s.cfg.EmbedMaxTokens)
 	if err != nil {
-		return nil, fmt.Errorf("embedding provider unavailable: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrEmbeddingUnavailable, err)
 	}
 
 	return s.FindCandidates(ctx, embedding, repo, 5)

@@ -13,7 +13,7 @@ import (
 )
 
 // eventColumns is the column list of the events table, in INSERT order.
-const eventColumns = 14
+const eventColumns = 15
 
 // Append implements memory.EventSink: one multi-row INSERT, idempotent by
 // event id (a re-sent event is ignored). A data or constraint error (SQLSTATE
@@ -27,7 +27,7 @@ func (s *Store) Append(ctx context.Context, evs ...memory.Event) error {
 
 	var sb strings.Builder
 	sb.WriteString(`INSERT INTO events (id, at, namespace, type, record_id, related_id, source, status,
-		outcome, via, similarity, stale, stale_commits, session_id) VALUES `)
+		outcome, via, similarity, stale, stale_commits, session_id, error_class) VALUES `)
 	args := make([]interface{}, 0, len(evs)*eventColumns)
 	for i, e := range evs {
 		if i > 0 {
@@ -45,7 +45,7 @@ func (s *Store) Append(ctx context.Context, evs ...memory.Event) error {
 			e.ID, e.At, e.Namespace, string(e.Type),
 			nullable(e.RecordID), nullable(e.RelatedID), nullable(string(e.Source)), nullable(string(e.Status)),
 			nullable(string(e.Outcome)), nullable(string(e.Via)),
-			e.Similarity, e.Stale, e.StaleCommits, nullable(e.SessionID),
+			e.Similarity, e.Stale, e.StaleCommits, nullable(e.SessionID), nullable(string(e.ErrorClass)),
 		)
 	}
 	sb.WriteString(" ON CONFLICT (id) DO NOTHING")

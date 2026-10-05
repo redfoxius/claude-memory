@@ -17,10 +17,10 @@ import (
 // newTestClient connects a client to a Server backed by svc over the
 // go-sdk's in-memory (net.Pipe) transport, and returns the client session
 // plus a cleanup func.
-func newTestClient(t *testing.T, svc Service) *mcp.ClientSession {
+func newTestClient(t *testing.T, svc Service, opts ...Option) *mcp.ClientSession {
 	t.Helper()
 
-	srv := New(svc, zerolog.New(io.Discard))
+	srv := New(svc, zerolog.New(io.Discard), opts...)
 
 	ctx := context.Background()
 	t1, t2 := mcp.NewInMemoryTransports()

@@ -6,6 +6,7 @@
 | [namespaces](namespaces/01-spec.md) | namespaces | implemented; integration suite passes on a local Postgres+pgvector; review follow-ups open (see item 1) |
 | [staleness-metrics](staleness-metrics/01-spec.md) | SPEC-2026-10-01-staleness-metrics | PR A (staleness) implemented and reviewed; PR B (events + stats) implemented (unit + integration tests, not yet reviewed); manual latency/Azure checks open (WI-0/WI-14) |
 | [install-doctor](install-doctor/01-spec.md) | SPEC-2026-10-01-install-doctor | v0.2; slice 1 (`doctor` + plumbing) implemented; its Fable review is FAIL (1 high, 5 medium — see item 8), fixes pending; slice 2 (`install`/`uninstall`) not started; slice 3 (Docker) deferred |
+| [mcp-reliability](mcp-reliability/01-spec.md) | SPEC-2026-10-05-mcp-reliability | v0.3; implemented and reviewed (reliability events through the spool, migration 0005, `stats` Reliability block); unit + integration tests pass; manual outage check (spec §7) open |
 
 ## Backlog (next, in order)
 

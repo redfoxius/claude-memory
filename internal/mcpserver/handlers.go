@@ -15,10 +15,20 @@ import (
 func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, SearchOutput, error) {
 	start := time.Now()
 
+	// One reliability event per call, after the result is built. Anything that
+	// returns before the outcome is set counts as an internal error.
+	outcome, class, canceled := memory.OutcomeError, memory.ErrClassInternal, false
+	defer func() {
+		if !canceled { // a cancelled call is not a service failure
+			s.emit(ctx, memory.EventSearchCalled, "", outcome, class)
+		}
+	}()
+
 	var kind *record.Kind
 	if in.Kind != "" {
 		k := record.Kind(in.Kind)
 		if !k.IsValid() {
+			class = memory.ErrClassInvalidRequest
 			return nil, SearchOutput{}, fmt.Errorf("invalid kind %q", in.Kind)
 		}
 		kind = &k
@@ -34,11 +44,16 @@ func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in Se
 
 	result, err := s.svc.Search(ctx, req)
 	if err != nil {
+		class, canceled = s.classifyErr(err), memory.IsCanceled(err)
 		s.logCall("memory_search", start, err, nil)
 		return nil, SearchOutput{}, toToolError("memory_search", err)
 	}
 
 	out := SearchOutput{Degraded: result.Degraded}
+	outcome, class = memory.OutcomeOK, ""
+	if result.Degraded {
+		outcome = memory.OutcomeDegraded
+	}
 	for _, r := range result.Records {
 		item := SearchResultItem{
 			ID:         r.ID,
@@ -71,8 +86,19 @@ func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in Se
 func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in StoreInput) (*mcp.CallToolResult, StoreOutput, error) {
 	start := time.Now()
 
+	// One reliability event per call, after the result is built, from the
+	// branch taken below (never from the caller's namespace). Anything that
+	// returns before the outcome is set counts as an internal error.
+	outcome, class, ns, canceled := memory.OutcomeError, memory.ErrClassInternal, "", false
+	defer func() {
+		if !canceled { // a cancelled call is not a service failure
+			s.emit(ctx, memory.EventStoreAttempted, ns, outcome, class)
+		}
+	}()
+
 	kind := record.Kind(in.Kind)
 	if !kind.IsValid() {
+		class = memory.ErrClassInvalidRequest
 		return nil, StoreOutput{}, fmt.Errorf("invalid kind %q", in.Kind)
 	}
 
@@ -80,9 +106,11 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 	if in.Source != "" {
 		src := record.Source(in.Source)
 		if !src.IsValid() {
+			class = memory.ErrClassInvalidRequest
 			return nil, StoreOutput{}, fmt.Errorf("invalid source %q", in.Source)
 		}
 		if src == record.SourceImport {
+			class = memory.ErrClassInvalidRequest
 			return nil, StoreOutput{}, fmt.Errorf("source %q is reserved for the import command", in.Source)
 		}
 		source = src
@@ -116,6 +144,7 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 		switch action {
 		case memory.ActionAdd, memory.ActionUpdate, memory.ActionSupersede, memory.ActionNoop:
 		default:
+			class = memory.ErrClassInvalidRequest
 			return nil, StoreOutput{}, fmt.Errorf("invalid decision action %q", in.Decision.Action)
 		}
 		dec := &memory.ExtractionDecision{Action: action}
@@ -127,11 +156,13 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 
 	resp, err := s.svc.Store(ctx, req)
 	if err != nil {
+		class, canceled = s.classifyErr(err), memory.IsCanceled(err)
 		s.logCall("memory_store", start, err, map[string]interface{}{"repo": repo})
 		return nil, StoreOutput{}, toToolError("memory_store", err)
 	}
 
 	out := StoreOutput{Namespace: resp.Namespace}
+	ns = resp.Namespace
 	for _, c := range resp.CandidatesConsidered {
 		out.CandidatesConsidered = append(out.CandidatesConsidered, StoreCandidate{
 			ID:         c.ID,
@@ -144,6 +175,7 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 		// Inline write landed in the 0.80-0.92 band: no record was written;
 		// the caller must re-call with a Decision (AC-15).
 		out.Status = "needs_judgment"
+		outcome, class = memory.OutcomeNeedsJudgment, ""
 		s.logCall("memory_store", start, nil, map[string]interface{}{
 			"status":     out.Status,
 			"candidates": len(out.CandidatesConsidered),
@@ -152,6 +184,7 @@ func (s *Server) handleStore(ctx context.Context, _ *mcp.CallToolRequest, in Sto
 	}
 
 	out.Status = "stored"
+	outcome, class = storeOutcome(resp.Decision)
 	out.ID = resp.ID
 	out.Decision = string(resp.Decision)
 

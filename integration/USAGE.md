@@ -125,6 +125,40 @@ A ratio with no data prints `n/a`. The last line, `N events still in the
 spool`, tells you the report may lag. The proxy depends on Claude calling
 `memory_feedback(useful)`; compare trends, not absolute numbers.
 
+### Reliability counters
+
+Memory fails softly, so `stats` also counts the calls themselves: one event per
+`memory_search` / `memory_store` call of the MCP server and one per hook run
+(searches only). Events hold an outcome (`ok`, `degraded` for an embedding-down
+fallback, `error`, and for stores `added`, `updated`, `superseded`, `noop`,
+`needs_judgment`) and, for errors, a class: `db_unavailable`,
+`embedding_unavailable`, `invalid_request`, `timeout` or `internal`. Never a
+query, title, content or error text. `serve` runs under a random session id, so
+the `latest serve session` line shows the most recent session across all namespaces (not necessarily the current one): its searches, store
+attempts and failures. Each block prints `searches (mcp)`, `searches (hook)`,
+`store attempts`, `failures`, `failure rate` and `db-down hours` (UTC clock
+hours with at least one `db_unavailable` event).
+
+- Events go through the file spool, so they are recorded while Postgres is down.
+  `stats` adds spool events the table does not hold yet (`reliability events
+  counted from the spool`), so the report is current without a drain.
+- The hook now appends on every prompt, sharing the 10 MB spool cap with card
+  events. Past the cap events are dropped and not counted: `stats` then prints
+  `spool is full: new events are being dropped and not counted`. `serve` start,
+  `cleanup`, `extract` and `ingest-pr` drain the spool.
+- Mixed versions: an old binary draining the spool skips the new event types
+  and deletes the file (logged at Debug only), so those events are lost. This
+  matters only while old and new binaries run side by side.
+- A `timeout` class can hide an unreachable database in `serve`: a connect
+  that hits the deadline surfaces as a plain deadline error. The hook records
+  any service-build failure as `db_unavailable`.
+- `stats` reads the table counts, then scans the spool. A drain between the two
+  can briefly undercount, never double count.
+- Writes by `extract`, `ingest-pr` and `import` are not counted.
+- An outage that spans a whole session is invisible to the MCP counters (`serve`
+  does not start when Postgres is down); only the hook's `db_unavailable` events
+  show it.
+
 ## Managing records from the terminal
 
 Look at and fix memory without a Claude session. Every command works on one

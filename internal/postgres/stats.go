@@ -2,8 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"claude-memory/internal/memory"
 )
@@ -43,6 +46,7 @@ func (s *Store) StatsCounts(ctx context.Context, since time.Time, namespace stri
 		CreatedBySource: map[string]int{},
 		DeprecatedByVia: map[string]int{},
 		Inventory:       map[string]map[string]int{},
+		Reliability:     memory.NewReliabilityCounts(),
 	}
 
 	// Cards.
@@ -122,6 +126,10 @@ func (s *Store) StatsCounts(ctx context.Context, since time.Time, namespace stri
 		return c, fmt.Errorf("stats deprecated: %w", err)
 	}
 
+	if err := s.reliabilityCounts(ctx, &c.Reliability, since, namespace); err != nil {
+		return c, err
+	}
+
 	// Inventory: the records table as it is now.
 	rows, err := s.pool.Query(ctx, `
 		SELECT source, status, count(*) FROM records
@@ -163,4 +171,133 @@ func (s *Store) countBy(ctx context.Context, dst map[string]int, query string, a
 		}
 	}
 	return rows.Err()
+}
+
+// reliabilityCounts fills the search_called / store_attempted counts. DB-down
+// hours are distinct UTC clock hours (by event time) with a db_unavailable
+// event.
+func (s *Store) reliabilityCounts(ctx context.Context, r *memory.ReliabilityCounts, since time.Time, namespace string) error {
+	rows, err := s.pool.Query(ctx, `
+		SELECT via, outcome, count(*) FROM events
+		WHERE type = 'search_called' AND at >= $1 AND ($2 = '' OR namespace = $2)
+		GROUP BY via, outcome`, since, namespace)
+	if err != nil {
+		return fmt.Errorf("stats searches: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var via, outcome string
+		var n int
+		if err := rows.Scan(&via, &outcome, &n); err != nil {
+			return fmt.Errorf("scan searches: %w", err)
+		}
+		if r.Search[via] == nil {
+			r.Search[via] = map[string]int{}
+		}
+		r.Search[via][outcome] = n
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("stats searches: %w", err)
+	}
+	rows.Close()
+
+	if err := s.countBy(ctx, r.Store, `
+		SELECT outcome, count(*) FROM events
+		WHERE type = 'store_attempted' AND at >= $1 AND ($2 = '' OR namespace = $2)
+		GROUP BY outcome`, since, namespace); err != nil {
+		return fmt.Errorf("stats store attempts: %w", err)
+	}
+	if err := s.countBy(ctx, r.Failures, `
+		SELECT error_class, count(*) FROM events
+		WHERE type IN ('search_called', 'store_attempted') AND error_class IS NOT NULL
+		  AND at >= $1 AND ($2 = '' OR namespace = $2)
+		GROUP BY error_class`, since, namespace); err != nil {
+		return fmt.Errorf("stats failures: %w", err)
+	}
+	err = s.pool.QueryRow(ctx, `
+		SELECT min(at), max(at)
+		FROM events
+		WHERE type IN ('search_called', 'store_attempted') AND error_class = 'db_unavailable'
+		  AND at >= $1 AND ($2 = '' OR namespace = $2)`,
+		since, namespace).Scan(&r.FirstDown, &r.LastDown)
+	if err != nil {
+		return fmt.Errorf("stats db-down window: %w", err)
+	}
+	hours, err := s.pool.Query(ctx, `
+		SELECT DISTINCT date_trunc('hour', at AT TIME ZONE 'UTC') FROM events
+		WHERE type IN ('search_called', 'store_attempted') AND error_class = 'db_unavailable'
+		  AND at >= $1 AND ($2 = '' OR namespace = $2)
+		ORDER BY 1`, since, namespace)
+	if err != nil {
+		return fmt.Errorf("stats db-down hours: %w", err)
+	}
+	defer hours.Close()
+	for hours.Next() {
+		var h time.Time
+		if err := hours.Scan(&h); err != nil {
+			return fmt.Errorf("scan db-down hour: %w", err)
+		}
+		r.DownHours = append(r.DownHours, h.UTC())
+	}
+	r.DBDownHours = len(r.DownHours)
+	return hours.Err()
+}
+
+// StatsLatestServeSession returns the session id of the newest mcp
+// reliability event with at >= since and that event's time ("" when none).
+func (s *Store) StatsLatestServeSession(ctx context.Context, since time.Time) (string, time.Time, error) {
+	var id string
+	var at time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT session_id, at FROM events
+		WHERE type IN ('search_called', 'store_attempted') AND via = 'mcp'
+		  AND session_id IS NOT NULL AND at >= $1
+		ORDER BY at DESC LIMIT 1`, since).Scan(&id, &at)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", time.Time{}, nil
+	}
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("stats latest serve session: %w", err)
+	}
+	return id, at, nil
+}
+
+// StatsSessionCounts counts the mcp reliability events of one serve session
+// with at >= since.
+func (s *Store) StatsSessionCounts(ctx context.Context, since time.Time, sessionID string) (memory.SessionCounts, error) {
+	c := memory.SessionCounts{ID: sessionID}
+	err := s.pool.QueryRow(ctx, `
+		SELECT min(at), max(at),
+		       count(*) FILTER (WHERE type = 'search_called'),
+		       count(*) FILTER (WHERE type = 'store_attempted'),
+		       count(*) FILTER (WHERE error_class IS NOT NULL)
+		FROM events
+		WHERE type IN ('search_called', 'store_attempted') AND via = 'mcp'
+		  AND session_id = $1 AND at >= $2`,
+		sessionID, since).Scan(&c.First, &c.Last, &c.Searches, &c.Stores, &c.Failures)
+	if err != nil {
+		return c, fmt.Errorf("stats session counts: %w", err)
+	}
+	return c, nil
+}
+
+// EventIDsExist returns which of ids are already in the events table.
+func (s *Store) EventIDsExist(ctx context.Context, ids []string) (map[string]bool, error) {
+	found := map[string]bool{}
+	if len(ids) == 0 {
+		return found, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id::text FROM events WHERE id = ANY($1::uuid[])`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("event ids exist: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan event id: %w", err)
+		}
+		found[id] = true
+	}
+	return found, rows.Err()
 }
