@@ -18,6 +18,12 @@ type Cursor struct {
 	Provider string    `json:"provider"`
 	Repo     string    `json:"repo"`
 	Since    time.Time `json:"since"`
+	// FailedPR and Failures track the one PR currently blocking this repo:
+	// how many consecutive runs its extraction failed. ingest-pr stops the
+	// repo's batch at that PR until the count reaches its limit, then skips
+	// it. Empty/zero when nothing is blocked.
+	FailedPR string `json:"failed_pr,omitempty"`
+	Failures int    `json:"failures,omitempty"`
 }
 
 // Store persists cursors to one JSON file per provider+repo under a base

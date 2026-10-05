@@ -233,7 +233,23 @@ func ingestOneRepo(ctx context.Context, svc extraction.StoreWriter, d ingestPort
 				CharBudget:   cfg.MaxContentChars,
 				HaikuTimeout: defaultHaikuTimeout,
 			}
-			if _, err := extraction.ProcessPR(ctx, svc, input, extractionCfg, d.Haiku, d.Scrubber); err != nil {
+			if _, err := extraction.ProcessPR(ctx, svc, input, extractionCfg, d.Haiku, d.Scrubber); errors.Is(err, extraction.ErrExtractionFailed) {
+				// Infrastructure failure: the PR was not processed. Keep the
+				// cursor before it and stop, so the next run retries it,
+				// unless it has failed too many runs in a row.
+				failures := 1
+				if hasCursor && cur.FailedPR == pr.ID {
+					failures = cur.Failures + 1
+				}
+				if failures < maxPRFailures {
+					slog.Warn("ingest-pr: PR extraction failed; keeping cursor before it and stopping this repo's batch (retried next run)",
+						"repo", ref.Name, "pr_id", pr.ID, "failures", failures, "error", err)
+					saveCursor(d.Cursors, prcursor.Cursor{Provider: string(provider), Repo: cursorRepo, Since: latest, FailedPR: pr.ID, Failures: failures}, ref.Name)
+					return
+				}
+				slog.Error("ingest-pr: PR extraction failed repeatedly; skipping it so the repo is not blocked (its knowledge is NOT extracted)",
+					"repo", ref.Name, "pr_id", pr.ID, "url", full.URL, "failures", failures, "error", err)
+			} else if err != nil {
 				slog.Warn("ingest-pr: processing PR failed; continuing with the rest of this repo's batch",
 					"repo", ref.Name, "pr_id", pr.ID, "error", err)
 			}
@@ -249,8 +265,16 @@ func ingestOneRepo(ctx context.Context, svc extraction.StoreWriter, d ingestPort
 
 	// The whole batch succeeded (or there was nothing to process): persist
 	// the cursor now, never mid-batch (AC-26).
-	if err := d.Cursors.Save(prcursor.Cursor{Provider: string(provider), Repo: cursorRepo, Since: latest}); err != nil {
-		slog.Error("ingest-pr: failed to persist cursor", "repo", ref.Name, "error", err)
+	saveCursor(d.Cursors, prcursor.Cursor{Provider: string(provider), Repo: cursorRepo, Since: latest}, ref.Name)
+}
+
+// maxPRFailures is how many consecutive runs a PR's extraction may fail
+// before ingest-pr gives up on it and moves the cursor past it.
+const maxPRFailures = 3
+
+func saveCursor(store *prcursor.Store, c prcursor.Cursor, repoName string) {
+	if err := store.Save(c); err != nil {
+		slog.Error("ingest-pr: failed to persist cursor", "repo", repoName, "error", err)
 	}
 }
 

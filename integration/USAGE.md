@@ -52,8 +52,24 @@ A linked `git worktree` is not ingested separately when its main checkout is als
 Azure DevOps (`az`), GitHub (`gh`) and GitLab (`glab`) repos are ingested;
 the provider comes from the repo's `origin`. Log in once per CLI
 (`gh auth login`, `glab auth login`); `claude-memory doctor` shows the
-`tools.gh` / `tools.glab` rows. Cursors only advance after a repo's full
-batch succeeds, so re-running after a failure is safe.
+`tools.gh` / `tools.glab` rows. Re-running after a failure is safe: a PR whose
+haiku extraction fails (call error, error envelope, unparsable output) is not
+passed by the cursor. The cursor stays at the last PR processed before it, that
+repo's batch stops with a WARN, and the next run retries it. A PR that fails 3
+runs in a row is skipped with an ERROR log naming it (so one bad PR cannot
+block a repo forever); its knowledge is not extracted.
+
+Cursors live in `~/.local/state/claude-memory/pr-cursors/<provider>__<repo>.json`:
+
+```bash
+cat ~/.local/state/claude-memory/pr-cursors/*.json   # since, failed_pr, failures
+# re-ingest from a date: edit "since" (and delete "failed_pr"/"failures")
+# re-ingest a repo from the lookback window: delete its file
+rm ~/.local/state/claude-memory/pr-cursors/azuredevops__billing-service.json
+```
+
+`failed_pr`/`failures` count consecutive failed runs of the PR currently
+blocking that repo.
 
 - **GitHub is `github.com` only** (no GitHub Enterprise).
 - **GitLab is auto-detected for `gitlab.com` only.** A self-hosted GitLab

@@ -96,9 +96,9 @@ func stubClaude(t *testing.T, files ...string) *CLIHaikuRunner {
 func TestEnvelopeEndToEnd(t *testing.T) {
 	runner := stubClaude(t, "envelope_draft.json", "envelope_decision.json")
 
-	drafts, errMsg := extractDrafts(context.Background(), runner, "session", "text", "ref")
-	if errMsg != "" {
-		t.Fatalf("extractDrafts error: %s", errMsg)
+	drafts, err := extractDrafts(context.Background(), runner, "session", "text", "ref")
+	if err != nil {
+		t.Fatalf("extractDrafts error: %v", err)
 	}
 	if len(drafts) != 1 || drafts[0].Title == "" {
 		t.Fatalf("want 1 draft with title, got %+v", drafts)

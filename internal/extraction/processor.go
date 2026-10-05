@@ -163,9 +163,11 @@ func ProcessSession(
 	}
 
 	// Step 1: haiku proposes 0-3 draft records, no dedup decision yet (AC-23, AC-45).
-	drafts, skipReason := extractDrafts(ctx, runner, "session", tr.CompactText, transcriptPath)
-	if skipReason != "" {
-		result.SkippedReason = skipReason
+	drafts, err := extractDrafts(ctx, runner, "session", tr.CompactText, transcriptPath)
+	if err != nil {
+		// Session extraction keeps no progress marker, so a failure here
+		// loses nothing a retry would recover; it is reported as a skip.
+		result.SkippedReason = err.Error()
 		return result, nil
 	}
 
@@ -200,33 +202,40 @@ func ProcessPR(
 	}
 
 	// Step 1: haiku proposes 0-3 draft records, no dedup decision yet (AC-23, AC-45).
-	drafts, skipReason := extractDrafts(ctx, runner, "PR", prText, pr.URL)
-	if skipReason != "" {
-		result.SkippedReason = skipReason
-		return result, nil
+	drafts, err := extractDrafts(ctx, runner, "PR", prText, pr.URL)
+	if err != nil {
+		// Infrastructure failure, not a skip: ingest-pr must not advance its
+		// cursor past this PR.
+		return result, err
 	}
 
 	processDrafts(ctx, writer, runner, drafts, pr.Repo, record.SourcePR, pr.CommitSHA, result)
+
+	if len(drafts) > 0 && result.RecordsStored == 0 && len(result.Errors) > 0 {
+		return result, fmt.Errorf("%w: no draft could be stored: %s", ErrExtractionFailed, result.Errors[0])
+	}
 
 	return result, nil
 }
 
 // extractDrafts runs the first haiku call (extraction only, no decision) and
 // parses its output into validated draft records (AC-23, AC-24, AC-25,
-// AC-45). logRef identifies the input for log messages (a path or URL).
-func extractDrafts(ctx context.Context, runner HaikuRunner, source, text, logRef string) ([]*DraftRecord, string) {
+// AC-45). logRef identifies the input for log messages (a path or URL). A
+// failed haiku call or unparsable output returns an error wrapping
+// ErrExtractionFailed; an empty draft list is a legitimate "nothing to extract".
+func extractDrafts(ctx context.Context, runner HaikuRunner, source, text, logRef string) ([]*DraftRecord, error) {
 	prompt := BuildExtractionPrompt(source, text)
 
 	output, err := runner.Run(ctx, prompt)
 	if err != nil {
 		slog.Error("haiku extraction call failed", "ref", logRef, "error", err)
-		return nil, fmt.Sprintf("haiku error: %v", err)
+		return nil, fmt.Errorf("%w: haiku error: %v", ErrExtractionFailed, err)
 	}
 
 	rawDrafts, err := ParseHaikuOutput(output)
 	if err != nil {
 		slog.Error("failed to parse haiku extraction output", "ref", logRef, "error", err)
-		return nil, fmt.Sprintf("parse haiku output error: %v", err)
+		return nil, fmt.Errorf("%w: parse haiku output error: %v", ErrExtractionFailed, err)
 	}
 
 	drafts := make([]*DraftRecord, 0, len(rawDrafts))
@@ -239,7 +248,7 @@ func extractDrafts(ctx context.Context, runner HaikuRunner, source, text, logRef
 		drafts = append(drafts, draft)
 	}
 
-	return drafts, ""
+	return drafts, nil
 }
 
 // processDrafts runs, for each draft, step 2 (candidate lookup) and step 3
