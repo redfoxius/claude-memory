@@ -25,6 +25,13 @@ import (
 // plan calls out as a documented default.
 const defaultHaikuTimeout = 60 * time.Second
 
+// subprocessGuard reports whether this process was started from inside one of
+// claude-memory's own `claude -p` calls (extraction.SubprocessEnv is set). The
+// hook and extract entry points check it first, before any DB/Ollama setup.
+func subprocessGuard() bool {
+	return os.Getenv(extraction.SubprocessEnv) != ""
+}
+
 // sessionEndInput matches Claude Code's SessionEnd hook stdin JSON contract.
 type sessionEndInput struct {
 	TranscriptPath string `json:"transcript_path"`
@@ -40,6 +47,9 @@ type sessionEndInput struct {
 //     work, run by the detached process. Applies gating (AC-22) and calls
 //     extraction.ProcessSession with the real `claude -p` haiku runner.
 func cmdExtract(cfg *config.Config) error {
+	if subprocessGuard() {
+		return nil // transcript of an internal `claude -p` call: nothing to extract
+	}
 	fs := flag.NewFlagSet("extract", flag.ContinueOnError)
 	runPath := fs.String("run", "", "internal: run extraction synchronously against this transcript path")
 	if err := fs.Parse(flag.Args()[1:]); err != nil {

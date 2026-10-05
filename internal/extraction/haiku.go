@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,6 +17,23 @@ type HaikuRunner interface {
 	// Run invokes haiku with the given prompt and returns the JSON output.
 	// Returns ErrHaikuFailed if the subprocess fails, times out, or returns non-JSON.
 	Run(ctx context.Context, prompt string) ([]byte, error)
+}
+
+// SubprocessEnv is set to "1" in the environment of every `claude -p` call
+// this package makes. The `hook` and `extract` subcommands exit immediately
+// when it is set, so the user's own Claude Code hooks (memory injection into
+// the extraction prompt, SessionEnd extraction of the call's own transcript)
+// never act on these internal calls. Wrappers that call `claude -p` for other
+// purposes can set it too.
+const SubprocessEnv = "CLAUDE_MEMORY_SUBPROCESS"
+
+// haikuArgs are the `claude` arguments of every haiku call. The call is a pure
+// text-in/text-out completion: no persisted session, no MCP servers
+// (--strict-mcp-config without --mcp-config loads none) and no built-in tools
+// (--tools ""), which also drops ~17k tokens of default prompt.
+func haikuArgs() []string {
+	return []string{"-p", "--model", "haiku", "--output-format", "json",
+		"--no-session-persistence", "--strict-mcp-config", "--tools", ""}
 }
 
 // CLIHaikuRunner implements HaikuRunner via `claude -p` subprocess.
@@ -47,7 +65,8 @@ func (r *CLIHaikuRunner) Run(ctx context.Context, prompt string) ([]byte, error)
 	// Build the command: claude -p --model haiku --output-format json
 	// --no-session-persistence (one-shot calls must not litter session history).
 	// Arguments are passed as a slice to prevent command injection (A05 / AC-45).
-	cmd := exec.CommandContext(runCtx, bin, "-p", "--model", "haiku", "--output-format", "json", "--no-session-persistence")
+	cmd := exec.CommandContext(runCtx, bin, haikuArgs()...)
+	cmd.Env = append(os.Environ(), SubprocessEnv+"=1")
 
 	// Provide the prompt on stdin.
 	cmd.Stdin = bytes.NewBufferString(prompt)

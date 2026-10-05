@@ -403,6 +403,9 @@ func classifyError(err error) memory.ErrorClass {
 }
 
 func cmdHook(cfg *config.Config) error {
+	if subprocessGuard() {
+		return nil // internal `claude -p` call: no memory hints, no output
+	}
 	hookStart := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.HookTimeout)
 	defer cancel()

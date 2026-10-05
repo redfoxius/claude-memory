@@ -124,3 +124,38 @@ func TestCLIHaikuRunnerErrorEnvelope(t *testing.T) {
 		t.Fatalf("want ErrHaikuFailed, got %v", err)
 	}
 }
+
+// The subprocess must carry the guard variable and the lean flag set, while
+// the rest of the environment (auth, PATH) passes through.
+func TestCLIHaikuRunnerArgsAndEnv(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-passthrough")
+	t.Setenv(SubprocessEnv, "")
+	dir := t.TempDir()
+	dump := filepath.Join(dir, "dump")
+	script := "#!/bin/sh\ncat >/dev/null\n{ printf 'ARGS:'; for a in \"$@\"; do printf '[%s]' \"$a\"; done; echo; env; } > " + dump + "\n" +
+		`echo '{"type":"result","subtype":"success","is_error":false,"result":"[]"}'` + "\n"
+	bin := filepath.Join(dir, "claude")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := (&CLIHaikuRunner{timeout: 10 * time.Second, bin: bin}).Run(context.Background(), "p")
+	if err != nil || strings.TrimSpace(string(out)) != "[]" {
+		t.Fatalf("Run: %q, %v", out, err)
+	}
+	b, err := os.ReadFile(dump)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{
+		"ARGS:[-p][--model][haiku][--output-format][json][--no-session-persistence][--strict-mcp-config][--tools][]",
+		"\n" + SubprocessEnv + "=1\n",
+		"\nCLAUDE_CODE_OAUTH_TOKEN=tok-passthrough\n",
+		"\nPATH=",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("subprocess dump lacks %q:\n%s", want, got)
+		}
+	}
+}

@@ -106,6 +106,18 @@ namespace with a warning and `doctor` reports it on the `namespaces` row.
 
 To schedule it daily instead, load the launchd job from `INSTALL.md` step 8.
 
+## Internal `claude -p` calls and `CLAUDE_MEMORY_SUBPROCESS`
+
+Extraction (SessionEnd and `ingest-pr`) shells out to
+`claude -p --model haiku --output-format json --no-session-persistence
+--strict-mcp-config --tools ""`: no saved session, no MCP servers, no tools.
+The subprocess runs with `CLAUDE_MEMORY_SUBPROCESS=1`, and `claude-memory hook`
+and `claude-memory extract` exit 0 immediately (hook prints nothing) when it is
+set. Without that guard your own hooks would inject memory hints into the
+extraction prompt and run `extract` on the call's own transcript. Your own
+scripts that call `claude -p` for something unrelated can set the same variable
+to keep claude-memory's hooks out of them.
+
 ## Cleanup
 
 Candidates nobody used or re-saw for 180 days (`MEMORY_CANDIDATE_TTL`) are
