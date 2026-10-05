@@ -184,3 +184,45 @@ func TestConfigAddValidates(t *testing.T) {
 		t.Error("no globs accepted")
 	}
 }
+
+func TestAddRejectsInvalidGlobs(t *testing.T) {
+	for _, g := range []string{"/work/[unclosed/**", "/src/a[", "", "  ", "/x/\\"} {
+		c := &Config{}
+		if err := c.Add("ok", g); err == nil {
+			t.Errorf("Add accepted glob %q", g)
+		}
+		if len(c.Namespaces) != 0 {
+			t.Errorf("rejected glob %q still created a namespace", g)
+		}
+	}
+	// A bad glob among good ones rejects the whole call.
+	c := &Config{}
+	if err := c.Add("ok", "/good/**", "/bad/["); err == nil || len(c.Namespaces) != 0 {
+		t.Errorf("mixed globs: err=%v namespaces=%v", err, c.Namespaces)
+	}
+	for _, g := range []string{"/work/acme/**", "~/src/pet-game", "$PWD/**", "/src/*-game", "/a/[bc]/**"} {
+		if err := (&Config{}).Add("ok", g); err != nil {
+			t.Errorf("Add rejected valid glob %q: %v", g, err)
+		}
+	}
+}
+
+func TestInitAndAddRejectInvalidGlobsWithoutWriting(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "namespaces.yaml")
+	err := Init(p, "", []Rule{{Namespace: "x", Paths: []string{"/a/["}}}, false)
+	if err == nil || !strings.Contains(err.Error(), "invalid path glob") {
+		t.Fatalf("Init err = %v, want invalid path glob", err)
+	}
+	if _, statErr := os.Stat(p); statErr == nil {
+		t.Error("Init wrote a file despite the invalid glob")
+	}
+	if err := Init(p, "Bad Default", nil, false); err == nil {
+		t.Error("Init accepted an invalid default")
+	}
+	if err := Init(p, "", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := Add(p, "x", "/a/["); err == nil {
+		t.Error("Add accepted an invalid glob")
+	}
+}
