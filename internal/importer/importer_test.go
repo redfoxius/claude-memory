@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // osFS is the real filesystem as the FS port (tests use temp dirs only).

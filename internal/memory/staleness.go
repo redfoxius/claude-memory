@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // maxStaleChecksPerSearch bounds how many of a search's top results are

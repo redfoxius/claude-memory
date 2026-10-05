@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/integration"
+	"github.com/redfoxius/claude-memory/integration"
 )
 
 // Tests for WI-S2-9: hooks.scripts and hooks.settings (AC-36..AC-39, AC-51,

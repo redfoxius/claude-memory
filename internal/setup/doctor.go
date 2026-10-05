@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/config"
 )
 
 // Doctor: the check registry and its parallel runner (spec AC-57..AC-60,

@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 func TestExecRunner(t *testing.T) {

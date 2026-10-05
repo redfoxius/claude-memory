@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 // doctorOptions are the doctor flags (AC-4).

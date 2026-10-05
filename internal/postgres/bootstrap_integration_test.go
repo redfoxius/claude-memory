@@ -18,8 +18,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"claude-memory/deploy"
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/deploy"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 // WI-S2-4b / AC-21 / AC-65: the bootstrap.sql the installer renders (three

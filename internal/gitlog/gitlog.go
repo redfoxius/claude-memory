@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // waitDelay bounds how long a killed git may hold the caller on pipe close.

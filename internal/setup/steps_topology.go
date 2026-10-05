@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/config"
 )
 
 // TopologyStepID is the id of the topology step (AC-7).

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 func readTestdata(t *testing.T, name string) []byte {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/integration"
+	"github.com/redfoxius/claude-memory/integration"
 )
 
 func TestRenderHookScript(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/mcpserver"
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/mcpserver"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // serveCmd starts the claude-memory MCP server on stdio only (AC-19,

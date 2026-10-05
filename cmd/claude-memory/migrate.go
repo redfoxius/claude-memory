@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/postgres"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/postgres"
 )
 
 // cmdMigrate implements the "migrate" subcommand (AC-3): it runs after the

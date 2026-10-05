@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/extraction"
-	"claude-memory/internal/memory"
-	"claude-memory/internal/namespace"
-	"claude-memory/internal/prcursor"
-	"claude-memory/internal/prsource"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/extraction"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/prcursor"
+	"github.com/redfoxius/claude-memory/internal/prsource"
 )
 
 // scopeFunc returns the writer scoped to a namespace. The composition root

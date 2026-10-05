@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/namespace"
-	"claude-memory/internal/prsource"
+	"github.com/redfoxius/claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/prsource"
 )
 
 // Doctor checks binary.version, tools.*, namespaces, jobs, dirs.state,

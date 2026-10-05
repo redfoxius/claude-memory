@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/deploy"
+	"github.com/redfoxius/claude-memory/deploy"
 )
 
 // Tests for WI-S2-4b rendering: the bootstrap.sql golden (AC-64), the

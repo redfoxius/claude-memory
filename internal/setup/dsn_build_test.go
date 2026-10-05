@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/config"
 )
 
 func TestBuildDSNTable(t *testing.T) {

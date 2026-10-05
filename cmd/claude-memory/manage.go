@@ -15,9 +15,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/namespace"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // manageUsage is the usage text of the record-management subcommands.

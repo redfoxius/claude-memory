@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/importer"
-	"claude-memory/internal/memory"
-	"claude-memory/internal/namespace"
-	"claude-memory/internal/scrub"
+	"github.com/redfoxius/claude-memory/internal/importer"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/scrub"
 )
 
 // fakeImportSvc scripts Store outcomes by title.

@@ -1,4 +1,4 @@
-module claude-memory
+module github.com/redfoxius/claude-memory
 
 go 1.25.0
 

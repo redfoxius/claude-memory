@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/integration"
+	"github.com/redfoxius/claude-memory/integration"
 )
 
 // testJobPATH is the PATH of the jobs in these tests.

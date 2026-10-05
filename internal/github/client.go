@@ -19,7 +19,7 @@ import (
 	"strconv"
 	"time"
 
-	"claude-memory/internal/prsource"
+	"github.com/redfoxius/claude-memory/internal/prsource"
 )
 
 const (

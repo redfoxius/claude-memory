@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 const (

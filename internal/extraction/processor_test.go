@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/memory/mock"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory/mock"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // haikuResponse is one scripted response for FakeHaikuRunner.

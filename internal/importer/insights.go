@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // insightsKinds maps a lower-cased `## ` section name to a record kind.

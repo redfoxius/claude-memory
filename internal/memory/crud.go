@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // Get retrieves a single record by ID.

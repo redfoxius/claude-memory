@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 func lifecycleCfg() *config.Config {

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // Verdict is a cached staleness result.

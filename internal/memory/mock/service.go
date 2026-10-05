@@ -4,8 +4,8 @@ package mock
 import (
 	"context"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // Service is a fake implementation of *memory.Service for testing.

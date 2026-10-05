@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/postgres"
+	"github.com/redfoxius/claude-memory/internal/postgres"
 )
 
 // TestMigrationIDsMatchEmbeddedFiles checks that the IDs the "migrate"

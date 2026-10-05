@@ -10,8 +10,8 @@ import (
 	"regexp"
 	"strings"
 
-	"claude-memory/deploy"
-	"claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/deploy"
+	"github.com/redfoxius/claude-memory/internal/config"
 )
 
 // DatabaseStepID is the id of the database step (AC-7: after envfile).

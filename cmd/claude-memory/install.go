@@ -15,7 +15,7 @@ import (
 
 	"golang.org/x/term"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 // errRoot is the AC-69 refusal: install and uninstall exit 2 with it when

@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"os"
 
-	"claude-memory/internal/evalset"
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/evalset"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // evalCmd runs the retrieval evaluation harness against an already-built

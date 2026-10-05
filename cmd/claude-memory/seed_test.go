@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // fakeSeedStorer is a fake seedStorer for unit tests, never touching

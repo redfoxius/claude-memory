@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/eventspool"
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/eventspool"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // relNow is the top of the current hour: a past instant, because the spool

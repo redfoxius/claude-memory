@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/config"
 )
 
 // Doctor checks env.file, env.perms, env.format (AC-27, AC-58).

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // emit records one reliability event for a finished memory_search or

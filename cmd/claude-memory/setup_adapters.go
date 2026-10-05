@@ -21,7 +21,7 @@ import (
 
 	"golang.org/x/term"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 // Adapters for the internal/setup ports (spec §10). They are constructed

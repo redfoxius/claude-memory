@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 func relEvent(ns string, typ memory.EventType, via memory.EventVia, outcome memory.FeedbackOutcome, class memory.ErrorClass, session string, at time.Time) memory.Event {

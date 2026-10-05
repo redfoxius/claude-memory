@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // writepathCfg returns a config matching the spec v0.5 defaults (AC-15):

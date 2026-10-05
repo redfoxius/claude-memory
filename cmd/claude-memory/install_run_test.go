@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/integration"
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/integration"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden files under testdata/")

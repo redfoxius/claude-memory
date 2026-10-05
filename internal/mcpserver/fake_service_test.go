@@ -3,8 +3,8 @@ package mcpserver
 import (
 	"context"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // fakeService is a hand-rolled fake of Service for in-process tests. Each

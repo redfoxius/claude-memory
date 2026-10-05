@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // Service orchestrates the memory management logic: search, dedup/merge, write-path decisions.

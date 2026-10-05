@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 // mapFS is a read-only setup.FS over an in-memory file map (cmd tests cannot

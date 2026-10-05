@@ -68,7 +68,7 @@ func TestGuardImports(t *testing.T) {
 		t.Fatalf("go list -deps: %v", err)
 	}
 	deps := strings.Fields(string(out))
-	if !slices.Contains(deps, "claude-memory/internal/setup") {
+	if !slices.Contains(deps, "github.com/redfoxius/claude-memory/internal/setup") {
 		t.Fatalf("go list output does not include the package itself: %v", deps)
 	}
 	for _, d := range deps {

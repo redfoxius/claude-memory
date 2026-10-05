@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/memory/mock"
-	"claude-memory/internal/prcursor"
-	"claude-memory/internal/prsource"
+	"github.com/redfoxius/claude-memory/internal/memory/mock"
+	"github.com/redfoxius/claude-memory/internal/prcursor"
+	"github.com/redfoxius/claude-memory/internal/prsource"
 )
 
 // failingTitleRunner fails the extraction call for any PR whose prompt

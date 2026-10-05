@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/extraction"
-	"claude-memory/internal/memory/mock"
-	"claude-memory/internal/namespace"
-	"claude-memory/internal/prcursor"
-	"claude-memory/internal/prsource"
+	"github.com/redfoxius/claude-memory/internal/extraction"
+	"github.com/redfoxius/claude-memory/internal/memory/mock"
+	"github.com/redfoxius/claude-memory/internal/namespace"
+	"github.com/redfoxius/claude-memory/internal/prcursor"
+	"github.com/redfoxius/claude-memory/internal/prsource"
 )
 
 var t0 = time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)

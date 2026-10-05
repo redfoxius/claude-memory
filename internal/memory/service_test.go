@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/config"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/config"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // Test doubles for the port interfaces.

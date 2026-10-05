@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // BuildExtractionPrompt constructs the first-stage haiku prompt: extract 0-3

@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"claude-memory/internal/memory/mock"
+	"github.com/redfoxius/claude-memory/internal/memory/mock"
 )
 
 type replaceScrubber struct{ from, to string }

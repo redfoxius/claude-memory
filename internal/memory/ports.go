@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 // Store is the port through which the service persists and retrieves records.

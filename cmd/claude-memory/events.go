@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"claude-memory/internal/eventspool"
-	"claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/eventspool"
+	"github.com/redfoxius/claude-memory/internal/memory"
 )
 
 // spoolDir is where the hook appends its events and the drains read them:

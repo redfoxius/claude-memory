@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 func TestRootGuard(t *testing.T) {

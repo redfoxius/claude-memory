@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"claude-memory/internal/setup"
+	"github.com/redfoxius/claude-memory/internal/setup"
 )
 
 func TestBuildPaths(t *testing.T) {

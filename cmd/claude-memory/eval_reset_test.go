@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"claude-memory/internal/memory"
-	"claude-memory/internal/record"
+	"github.com/redfoxius/claude-memory/internal/memory"
+	"github.com/redfoxius/claude-memory/internal/record"
 )
 
 type fakeFixtures struct {

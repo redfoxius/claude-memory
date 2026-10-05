@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-memory/internal/prsource"
+	"github.com/redfoxius/claude-memory/internal/prsource"
 )
 
 // fakeRunner answers by joined argv; calls records every argv.

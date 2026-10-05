@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-memory/internal/prsource"
+	"github.com/redfoxius/claude-memory/internal/prsource"
 )
 
 // azureDevOpsResource is the Azure AD application id of Azure DevOps. `az rest`
