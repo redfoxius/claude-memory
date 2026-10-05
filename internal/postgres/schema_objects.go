@@ -121,6 +121,11 @@ var schemaMigrations = []migrationObjects{
 			index("records", "idx_records_import_key"),
 		},
 	},
+	{
+		ID:      "0005",
+		File:    "0005_reliability.sql",
+		Objects: []schemaObject{column("events", "error_class")},
+	},
 }
 
 // ourTables are the tables whose columns and indexes the probe inventories

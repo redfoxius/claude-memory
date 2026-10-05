@@ -32,9 +32,12 @@ var migrationEventsSQL string
 //go:embed migrations/0004_mgmt_import.sql
 var migrationMgmtImportSQL string
 
+//go:embed migrations/0005_reliability.sql
+var migrationReliabilitySQL string
+
 // migrationSQL is every migration, applied in order. Each statement is
 // idempotent, so re-running on an already-migrated database is a no-op.
-var migrationSQL = migrationInitSQL + ";\n" + migrationNamespacesSQL + ";\n" + migrationEventsSQL + ";\n" + migrationMgmtImportSQL
+var migrationSQL = migrationInitSQL + ";\n" + migrationNamespacesSQL + ";\n" + migrationEventsSQL + ";\n" + migrationMgmtImportSQL + ";\n" + migrationReliabilitySQL
 
 // Store is the Postgres adapter implementing memory.Store.
 type Store struct {

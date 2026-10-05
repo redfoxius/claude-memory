@@ -63,13 +63,13 @@ func TestEventsMigrationIdempotentAndShape(t *testing.T) {
 		cols = append(cols, c)
 	}
 	rows.Close()
-	want := []string{"at", "id", "namespace", "outcome", "record_id", "related_id", "session_id", "similarity",
+	want := []string{"at", "error_class", "id", "namespace", "outcome", "record_id", "related_id", "session_id", "similarity",
 		"source", "stale", "stale_commits", "status", "type", "via"}
 	if !slices.Equal(cols, want) {
 		t.Errorf("columns = %v, want exactly %v", cols, want)
 	}
 
-	for _, name := range []string{"events_type_check", "events_source_check_v2", "events_status_check", "events_outcome_check", "events_via_check"} {
+	for _, name := range []string{"events_type_check_v2", "events_source_check_v2", "events_status_check", "events_outcome_check_v2", "events_via_check_v2", "events_error_class_check"} {
 		if n := countRows(t, ctx, s, `SELECT count(*) FROM pg_constraint WHERE conname = $1`, name); n != 1 {
 			t.Errorf("constraint %s present %d times", name, n)
 		}
@@ -79,7 +79,7 @@ func TestEventsMigrationIdempotentAndShape(t *testing.T) {
 			t.Errorf("index %s present %d times", name, n)
 		}
 	}
-	if !slices.Equal(MigrationIDs(), []string{"0001", "0002", "0003", "0004"}) {
+	if !slices.Equal(MigrationIDs(), []string{"0001", "0002", "0003", "0004", "0005"}) {
 		t.Errorf("MigrationIDs = %v", MigrationIDs())
 	}
 }
@@ -324,6 +324,7 @@ func TestStatsCounts(t *testing.T) {
 		Inventory: map[string]map[string]int{
 			"pr": {"active": 1}, "session": {"candidate": 1}, "inline": {"candidate": 1}},
 	}
+	wantTotal.Reliability = memory.NewReliabilityCounts()
 	if !reflect.DeepEqual(total, wantTotal) {
 		t.Errorf("total:\n got %+v\nwant %+v", total, wantTotal)
 	}
@@ -343,6 +344,7 @@ func TestStatsCounts(t *testing.T) {
 		DeprecatedByVia:    map[string]int{"feedback": 1},
 		Inventory:          map[string]map[string]int{"pr": {"active": 1}, "session": {"candidate": 1}},
 	}
+	wantNS1.Reliability = memory.NewReliabilityCounts()
 	if !reflect.DeepEqual(ns1, wantNS1) {
 		t.Errorf("ns1:\n got %+v\nwant %+v", ns1, wantNS1)
 	}

@@ -49,6 +49,32 @@ type fakeStats struct {
 	byNS      map[string]memory.EventCounts
 	sinceSeen time.Time
 	err       error
+
+	// reliability
+	sessID   string
+	sessAt   time.Time
+	sessions map[string]memory.SessionCounts
+	inDB     map[string]bool
+	idsAsked []string
+}
+
+func (f *fakeStats) StatsLatestServeSession(context.Context, time.Time) (string, time.Time, error) {
+	return f.sessID, f.sessAt, f.err
+}
+func (f *fakeStats) StatsSessionCounts(_ context.Context, _ time.Time, id string) (memory.SessionCounts, error) {
+	c := f.sessions[id]
+	c.ID = id
+	return c, f.err
+}
+func (f *fakeStats) EventIDsExist(_ context.Context, ids []string) (map[string]bool, error) {
+	f.idsAsked = append(f.idsAsked, ids...)
+	out := map[string]bool{}
+	for _, id := range ids {
+		if f.inDB[id] {
+			out[id] = true
+		}
+	}
+	return out, f.err
 }
 
 func (f *fakeStats) StatsNamespaces(_ context.Context, since time.Time) ([]string, error) {

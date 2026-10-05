@@ -19,6 +19,9 @@ import (
 // imported as a pre-declared interface from internal/memory. *memory.Service
 // satisfies it structurally — no adapter type is required.
 type Service interface {
+	// Namespace is the service's own namespace (reliability events).
+	Namespace() string
+
 	// Search backs memory_search (AC-4, AC-5, AC-6, AC-7).
 	Search(ctx context.Context, req *memory.SearchRequest) (*memory.SearchResult, error)
 

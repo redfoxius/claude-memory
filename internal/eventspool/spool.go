@@ -185,6 +185,35 @@ func drainFile(ctx context.Context, path string, sink memory.EventSink, res *Dra
 	return nil
 }
 
+// Scan reads the valid events still in the spool (the live file and every
+// *.draining file) without modifying anything; full reports a live file over
+// the size cap. Invalid and torn lines are skipped, as the drain does.
+func Scan(dir string) (evs []memory.Event, full bool) {
+	live := filepath.Join(dir, spoolFile)
+	if fi, err := os.Stat(live); err == nil && fi.Size() > maxSpoolBytes {
+		full = true
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "spool.*.draining"))
+	now := time.Now()
+	for _, path := range append([]string{live}, files...) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		for _, line := range bytes.Split(data, []byte("\n")) {
+			line = bytes.TrimSpace(line)
+			if len(line) == 0 {
+				continue
+			}
+			var e memory.Event
+			if json.Unmarshal(line, &e) == nil && e.Validate(now) == nil {
+				evs = append(evs, e)
+			}
+		}
+	}
+	return evs, full
+}
+
 // Pending reports what is still in the spool: events (non-empty lines) in the
 // live file and in *.draining files, the number of *.draining files, and the
 // number of *.failed files.

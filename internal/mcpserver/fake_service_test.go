@@ -21,6 +21,8 @@ type fakeService struct {
 	staleHint   func(rec *record.Record) *memory.StaleHint
 }
 
+func (f *fakeService) Namespace() string { return "fake-ns" }
+
 func (f *fakeService) Search(ctx context.Context, req *memory.SearchRequest) (*memory.SearchResult, error) {
 	return f.searchFn(ctx, req)
 }

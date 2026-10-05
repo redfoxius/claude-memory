@@ -280,6 +280,11 @@ type FeedbackResponse struct {
 // ErrNotFound is returned when a requested record does not exist.
 var ErrNotFound = errors.New("record not found")
 
+// ErrEmbeddingUnavailable is wrapped (with the original error) by the write
+// path when the embedding provider fails, so callers can classify the failure
+// without parsing the message.
+var ErrEmbeddingUnavailable = errors.New("embedding provider unavailable")
+
 // ErrInvalidRequest wraps every Store request validation error, so a caller
 // (import) can tell a bad item from an infrastructure failure.
 var ErrInvalidRequest = errors.New("invalid request")

@@ -66,9 +66,10 @@ func TestHookCmd_SpoolsOneEventPerCard(t *testing.T) {
 	}
 
 	evs := spoolEvents(t, dir)
-	if len(evs) != 3 {
-		t.Fatalf("spooled %d events, want 3 (one per card)", len(evs))
+	if len(evs) != 4 || evs[3].Type != memory.EventSearchCalled {
+		t.Fatalf("spooled %d events, want 3 cards + the reliability event", len(evs))
 	}
+	evs = evs[:3]
 	for _, e := range evs {
 		if e.Type != memory.EventCardInjected || e.Namespace != "test-ns" || e.SessionID != "sess-1" || e.Similarity == nil {
 			t.Errorf("event = %+v", e)
@@ -88,7 +89,7 @@ func TestHookCmd_SpoolsOneEventPerCard(t *testing.T) {
 	}
 }
 
-func TestHookCmd_NoCardsNoSpoolAndBadSessionIDDropped(t *testing.T) {
+func TestHookCmd_NoCardsOnlyReliabilityEventAndBadSessionIDDropped(t *testing.T) {
 	cfg := hookTestCfg()
 	dir := filepath.Join(t.TempDir(), "events")
 	deps := hookDeps{Events: eventspool.Sink{Dir: dir}}
@@ -97,15 +98,15 @@ func TestHookCmd_NoCardsNoSpoolAndBadSessionIDDropped(t *testing.T) {
 	if _, err := runHookCmdDeps(t, context.Background(), cfg, empty, `{"prompt":"p","cwd":"/tmp"}`, deps); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("spool dir created without cards: %v", err)
+	if evs := spoolEvents(t, dir); len(evs) != 1 || evs[0].Type != memory.EventSearchCalled {
+		t.Errorf("no cards: events = %+v, want only the reliability event", evs)
 	}
 
 	one := hookEventsSvc([]*memory.SearchRecord{searchRecord(evID1, "t", "repo", "c", 0.9, 0.5, false)})
 	if _, err := runHookCmdDeps(t, context.Background(), cfg, one, `{"prompt":"p","cwd":"/tmp","session_id":"../evil"}`, deps); err != nil {
 		t.Fatal(err)
 	}
-	if evs := spoolEvents(t, dir); len(evs) != 1 || evs[0].SessionID != "" {
+	if evs := spoolEvents(t, dir); len(evs) != 3 || evs[1].SessionID != "" || evs[2].SessionID != "" {
 		t.Errorf("events = %+v", evs)
 	}
 }

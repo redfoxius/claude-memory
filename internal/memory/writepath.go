@@ -50,7 +50,7 @@ func (s *Service) Store(ctx context.Context, req *StoreRequest) (*StoreResponse,
 	// Compute embedding. If embedding provider fails, return a clear error (AC-57).
 	embedding, err := s.embeddingProvider.Embed(ctx, embedInput, s.cfg.EmbedMaxTokens)
 	if err != nil {
-		return nil, fmt.Errorf("embedding provider unavailable: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrEmbeddingUnavailable, err)
 	}
 
 	// Resolve the target namespace: the service's own, or "global" when the

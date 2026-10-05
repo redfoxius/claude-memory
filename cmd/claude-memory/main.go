@@ -8,13 +8,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"time"
+
+	"github.com/google/uuid"
 
 	"claude-memory/integration"
 	"claude-memory/internal/azuredevops"
@@ -26,6 +27,7 @@ import (
 	"claude-memory/internal/gitlab"
 	"claude-memory/internal/gitlog"
 	"claude-memory/internal/importer"
+	"claude-memory/internal/mcpserver"
 	"claude-memory/internal/memory"
 	"claude-memory/internal/namespace"
 	"claude-memory/internal/ollama"
@@ -387,7 +389,16 @@ func cmdServe(cfg *config.Config) error {
 	}
 	cancel()
 
-	return serveCmd(ctx, cfg, svc)
+	// Reliability events go to the file spool (it works while Postgres is
+	// down) under a random per-process session id: no host, user or PID.
+	events := mcpserver.WithEvents(eventspool.Sink{Dir: spoolDir()}, uuid.NewString(), classifyError)
+	return serveCmd(ctx, cfg, svc, events)
+}
+
+// classifyError is memory.ClassifyError with the Postgres adapter's
+// unavailable check, the composition root's one wiring of the two.
+func classifyError(err error) memory.ErrorClass {
+	return memory.ClassifyError(err, postgres.IsUnavailable)
 }
 
 func cmdHook(cfg *config.Config) error {
@@ -395,17 +406,14 @@ func cmdHook(cfg *config.Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.HookTimeout)
 	defer cancel()
 
-	// Hot path: no migration check (serve/seed/cleanup/ingest-pr apply the schema).
-	svc, cleanup, err := buildService(ctx, cfg, false)
-	if err != nil {
-		// Silent failure per AC-31: error on Ollama/Postgres down -> exit 0, no output
-		slog.DebugContext(ctx, "failed to build service", "error", err)
-		return nil
+	deps := hookDeps{
+		History:  buildCodeHistory(cfg),
+		Events:   eventspool.Sink{Dir: spoolDir()},
+		Classify: classifyError,
 	}
-	defer cleanup()
-
-	deps := hookDeps{History: buildCodeHistory(cfg), Events: eventspool.Sink{Dir: spoolDir()}}
-	return hookCmd(ctx, cfg, svc, deps, hookStart)
+	// Hot path: no migration check (serve/seed/cleanup/ingest-pr apply the schema).
+	build := func(ctx context.Context) (*memory.Service, func(), error) { return buildService(ctx, cfg, false) }
+	return runHook(ctx, cfg, os.Stdin, build, deps, hookStart)
 }
 
 // cmdExtract is implemented in extract.go (WI-12).
