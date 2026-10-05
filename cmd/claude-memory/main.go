@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -560,7 +561,19 @@ func cmdEvalRetrieval(cfg *config.Config) error {
 	}
 	defer cleanup()
 
-	return evalCmd(ctx, args, evalScope(svc))
+	scoped := evalScope(svc)
+	if os.Getenv(config.NamespaceEnv) != "" {
+		slog.WarnContext(ctx, "MEMORY_NAMESPACE is set: eval fixtures are not reset and accumulate in that namespace",
+			"namespace", scoped.Namespace())
+	} else {
+		n, err := resetEvalFixtures(ctx, scoped)
+		if err != nil {
+			return fmt.Errorf("reset eval namespace: %w", err)
+		}
+		slog.InfoContext(ctx, "eval namespace reset", "namespace", scoped.Namespace(), "removed", n)
+	}
+
+	return evalCmd(ctx, args, scoped)
 }
 
 // evalNamespace is where eval-retrieval's synthetic fixtures live unless
