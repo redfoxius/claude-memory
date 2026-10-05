@@ -192,9 +192,9 @@ func (JobsStep) Detect(ctx context.Context, rc ReadPorts, st *RunState) Detectio
 		d.Detail = strings.Join(names, ", ") + " installed and loaded"
 	}
 	if len(views) == 2 {
-		d.Notes = append(d.Notes, Note{NoteInfo, "ingest-pr supports Azure DevOps repositories only"})
+		d.Notes = append(d.Notes, Note{NoteInfo, "ingest-pr supports Azure DevOps (az), GitHub (gh) and GitLab (glab) repositories; each needs its CLI logged in"})
 	} else {
-		d.Notes = append(d.Notes, Note{NoteInfo, "ingest-pr is not installed: pass --pr-repos or set MEMORY_PR_INGEST_REPOS to enable it"})
+		d.Notes = append(d.Notes, Note{NoteInfo, "ingest-pr is not installed: pass --pr-repos or set MEMORY_PR_INGEST_REPOS (Azure DevOps, GitHub or GitLab repos) to enable it"})
 		if b, err := rc.FS.ReadFile(filepath.Join(rc.Paths.LaunchAgentsDir, LaunchdLabelPrefix+JobIngestPR+".plist")); err == nil &&
 			bytes.Contains(b, []byte(legacyWrapperSuffix)) {
 			d.Notes = append(d.Notes, Note{NoteWarn, "legacy ingest-pr plist left untouched; pass --pr-repos to manage it"})

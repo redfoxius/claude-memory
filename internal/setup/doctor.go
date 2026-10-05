@@ -491,6 +491,8 @@ func (d *doctor) checks() []Check {
 		{ID: "tools.git", Title: "git on PATH", Run: d.checkToolGit},
 		{ID: "tools.claude", Title: "claude CLI on PATH", Run: d.checkToolClaude},
 		{ID: "tools.az", Title: "az CLI on PATH", Run: d.checkToolAz},
+		{ID: "tools.gh", Title: "gh CLI on PATH and logged in", Run: d.checkToolGh},
+		{ID: "tools.glab", Title: "glab CLI on PATH and logged in", Run: d.checkToolGlab},
 		{ID: "mcp.registered", Title: "MCP server registered", Run: d.checkMCP},
 		{ID: "hooks.scripts", Title: "hook scripts", Run: d.checkHookScripts},
 		{ID: "hooks.settings", Title: "hooks in settings.json", Run: d.checkHookSettings},

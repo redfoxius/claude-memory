@@ -1,0 +1,1 @@
+{"number": 123, "title": "Switch to squash merges", "body": "We squash now.\n\nSee docs.", "html_url": "https://github.com/acme/widgets/pull/123", "state": "closed", "merged_at": "2026-09-21T08:30:00Z", "updated_at": "2026-09-21T08:31:00Z", "merge_commit_sha": "bbbb222", "user": {"login": "alice", "type": "User"}, "author_association": "OWNER"}

@@ -2,7 +2,8 @@
 // against a PR-hosting platform (Azure DevOps, GitHub, GitLab), and the
 // origin-URL detection that picks which provider a given local repo uses.
 // It has zero concrete dependencies: the only implementation in MVP is
-// internal/azuredevops, wired up by cmd/claude-memory/ingestpr.go.
+// internal/azuredevops, internal/github and internal/gitlab, wired up by
+// cmd/claude-memory/main.go.
 package prsource
 
 import (
@@ -28,12 +29,21 @@ const (
 // remote came from — Name is the canonical identifier used for the cursor
 // file and the memory record's repo field.
 type RepoRef struct {
-	Provider  Provider
-	Org       string
-	Project   string
-	Name      string
-	LocalPath string
-	Remote    string
+	Provider Provider
+	Org      string
+	Project  string
+	Name     string
+	// RemoteName is the repo name parsed from the origin URL (Name is the
+	// local directory's basename once ingest-pr sets it). Azure DevOps API
+	// calls use it.
+	RemoteName string
+	LocalPath  string
+	// Remote is the origin URL with userinfo removed (safe to log).
+	Remote string
+	// Host (lower-case, no port) and Path (all segments, no ".git") come
+	// from the origin URL; GitHub/GitLab adapters address the API by them.
+	Host string
+	Path string
 }
 
 // PR is a provider-neutral view of one pull request, with just enough
@@ -50,6 +60,11 @@ type PR struct {
 	// provider gives none). It is the staleness baseline for records
 	// extracted from the PR — never the local HEAD.
 	MergeCommit string
+	// Bot and Trusted come from the author: ingest-pr lists bot or untrusted
+	// PRs (so the cursor passes them) but never fetches or extracts them.
+	// Adapters must set Trusted explicitly.
+	Bot     bool
+	Trusted bool
 }
 
 // Source is the port ingest-pr needs against a PR-hosting platform:
@@ -57,8 +72,8 @@ type PR struct {
 // guaranteed by the port itself — callers that need ordering, per AC-26,
 // sort the result), and fetch one PR's full detail including review
 // comments. Declared here, by the consumer, sized to exactly what
-// ingest-pr calls; satisfied in MVP only by internal/azuredevops.Client
-// (AC-58 — GitHub/GitLab adapters are backlog).
+// ingest-pr calls; satisfied by internal/azuredevops, internal/github and
+// internal/gitlab.
 type Source interface {
 	ListCompleted(ctx context.Context, repo RepoRef, since time.Time) ([]PR, error)
 	Get(ctx context.Context, repo RepoRef, id string) (*PR, error)

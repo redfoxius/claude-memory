@@ -85,8 +85,11 @@ type Cmd struct {
 	Dir  string   // working directory; "" = inherit
 	// Env holds KEY=VALUE entries added to the inherited environment (e.g.
 	// the AC-16 XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS for systemctl --user).
-	Env   []string
-	Stdin []byte // nil = no stdin
+	Env []string
+	// DropEnv names variables removed from the inherited environment (the
+	// doctor gh/glab check must not see token variables).
+	DropEnv []string
+	Stdin   []byte // nil = no stdin
 	// Mutating marks a command that changes state (launchctl bootstrap,
 	// systemctl enable, claude mcp add, ...). It is set by the step code; a
 	// read-only Runner refuses it with ErrReadOnly.

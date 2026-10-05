@@ -19,6 +19,8 @@ WARN  tools.git
 WARN  tools.claude      
                         fix: install the Claude Code CLI and put it on PATH
 INFO  tools.az          
+INFO  tools.gh          
+INFO  tools.glab        
 FAIL  mcp.registered    $ROOT/home/.claude.json does not exist
                         fix: claude mcp add --scope user claude-memory -- $ROOT/home/.local/bin/claude-memory serve
 FAIL  hooks.scripts     
@@ -35,4 +37,4 @@ INFO  jobs
 INFO  dirs.state        
 INFO  manifest          no $ROOT/home/.config/claude-memory/install.json (a manual install, or install has not run yet)
 
-23 checks: 1 pass · 5 fail · 3 warn · 6 info · 8 skip
+25 checks: 1 pass · 5 fail · 3 warn · 8 info · 8 skip

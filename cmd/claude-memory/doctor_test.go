@@ -153,7 +153,7 @@ func TestDoctorBinaryNeverRunsMCPCommand(t *testing.T) {
 			if err := json.Unmarshal(out, &doc); err != nil {
 				t.Fatalf("--json output is not one JSON object: %v\n%s", err, out)
 			}
-			if doc.Schema != 1 || doc.OK || len(doc.Checks) != 23 {
+			if doc.Schema != 1 || doc.OK || len(doc.Checks) != 25 {
 				t.Errorf("--json: schema %d ok %v, %d checks", doc.Schema, doc.OK, len(doc.Checks))
 			}
 		}

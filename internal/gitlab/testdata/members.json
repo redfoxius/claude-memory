@@ -1,0 +1,6 @@
+[
+ {"id": 1, "username": "alice", "access_level": 40},
+ {"id": 2, "username": "bob", "access_level": 30},
+ {"id": 3, "username": "guest-gina", "access_level": 10},
+ {"id": 9, "username": "project_12_bot_x1", "access_level": 30}
+]

@@ -176,7 +176,11 @@ launchctl list | grep io.github.claude-memory
 
 Set `MEMORY_PR_INGEST_REPOS` in `~/.config/claude-memory/env` (step 2)
 to the comma-separated local repo paths (or root directories) you want
-`ingest-pr` to scan, if you haven't already.
+`ingest-pr` to scan, if you haven't already. Azure DevOps repos need `az`
+logged in, GitHub repos `gh auth login`, GitLab repos `glab auth login`
+(`install` adds their directories to the job PATH when they are installed;
+re-run `install --upgrade` after installing one later). See `USAGE.md`
+"PR ingest" for the trusted-author rule and per-namespace `pr_ingest`.
 
 ## 9. Verify
 

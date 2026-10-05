@@ -193,6 +193,7 @@ func (r *FakeRunner) MutatingCalls() int {
 func cloneCmd(c Cmd) Cmd {
 	c.Argv = slices.Clone(c.Argv)
 	c.Env = slices.Clone(c.Env)
+	c.DropEnv = slices.Clone(c.DropEnv)
 	c.Stdin = slices.Clone(c.Stdin)
 	return c
 }

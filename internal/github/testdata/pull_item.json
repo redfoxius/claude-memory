@@ -1,0 +1,1 @@
+{"number": 101, "title": "Add retry to sync", "body": "Retries the sync with backoff.", "html_url": "https://github.com/acme/widgets/pull/101", "state": "closed", "merged_at": "2026-09-20T10:00:00Z", "updated_at": "2026-09-20T10:00:05Z", "merge_commit_sha": "aaaa111", "user": {"login": "alice", "type": "User"}, "author_association": "MEMBER"}

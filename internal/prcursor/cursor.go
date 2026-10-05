@@ -36,6 +36,10 @@ func (s *Store) path(provider, repo string) string {
 	return filepath.Join(s.dir, fmt.Sprintf("%s__%s.json", sanitize(provider), sanitize(repo)))
 }
 
+// File returns the path of the cursor file for provider+repo (for error
+// messages that tell the user which file to edit).
+func (s *Store) File(provider, repo string) string { return s.path(provider, repo) }
+
 // Load reads the persisted cursor for provider+repo. If the file is
 // missing, unreadable, or its content doesn't parse, Load returns
 // ok=false rather than an error — a missing/unreadable cursor is the

@@ -270,11 +270,13 @@ func TestNamespacesRerenderLossWarnsAndBacksUp(t *testing.T) {
 		body  string
 		lossy bool
 	}{
-		"comment":      {"# my note\ndefault: scratch\nnamespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n", true},
-		"line comment": {"default: scratch # why\nnamespaces: []\n", true},
-		"unknown top":  {"default: scratch\nextra: 1\nnamespaces: []\n", true},
-		"unknown rule": {"namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    note: hi\n", true},
-		"clean":        {"default: scratch\nnamespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n", false},
+		"comment":         {"# my note\ndefault: scratch\nnamespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n", true},
+		"line comment":    {"default: scratch # why\nnamespaces: []\n", true},
+		"unknown top":     {"default: scratch\nextra: 1\nnamespaces: []\n", true},
+		"unknown rule":    {"namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    note: hi\n", true},
+		"pr_ingest known": {"namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    pr_ingest:\n      enabled: false\n      provider: github\n", false},
+		"pr_ingest typo":  {"namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    pr_ingest:\n      enabeld: false\n", true},
+		"clean":           {"default: scratch\nnamespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n", false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newS23(t)
@@ -327,5 +329,40 @@ func TestNamespacesConfigureSkipsUnparseableAndCovered(t *testing.T) {
 		text("Add another mapping", "")
 	if err := h.nsStep().Configure(context.Background(), h.rp(), ui, st); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The install step re-renders through namespace.Marshal, which must keep a
+// rule's pr_ingest section.
+func TestNamespacesStepKeepsPRIngest(t *testing.T) {
+	h := newS23(t)
+	h.write(h.p.NamespacesFile(), "namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    pr_ingest:\n      enabled: false\n", 0o600)
+	r := h.nsRun(nsState(NSRule{"b", []string{"/y/**"}}))
+	if !strings.Contains(r.after, "pr_ingest:") || !strings.Contains(r.after, "enabled: false") || !strings.Contains(r.after, "/y/**") {
+		t.Errorf("after =\n%s", r.after)
+	}
+}
+
+// A malformed pr_ingest must never be re-rendered (it would become "enabled"):
+// the step treats the file like an unparseable one.
+func TestNamespacesMalformedPRIngestNeverWritten(t *testing.T) {
+	for name, body := range map[string]string{
+		"false":         "namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    pr_ingest: false\n",
+		"enabled maybe": "namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    pr_ingest: {enabled: maybe}\n",
+		"provider list": "namespaces:\n  - namespace: a\n    paths: [\"/x/**\"]\n    pr_ingest: {provider: [gitlab]}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newS23(t)
+			h.write(h.p.NamespacesFile(), body, 0o600)
+			st := nsState(NSRule{"b", []string{"/y/**"}})
+			before := len(h.fs.Writes())
+			r := h.nsRun(st)
+			if r.det.State != StateModified || !strings.Contains(r.det.Detail, "fix pr_ingest") {
+				t.Fatalf("detect = %s %q", r.det.State, r.det.Detail)
+			}
+			if got, _ := os.ReadFile(h.p.NamespacesFile()); string(got) != body || len(h.fs.Writes()) != before {
+				t.Errorf("file was written: %q", got)
+			}
+		})
 	}
 }

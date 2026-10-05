@@ -93,11 +93,13 @@ write-path UPDATE with no `files` never re-baselines.
   `CLAUDE.md`/`MEMORY.md` index files.
 - Rough size: S–M.
 
-### 4. PR ingest: GitHub + GitLab providers, per-namespace config — NOT STARTED
+### 4. PR ingest: GitHub + GitLab providers, per-namespace config — implemented (spec: [pr-providers](pr-providers/01-spec.md)); GitLab verified with fixtures only
 
 MVP already has the provider-neutral `PRSource` port, auto-detection from the
 repo's git `origin`, and per-provider cursors (spec AC-58); only Azure DevOps
-is implemented. This item adds:
+was implemented; GitHub and GitLab adapters now exist (v0.2 narrowed the
+scope below: github.com only, gitlab.com auto-detected, no `host`/`auth`
+keys, repos only from `MEMORY_PR_INGEST_REPOS`). This item added:
 - `PRSource` adapters for GitHub (`gh` CLI / REST, incl. GitHub Enterprise
   hosts) and GitLab (`glab` CLI / REST, incl. self-hosted hosts) — completed
   PRs/MRs since cursor, description, diff summary, review comments.

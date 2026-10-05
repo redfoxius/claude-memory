@@ -18,7 +18,14 @@ const fileHeader = `# claude-memory namespaces. Maps project directories to memo
 // Marshal renders c exactly as Save writes it: the explanatory header
 // followed by the YAML body. It is pure (no I/O), so a caller that owns its
 // own filesystem port (the installer) can write the bytes itself.
+//
+// It refuses (see PRIngestError) while any pr_ingest section is unusable:
+// re-rendering would drop a malformed value and so turn an opt-out into
+// "enabled".
 func Marshal(c *Config) ([]byte, error) {
+	if err := c.pringestError(); err != nil {
+		return nil, err
+	}
 	body, err := yaml.Marshal(c)
 	if err != nil {
 		return nil, fmt.Errorf("marshal namespaces: %w", err)
@@ -34,7 +41,7 @@ func Save(path string, c *Config) error {
 	}
 	out, err := Marshal(c)
 	if err != nil {
-		return err
+		return fmt.Errorf("fix pr_ingest in %s first: %w", path, err)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".namespaces-*.yaml")
 	if err != nil {

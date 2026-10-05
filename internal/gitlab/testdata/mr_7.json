@@ -1,0 +1,1 @@
+{"iid": 7, "title": "Squash MR", "description": "Squashed.", "web_url": "https://gitlab.com/grp/sub/proj/-/merge_requests/7", "merged_at": "2026-09-20T10:00:00Z", "updated_at": "2026-09-20T10:00:05Z", "merge_commit_sha": null, "squash_commit_sha": "sq777", "sha": "head777", "author": {"id": 1, "username": "alice"}}

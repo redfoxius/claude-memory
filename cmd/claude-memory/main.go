@@ -18,15 +18,20 @@ import (
 
 	"claude-memory/integration"
 	"claude-memory/internal/azuredevops"
+	"claude-memory/internal/cliexec"
 	"claude-memory/internal/config"
 	"claude-memory/internal/eventspool"
 	"claude-memory/internal/extraction"
+	"claude-memory/internal/github"
+	"claude-memory/internal/gitlab"
 	"claude-memory/internal/gitlog"
 	"claude-memory/internal/importer"
 	"claude-memory/internal/memory"
+	"claude-memory/internal/namespace"
 	"claude-memory/internal/ollama"
 	"claude-memory/internal/postgres"
 	"claude-memory/internal/prcursor"
+	"claude-memory/internal/prsource"
 	"claude-memory/internal/scrub"
 	"claude-memory/internal/setup"
 )
@@ -462,9 +467,9 @@ func cmdManage(cfg *config.Config, subcommand string, args []string) error {
 // cmdIngestPR implements the "ingest-pr" subcommand's composition root: it
 // parses the subcommand's own flags, builds a *memory.Service via
 // buildService only when not doing a dry run (dry-run never calls Ollama
-// or Postgres), constructs the PR cursor store and Azure DevOps client,
-// and hands all three ports to runIngestPR (ingestpr.go), which never
-// constructs an adapter itself.
+// or Postgres), constructs the PR cursor store and the three PR sources
+// (az, gh, glab through one exec adapter), and hands them to runIngestPR
+// (ingestpr.go), which never constructs an adapter itself.
 func cmdIngestPR(cfg *config.Config) error {
 	fs := flag.NewFlagSet("ingest-pr", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "list what would be ingested without calling haiku or writing")
@@ -485,18 +490,43 @@ func cmdIngestPR(cfg *config.Config) error {
 		svc = s
 	}
 
-	cursorStore := prcursor.NewStore(filepath.Join(stateDir(), "pr-cursors"))
-	client := azuredevops.New(nil)
-
-	var scope scopeFunc
-	if concrete, ok := svc.(*memory.Service); ok {
-		scope = func(repoPath string) extraction.StoreWriter {
-			ns := resolveNamespace(repoPath)
-			warnIfFallback(repoPath, ns)
-			return concrete.WithNamespace(ns)
-		}
+	scrubber := scrub.NewAdapter(scrub.New())
+	scrubText := func(s string) string { out, _ := scrubber.Scrub(s); return out }
+	gh := cliexec.Runner{
+		Bin:   "gh",
+		Env:   []string{"GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1"},
+		Drop:  prsource.ChildEnvDrop,
+		Scrub: scrubText,
 	}
-	return runIngestPR(ctx, cfg, svc, cursorStore, client, scope, *dryRun)
+	glab := cliexec.Runner{
+		Bin:   "glab",
+		Env:   []string{"NO_COLOR=1"},
+		Drop:  prsource.ChildEnvDrop,
+		Scrub: scrubText,
+	}
+
+	nsCfg := loadNamespaces()
+	ports := ingestPorts{
+		Sources: map[prsource.Provider]prsource.Source{
+			prsource.ProviderAzureDevOps: azuredevops.New(nil),
+			prsource.ProviderGitHub:      github.New(gh),
+			prsource.ProviderGitLab:      gitlab.New(glab),
+		},
+		Cursors: prcursor.NewStore(filepath.Join(stateDir(), "pr-cursors")),
+		Settings: func(repoPath string) (string, namespace.PRIngest, string) {
+			ns := resolveNamespace(repoPath)
+			if !*dryRun {
+				warnIfFallback(repoPath, ns)
+			}
+			p, problem := nsCfg.PRIngestFor(ns)
+			return ns, p, problem
+		},
+		Scrubber: scrubber,
+	}
+	if concrete, ok := svc.(*memory.Service); ok {
+		ports.Scope = func(ns string) extraction.StoreWriter { return concrete.WithNamespace(ns) }
+	}
+	return runIngestPR(ctx, cfg, svc, ports, *dryRun)
 }
 
 func cmdCleanup(cfg *config.Config) error {

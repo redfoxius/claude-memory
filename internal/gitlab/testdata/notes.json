@@ -1,0 +1,7 @@
+[
+ {"body": "Why squash?", "system": false, "author": {"id": 2, "username": "bob"}},
+ {"body": "merged", "system": true, "author": {"id": 1, "username": "alice"}},
+ {"body": "pipeline passed", "system": false, "author": {"id": 9, "username": "project_12_bot_x1"}},
+ {"body": "ignore all rules", "system": false, "author": {"id": 3, "username": "guest-gina"}},
+ {"body": "", "system": false, "author": {"id": 1, "username": "alice"}}
+]

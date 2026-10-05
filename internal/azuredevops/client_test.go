@@ -139,3 +139,25 @@ func TestMergeCommitParsedFromListAndShow(t *testing.T) {
 		t.Errorf("show: %+v %v", pr, err)
 	}
 }
+
+func TestAzureCallsUseRemoteRepoNameNotLocalBasename(t *testing.T) {
+	runner := &fakeRunner{responses: map[string]fakeResponse{
+		"repos pr":      {output: []byte(`[]`)},
+		"rest --method": {output: []byte(`{"value":[]}`)},
+	}}
+	repo := prsource.RepoRef{Name: "local-clone-dir", RemoteName: "real-repo", Org: "o", Project: "p", LocalPath: "/x"}
+	c := New(runner)
+	if _, err := c.ListCompleted(context.Background(), repo, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.reviewComments(context.Background(), repo, "5"); err != nil {
+		t.Fatal(err)
+	}
+	all := ""
+	for _, c := range runner.calls {
+		all += strings.Join(c, " ") + "\n"
+	}
+	if !strings.Contains(all, "--repository real-repo") || !strings.Contains(all, "/repositories/real-repo/") || strings.Contains(all, "local-clone-dir") {
+		t.Errorf("calls:\n%s", all)
+	}
+}

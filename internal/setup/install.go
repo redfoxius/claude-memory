@@ -73,6 +73,8 @@ var DoctorCheckSteps = map[string]string{
 	"tools.git":        "prereqs",
 	"tools.claude":     "prereqs",
 	"tools.az":         "prereqs",
+	"tools.gh":         "prereqs",
+	"tools.glab":       "prereqs",
 	"mcp.registered":   "mcp",
 	"hooks.scripts":    "hooks.scripts",
 	"hooks.settings":   "hooks.settings",

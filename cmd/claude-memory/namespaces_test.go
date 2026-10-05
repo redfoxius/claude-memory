@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"claude-memory/internal/namespace"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -113,5 +114,17 @@ func TestCmdNamespaces_UsageMentionsList(t *testing.T) {
 	err := cmdNamespaces([]string{"bogus"})
 	if err == nil || !strings.Contains(err.Error(), `unknown namespaces command "bogus"`) || !strings.Contains(err.Error(), "namespaces list") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestNamespacesAddRefusesMalformedPRIngest(t *testing.T) {
+	body := "namespaces:\n  - namespace: s\n    paths: [\"/s\"]\n    pr_ingest: false\n"
+	p := writeNamespacesFile(t, body)
+	err := namespace.Add(p, "s", "/more")
+	if err == nil || !strings.Contains(err.Error(), "fix pr_ingest in "+p+" first") {
+		t.Fatalf("err = %v", err)
+	}
+	if got, _ := os.ReadFile(p); string(got) != body {
+		t.Errorf("file changed: %q", got)
 	}
 }

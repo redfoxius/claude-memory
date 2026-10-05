@@ -973,4 +973,4 @@ intent (ambient, automatic, cross-repo memory), so none required
 - [ ] AC-55 — record embedding uses title+tags+content up to the configured 2048-token limit; full content always full-text indexed (new v0.2, limit v0.3)
 - [ ] AC-56 — hook embeds the prompt up to the configured 2048-token limit (new v0.2, limit v0.3)
 - [ ] AC-57 — write path returns a clear error (no local queue) when Postgres/Ollama is unreachable (new, v0.2)
-- [ ] AC-58 — ingest-pr detects provider from git origin behind a PRSource port; Azure only, others skipped with a warning (new, v0.4)
+- [ ] AC-58 — ingest-pr detects provider from git origin behind a PRSource port; Azure only, others skipped with a warning (new, v0.4) — GitHub and GitLab implemented since pr-providers (docs/specs/pr-providers); only an unknown provider is now skipped with a warning

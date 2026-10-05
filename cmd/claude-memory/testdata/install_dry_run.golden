@@ -3,7 +3,7 @@ Platform                       ok        keep    macOS 15.0 (arm64); jobs: launc
 Binary                         absent    apply   install /opt/build/claude-memory to $HOME/.local/bin/claude-memory
   - binary/file absent install /opt/build/claude-memory to $HOME/.local/bin/claude-memory
   - binary/dir absent create $HOME/.local/bin
-Prerequisites                  ok        keep    found: git, claude, psql, az, ollama
+Prerequisites                  ok        keep    found: git, claude, psql, az, gh, glab, ollama
 Topology                       outdated  apply   record topology remote
 Env file                       absent    apply   $HOME/.config/claude-memory/env: dir, MEMORY_PG_DSN, MEMORY_OLLAMA_URL, MEMORY_OLLAMA_MODEL, MEMORY_PR_INGEST_REPOS
   - envfile/dir absent create $HOME/.config/claude-memory (mode 0700)
@@ -407,7 +407,7 @@ Scheduled jobs
 
 warn: $HOME/.local/bin is not on PATH: add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile
 warn: Ollama at http://ollama.example.com:11434 is not on this machine: prompts are sent over the network for embedding. The prompt hook gives up after MEMORY_HOOK_TIMEOUT (800 ms by default), and a slow remote Ollama - e.g. on CPU, where DEPLOY.md measured 0.23 s for 15 tokens and 2.3 s for 150 - makes the hook time out and inject nothing at all; memory_search via MCP still works. Doctor's ollama.embed warning (> 500 ms) is the watchdog.
-info: ingest-pr supports Azure DevOps repositories only
+info: ingest-pr supports Azure DevOps (az), GitHub (gh) and GitLab (glab) repositories; each needs its CLI logged in
 
 Dry run: nothing was changed.
 

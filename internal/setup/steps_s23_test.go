@@ -151,7 +151,7 @@ func TestPrereqsDetect(t *testing.T) {
 			info++
 		}
 	}
-	if warn != 1 || info != 2 || !hasNote(d.Notes, "psql not found") || !hasNote(d.Notes, "postgresql-client") {
+	if warn != 1 || info != 4 || !hasNote(d.Notes, "psql not found") || !hasNote(d.Notes, "postgresql-client") {
 		t.Errorf("optional tools missing: notes %+v", d.Notes)
 	}
 

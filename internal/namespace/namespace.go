@@ -26,8 +26,9 @@ func ValidName(s string) bool { return validName.MatchString(s) }
 
 // Rule maps project path globs to a namespace.
 type Rule struct {
-	Namespace string   `yaml:"namespace"`
-	Paths     []string `yaml:"paths"`
+	Namespace string    `yaml:"namespace"`
+	Paths     []string  `yaml:"paths"`
+	PRIngest  *PRIngest `yaml:"pr_ingest,omitempty"`
 }
 
 // Config is the parsed namespaces.yaml.
@@ -41,6 +42,11 @@ type Rule struct {
 type Config struct {
 	Default    string `yaml:"default"`
 	Namespaces []Rule `yaml:"namespaces"`
+
+	// PRIngestProblems lists namespaces whose pr_ingest is unusable (set by
+	// Parse). They never make Parse fail: ingest-pr skips those namespaces
+	// and doctor reports them.
+	PRIngestProblems []PRIngestProblem `yaml:"-"`
 
 	home string
 }
@@ -74,6 +80,7 @@ func Parse(data []byte, path, home string) (*Config, error) {
 			return nil, fmt.Errorf("%s: invalid namespace %q", path, r.Namespace)
 		}
 	}
+	c.collectPRIngestProblems()
 	return c, nil
 }
 

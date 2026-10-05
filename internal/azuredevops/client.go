@@ -82,6 +82,15 @@ type prItem struct {
 	} `json:"lastMergeCommit"`
 }
 
+// apiName is the repository name for Azure API calls: the one parsed from
+// the origin URL, not the local clone directory's name.
+func apiName(repo prsource.RepoRef) string {
+	if repo.RemoteName != "" {
+		return repo.RemoteName
+	}
+	return repo.Name
+}
+
 // ListCompleted lists PRs completed after since, scoped to repo, in
 // completion order (oldest first), via `az repos pr list --status
 // completed --detect true --repository <name>` run with its working
@@ -91,7 +100,7 @@ func (c *Client) ListCompleted(ctx context.Context, repo prsource.RepoRef, since
 	args := []string{
 		"repos", "pr", "list",
 		"--detect", "true",
-		"--repository", repo.Name,
+		"--repository", apiName(repo),
 		"--status", "completed",
 		"--output", "json",
 	}
@@ -124,6 +133,7 @@ func (c *Client) ListCompleted(ctx context.Context, repo prsource.RepoRef, since
 			CompletedAt: completedAt,
 			URL:         it.URL,
 			MergeCommit: it.LastMergeCommit.CommitID,
+			Trusted:     true, // Azure DevOps access is already limited to the org's members.
 		})
 	}
 
@@ -173,6 +183,7 @@ func (c *Client) Get(ctx context.Context, repo prsource.RepoRef, id string) (*pr
 		CompletedAt:    completedAt,
 		URL:            item.URL,
 		MergeCommit:    item.LastMergeCommit.CommitID,
+		Trusted:        true,
 	}, nil
 }
 
@@ -199,7 +210,7 @@ func (c *Client) reviewComments(ctx context.Context, repo prsource.RepoRef, id s
 
 	url := fmt.Sprintf(
 		"https://dev.azure.com/%s/%s/_apis/git/repositories/%s/pullRequests/%s/threads?api-version=7.1",
-		repo.Org, repo.Project, repo.Name, id,
+		repo.Org, repo.Project, apiName(repo), id,
 	)
 	args := []string{"rest", "--method", "get", "--url", url, "--output", "json"}
 
