@@ -57,6 +57,7 @@ func TestNamespace_ListIsConfinedToOwnNamespace(t *testing.T) {
 func TestNamespace_IDLookupsHideOtherNamespaces(t *testing.T) {
 	recs := map[string]*record.Record{
 		"mine":   {ID: "mine", Namespace: "pet-game", Status: record.StatusActive},
+		"mine2":  {ID: "mine2", Namespace: "pet-game", Status: record.StatusActive},
 		"global": {ID: "global", Namespace: "global", Status: record.StatusActive},
 		"theirs": {ID: "theirs", Namespace: "acme", Status: record.StatusActive},
 	}
@@ -136,6 +137,7 @@ func TestNamespace_StoreRejectsForeignNamespace(t *testing.T) {
 func TestNamespace_DeprecateSupersededByMustBeAccessible(t *testing.T) {
 	recs := map[string]*record.Record{
 		"mine":   {ID: "mine", Namespace: "pet-game", Status: record.StatusActive},
+		"mine2":  {ID: "mine2", Namespace: "pet-game", Status: record.StatusActive},
 		"global": {ID: "global", Namespace: "global", Status: record.StatusActive},
 		"theirs": {ID: "theirs", Namespace: "acme", Status: record.StatusActive},
 	}
@@ -152,7 +154,7 @@ func TestNamespace_DeprecateSupersededByMustBeAccessible(t *testing.T) {
 	}
 	svc := nsService(store, "pet-game")
 	ctx := context.Background()
-	for _, id := range []string{"mine", "global"} {
+	for _, id := range []string{"mine2", "global"} {
 		by := id
 		if _, err := svc.DeprecateRecord(ctx, &DeprecateRequest{ID: "mine", Reason: "x", SupersededBy: &by}); err != nil {
 			t.Errorf("superseded_by %s: %v", id, err)
@@ -163,5 +165,9 @@ func TestNamespace_DeprecateSupersededByMustBeAccessible(t *testing.T) {
 		if _, err := svc.DeprecateRecord(ctx, &DeprecateRequest{ID: "mine", Reason: "x", SupersededBy: &by}); !errors.Is(err, ErrNotFound) {
 			t.Errorf("superseded_by %s: err = %v, want ErrNotFound", id, err)
 		}
+	}
+	self := "mine"
+	if _, err := svc.DeprecateRecord(ctx, &DeprecateRequest{ID: "mine", Reason: "x", SupersededBy: &self}); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("superseded_by self: err = %v, want ErrInvalidRequest", err)
 	}
 }
