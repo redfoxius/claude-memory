@@ -22,6 +22,14 @@ echo '{"prompt":"which branch do I open the PR into","cwd":"'"$PWD"'"}' \
 The hook is silent on any error by design (it must never block a prompt).
 For details: `MEMORY_DEBUG=1 claude-memory hook < input.json`.
 
+## What leaves your machine
+
+- **Embeddings are local.** Text is embedded by your own Ollama instance; it is never sent elsewhere for embedding.
+- **Extraction sends text to Anthropic.** Session transcripts (at session end) and PR text (during PR ingest) are sent to Anthropic through your own `claude -p --model haiku` call, using your own Claude Code login. Before sending, the text is run through the built-in secret scrubber (tokens, API keys, JWTs, bearer headers, connection strings with passwords, private keys, `password=`-style assignments).
+- **The scrub is pattern-based and best-effort, not a guarantee.** A secret in an unusual shape will not be caught. Do not rely on it for highly sensitive sessions; disable the hook for those.
+- **Nothing is sent to any other third party.**
+- **PR ingest calls the provider CLIs** (`az`, `gh`, `glab`) on your machine with your own credentials, to read PRs from your own repositories.
+
 ## What gets captured, and how
 
 | Path | When | Needs |

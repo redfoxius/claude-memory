@@ -79,7 +79,7 @@ func TestProcessSessionGatingTooFewMessages(t *testing.T) {
 	svc := mock.NewMemoryService()
 	cfg := Config{MinMessages: 20, CharBudget: 5000, HaikuTimeout: 5 * time.Second}
 
-	result, err := ProcessSession(context.Background(), svc, path, cfg, nil)
+	result, err := ProcessSession(context.Background(), svc, path, cfg, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestProcessSessionGatingFileEdits(t *testing.T) {
 		{output: []byte(`{"action":"ADD","target_id":null}`)},
 	}}
 
-	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner)
+	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestProcessSessionMissingTranscript(t *testing.T) {
 	svc := mock.NewMemoryService()
 	cfg := Config{MinMessages: 20, CharBudget: 5000, HaikuTimeout: 5 * time.Second}
 
-	result, err := ProcessSession(context.Background(), svc, "/nonexistent/path.jsonl", cfg, nil)
+	result, err := ProcessSession(context.Background(), svc, "/nonexistent/path.jsonl", cfg, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestProcessSessionHaikuFails(t *testing.T) {
 	// Extraction call itself fails; no decision call should ever happen.
 	fakeRunner := singleResponseRunner(nil, ErrHaikuFailed)
 
-	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner)
+	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestProcessSessionPassesCandidatesIntoDecisionPrompt(t *testing.T) {
 		{output: []byte(`{"action":"UPDATE","target_id":"cand-1"}`)},
 	}}
 
-	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner)
+	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestProcessSessionInventedTargetIDFallsBackToADD(t *testing.T) {
 		{output: []byte(`{"action":"UPDATE","target_id":"made-up-id-12345"}`)},
 	}}
 
-	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner)
+	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestInjectionStringInDataBlock(t *testing.T) {
 		{output: []byte(`{"action":"ADD","target_id":null}`)},
 	}}
 
-	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner)
+	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -600,7 +600,7 @@ func TestProcessSessionOffSchemaDecisionJSON_FallsBackToADD(t *testing.T) {
 		{output: []byte(`{"action":"MAYBE_UPDATE_IDK","target_id":"cand-1"}`)},
 	}}
 
-	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner)
+	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -637,7 +637,7 @@ func TestProcessSessionOffSchemaDecisionJSON_MalformedJSON_FallsBackToADD(t *tes
 		{output: []byte(`not json at all, sorry haiku`)},
 	}}
 
-	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner)
+	result, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -691,7 +691,7 @@ func TestProcessSession_ConfigRepoOverridesTranscriptRepo(t *testing.T) {
 			{output: []byte(`{"action":"ADD"}`)},
 		}}
 		cfg := Config{MinMessages: 20, CharBudget: 5000, HaikuTimeout: 5 * time.Second, Repo: tc.cfgRepo}
-		if _, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner); err != nil {
+		if _, err := ProcessSession(context.Background(), svc, path, cfg, fakeRunner, nil); err != nil {
 			t.Fatal(err)
 		}
 		stored := svc.GetStoredRecords()
