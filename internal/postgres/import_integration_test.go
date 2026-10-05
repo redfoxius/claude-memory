@@ -213,9 +213,16 @@ func TestConcurrentNewOnFreshDatabase(t *testing.T) {
 	}
 	for round := 0; round < 4; round++ {
 		name := fmt.Sprintf("race_%d", round)
+		// On an external server (MEMORY_TEST_PG_ADMIN_DSN) the databases
+		// outlive the test, so drop leftovers of an earlier run first.
+		drop := "DROP DATABASE IF EXISTS " + name + " WITH (FORCE)"
+		if _, err := admin.Exec(ctx, drop); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err != nil {
 			t.Fatal(err)
 		}
+		defer func() { _, _ = admin.Exec(context.Background(), drop) }() // runs before admin.Close
 		u.Path = "/" + name
 		// The extension needs a superuser, and tests connect as the owner of
 		// a throwaway container, which is one.
