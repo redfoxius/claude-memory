@@ -30,8 +30,9 @@ None of these ideas is new on its own. The combination is what this project is a
   those files changed since, the card says
   `code changed since this was recorded (N commits)`.
 - **PR ingest.** Merged PRs from Azure DevOps (`az`), GitHub (`gh`) and GitLab
-  (`glab`) are turned into candidate records by two haiku calls per PR, with
-  the merge commit as the staleness baseline. On GitHub and GitLab only
+  (`glab`) are turned into records by up to two haiku calls per PR, with the
+  merge commit as the staleness baseline. Unlike session facts, PR-derived
+  records are stored as `active` (confidence 0.75) without a review step. On GitHub and GitLab only
   trusted authors are used (GitHub `OWNER`/`MEMBER`/`COLLABORATOR`, GitLab
   Developer or higher, no bots).
 - **Measured retrieval.** Hybrid search: vector similarity and Postgres
@@ -61,7 +62,8 @@ auto memory, and there are mature, simpler-to-install projects such as
 [thedotmack/claude-mem](https://github.com/thedotmack/claude-mem),
 [rohitg00/agentmemory](https://github.com/rohitg00/agentmemory),
 [doobidoo/mcp-memory-service](https://github.com/doobidoo/mcp-memory-service),
-[mem0](https://github.com/mem0ai/mem0) and Hindsight.
+[mem0](https://github.com/mem0ai/mem0) and
+[Hindsight](https://github.com/vectorize-io/hindsight).
 
 The trade-offs here make sense if you want memory **shared** across machines or
 people on **your own Postgres**, **curated** (review, dedup, deprecation,
@@ -230,6 +232,9 @@ Known gaps:
 - The GitLab adapter is tested only against fixtures written from the API
   docs; GitHub Enterprise and auto-detection of self-hosted GitLab are not
   supported.
+- PR-derived records go live as `active` without review, so they reach prompts
+  immediately; text from untrusted authors is dropped on GitHub and GitLab, and
+  Azure DevOps authors are all treated as trusted.
 - No offline write queue: with Postgres unreachable the hook stays silent and
   `memory_store` returns an error.
 

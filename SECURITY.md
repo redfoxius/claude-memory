@@ -49,7 +49,8 @@ Postgres database that you operate.
   that reached a record through a session or a trusted PR, can influence
   Claude's behaviour in later sessions. Treat write access to the database as
   equivalent to write access to your prompts, review candidates
-  (`claude-memory review`), and run `import` and `ingest-pr` with `--dry-run`
+  (`claude-memory review`; note that PR-derived records are stored as `active`
+  and skip this step), and run `import` and `ingest-pr` with `--dry-run`
   first.
 - **Namespaces are for relevance, not isolation.** All namespaces share one
   database and one role. Use separate databases if you need a hard boundary.
