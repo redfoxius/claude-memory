@@ -703,3 +703,25 @@ func TestProcessSession_ConfigRepoOverridesTranscriptRepo(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessPRFailureVersusSkip(t *testing.T) {
+	tests := []struct {
+		name    string
+		runner  *FakeHaikuRunner
+		wantErr bool
+	}{
+		{"haiku call fails", singleResponseRunner(nil, ErrHaikuFailed), true},
+		{"unparsable output", singleResponseRunner([]byte("I need clarification"), nil), true},
+		{"nothing worth extracting is a skip", singleResponseRunner([]byte("[]"), nil), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := mock.NewMemoryService()
+			_, err := ProcessPR(context.Background(), svc, PRInput{Title: "t", Description: "d", Repo: "r"},
+				Config{CharBudget: 5000, HaikuTimeout: time.Second}, tc.runner, nil)
+			if got := errors.Is(err, ErrExtractionFailed); got != tc.wantErr {
+				t.Fatalf("errors.Is(ErrExtractionFailed)=%v want %v (err=%v)", got, tc.wantErr, err)
+			}
+		})
+	}
+}

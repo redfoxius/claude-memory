@@ -1,0 +1,18 @@
+{
+ "type": "result",
+ "subtype": "success",
+ "is_error": false,
+ "api_error_status": null,
+ "duration_ms": 4120,
+ "num_turns": 1,
+ "result": "```json\n[\n  {\n    \"kind\": \"gotcha\",\n    \"title\": \"pgx ErrNoRows must map to 404 response\",\n    \"content\": \"pgx returns ErrNoRows when a query matches nothing, handlers must map it to 404\",\n    \"tags\": [\"pgx\", \"error-handling\", \"http-status-codes\", \"go\", \"database\"],\n    \"files\": [\"internal/api/handler.go\"]\n  }\n]\n```",
+ "stop_reason": "end_turn",
+ "session_id": "00000000-0000-0000-0000-000000000000",
+ "total_cost_usd": 0.0131111,
+ "terminal_reason": "completed",
+ "uuid": "00000000-0000-0000-0000-000000000000",
+ "usage": {
+  "input_tokens": 9,
+  "output_tokens": 100
+ }
+}
