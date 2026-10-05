@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -187,8 +188,15 @@ func (r execRunner) Run(ctx context.Context, c setup.Cmd) (setup.Result, error) 
 	}
 	cmd := exec.CommandContext(ctx, c.Argv[0], c.Argv[1:]...)
 	cmd.Dir = c.Dir
-	if len(c.Env) > 0 {
-		cmd.Env = append(os.Environ(), c.Env...)
+	if len(c.Env) > 0 || len(c.DropEnv) > 0 {
+		env := os.Environ()
+		if len(c.DropEnv) > 0 {
+			env = slices.DeleteFunc(slices.Clone(env), func(kv string) bool {
+				k, _, _ := strings.Cut(kv, "=")
+				return slices.Contains(c.DropEnv, k)
+			})
+		}
+		cmd.Env = append(env, c.Env...)
 	}
 	if c.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(c.Stdin)

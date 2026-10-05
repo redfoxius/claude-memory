@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -117,6 +119,12 @@ func ingestOneRepo(ctx context.Context, svc extraction.StoreWriter, d ingestPort
 			return
 		}
 		provider = prsource.Provider(settings.Provider)
+		// GitHub is github.com only: a "github" override on another host
+		// would treat that host's repo owner as trusted.
+		if provider == prsource.ProviderGitHub && !prsource.IsGitHubHost(host) {
+			skip("unsupported provider", "provider", provider, "remote", safeRemote)
+			return
+		}
 		ref.Provider, ref.Host, ref.Path, ref.Remote = provider, host, path, safeRemote
 	}
 
@@ -141,7 +149,7 @@ func ingestOneRepo(ctx context.Context, svc extraction.StoreWriter, d ingestPort
 			}
 		}
 		// AC-4: two clones with one basename must not share a cursor.
-		cursorRepo = strings.ReplaceAll(ref.Path, "/", "_")
+		cursorRepo = cursorKey(provider, ref.Host, ref.Path)
 	}
 
 	if d.Scope != nil {
@@ -167,7 +175,17 @@ func ingestOneRepo(ctx context.Context, svc extraction.StoreWriter, d ingestPort
 	}
 
 	if dryRun {
-		fmt.Printf("%s (%s): %d PR(s) would be ingested since %s\n", ref.Name, provider, len(prs), since.Format(time.RFC3339))
+		eligible := 0
+		for _, pr := range prs {
+			if !pr.Bot && pr.Trusted {
+				eligible++
+			}
+		}
+		note := ""
+		if n := len(prs) - eligible; n > 0 {
+			note = fmt.Sprintf(", %d skipped (bot/untrusted)", n)
+		}
+		fmt.Printf("%s (%s): %d PR(s) would be ingested%s since %s\n", ref.Name, provider, eligible, note, since.Format(time.RFC3339))
 		return
 	}
 
@@ -228,6 +246,21 @@ func ingestOneRepo(ctx context.Context, svc extraction.StoreWriter, d ingestPort
 	if err := d.Cursors.Save(prcursor.Cursor{Provider: string(provider), Repo: cursorRepo, Since: latest}); err != nil {
 		slog.Error("ingest-pr: failed to persist cursor", "repo", ref.Name, "error", err)
 	}
+}
+
+// cursorKey is the GitHub/GitLab cursor file key: readable ("/" -> "_") plus
+// a hash suffix so it is collision-free ("a_b/c" vs "a/b_c"). GitLab keys
+// include the host (gitlab.com vs a self-hosted instance); GitHub is always
+// github.com, so its key is host-less.
+func cursorKey(p prsource.Provider, host, path string) string {
+	id := path
+	readable := strings.ReplaceAll(path, "/", "_")
+	if p == prsource.ProviderGitLab {
+		id = host + "/" + path
+		readable = host + "_" + readable
+	}
+	sum := sha256.Sum256([]byte(id))
+	return readable + "-" + hex.EncodeToString(sum[:])[:12]
 }
 
 // discoverRepos resolves the configured repo roots into concrete git repo

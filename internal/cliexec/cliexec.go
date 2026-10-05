@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 const (
@@ -23,6 +24,14 @@ const (
 	// escape the scrubber's patterns.
 	maxStderr  = 512
 	stderrRead = 4096
+)
+
+// DefaultTimeout is the per-call limit when Runner.Timeout is zero, and
+// waitDelay how long after the kill a grandchild holding the pipes may
+// delay Run (a forking wrapper script).
+const (
+	DefaultTimeout = 60 * time.Second
+	waitDelay      = 2 * time.Second
 )
 
 // ErrOutputTooLarge is returned when stdout exceeds MaxStdout.
@@ -36,6 +45,9 @@ type Runner struct {
 	// Drop lists variable names removed from the inherited environment
 	// (tokens and debug switches a child must not see or echo).
 	Drop []string
+	// Timeout bounds one call (0 = DefaultTimeout); a stalled CLI must not
+	// hang the nightly job.
+	Timeout time.Duration
 	// Scrub, when set, redacts secrets from the stderr text in errors.
 	Scrub func(string) string
 }
@@ -45,8 +57,15 @@ type Runner struct {
 // bytes of scrubbed stderr and a remedy keyed by the CLI name only; the
 // caller adds the endpoint.
 func (r Runner) Run(ctx context.Context, dir string, args []string) ([]byte, error) {
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, r.Bin, args...)
 	cmd.Dir = dir
+	cmd.WaitDelay = waitDelay
 	cmd.Env = r.environ(os.Environ())
 
 	stdout := &capWriter{max: MaxStdout}
@@ -62,6 +81,9 @@ func (r Runner) Run(ctx context.Context, dir string, args []string) ([]byte, err
 		if stdout.over {
 			return nil, fmt.Errorf("%s%s: %w", r.Bin, sub, ErrOutputTooLarge)
 		}
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("%s%s: timed out after %s: %w", r.Bin, sub, timeout, ctx.Err())
+		}
 		if errors.Is(err, exec.ErrNotFound) {
 			return nil, fmt.Errorf("%s is not installed or not on PATH: %w", r.Bin, err)
 		}
@@ -72,9 +94,20 @@ func (r Runner) Run(ctx context.Context, dir string, args []string) ([]byte, err
 		if len(msg) > maxStderr {
 			msg = strings.ToValidUTF8(msg[:maxStderr], "") + "..."
 		}
-		return nil, fmt.Errorf("%s%s: %w (stderr: %s); try `%s auth login`", r.Bin, sub, err, msg, r.Bin)
+		return nil, fmt.Errorf("%s%s: %w (stderr: %s); try `%s`", r.Bin, sub, err, msg, r.remedy(args))
 	}
 	return stdout.buf.Bytes(), nil
+}
+
+// remedy is the login command to suggest: keyed by the CLI name, plus the
+// host when the call carried a --hostname=<host> argument (glab).
+func (r Runner) remedy(args []string) string {
+	for _, a := range args {
+		if h, ok := strings.CutPrefix(a, "--hostname="); ok {
+			return r.Bin + " auth login --hostname=" + h
+		}
+	}
+	return r.Bin + " auth login"
 }
 
 // environ returns base minus the stripped names, plus r.Env.

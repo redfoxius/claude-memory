@@ -495,13 +495,13 @@ func cmdIngestPR(cfg *config.Config) error {
 	gh := cliexec.Runner{
 		Bin:   "gh",
 		Env:   []string{"GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1"},
-		Drop:  []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_DEBUG"},
+		Drop:  prsource.ChildEnvDrop,
 		Scrub: scrubText,
 	}
 	glab := cliexec.Runner{
 		Bin:   "glab",
 		Env:   []string{"NO_COLOR=1"},
-		Drop:  []string{"GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN", "GITLAB_HOST", "GLAB_DEBUG"},
+		Drop:  prsource.ChildEnvDrop,
 		Scrub: scrubText,
 	}
 

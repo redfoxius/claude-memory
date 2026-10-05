@@ -1108,3 +1108,27 @@ func TestDoctorStickyBinPath(t *testing.T) {
 		}
 	})
 }
+
+// The gh/glab login check runs with the token variables dropped, so it
+// reflects the keyring login the job uses.
+func TestDoctorLoginCheckDropsTokenEnv(t *testing.T) {
+	t.Parallel()
+	f := newDoctorFixture(t)
+	f.runner.SetPath("gh", "/usr/bin/gh")
+	f.runner.Script(ArgvPrefix("gh", "auth", "status"), Result{})
+	f.run()
+	var found bool
+	for _, c := range f.runner.Calls() {
+		if len(c.Argv) > 1 && c.Argv[0] == "gh" && c.Argv[1] == "auth" {
+			found = true
+			for _, v := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN", "GITLAB_TOKEN"} {
+				if !slices.Contains(c.DropEnv, v) {
+					t.Errorf("DropEnv lacks %s", v)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("gh auth status not run")
+	}
+}

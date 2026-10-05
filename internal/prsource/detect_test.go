@@ -139,10 +139,12 @@ func TestDetectFillsHostPathAndRedactsRemote(t *testing.T) {
 
 func TestRedactRemote(t *testing.T) {
 	for in, want := range map[string]string{
-		"https://user:tok@github.com/a/b.git": "https://github.com/a/b.git",
-		"https://tok@github.com/a/b":          "https://github.com/a/b",
-		"git@github.com:a/b.git":              "github.com:a/b.git",
-		"https://github.com/a/b":              "https://github.com/a/b",
+		"https://user:tok@github.com/a/b.git":     "https://github.com/a/b.git",
+		"https://tok@github.com/a/b":              "https://github.com/a/b",
+		"git@github.com:a/b.git":                  "github.com:a/b.git",
+		"https://github.com/a/b":                  "https://github.com/a/b",
+		"https://u:t@github.com/a/b?token=x#frag": "https://github.com/a/b",
+		"evil.com:x@github.com:a/b":               "evil.com:x@github.com:a/b",
 	} {
 		if got := RedactRemote(in); got != want {
 			t.Errorf("RedactRemote(%q) = %q, want %q", in, got, want)
@@ -196,5 +198,16 @@ func TestBots(t *testing.T) {
 		if IsGitLabBot(u) != want {
 			t.Errorf("IsGitLabBot(%q) = %v", u, !want)
 		}
+	}
+}
+
+func TestSCPUserSplitFollowsGit(t *testing.T) {
+	h, p, ok := ParseRemote("evil.com:x@github.com:a/b")
+	if !ok || h != "evil.com" {
+		t.Errorf("host = %q (%v), want evil.com", h, ok)
+	}
+	_ = p
+	if prov, _, _ := Detect("evil.com:x@github.com:a/b"); prov != ProviderUnknown {
+		t.Errorf("provider = %v, want unknown", prov)
 	}
 }

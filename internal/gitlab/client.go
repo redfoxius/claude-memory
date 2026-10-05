@@ -132,7 +132,8 @@ func (c *Client) trustedMembers(ctx context.Context, repo prsource.RepoRef) (map
 	ids := map[int]bool{}
 	for page := 1; ; page++ {
 		if page > maxPages {
-			return nil, fmt.Errorf("members of %s: %w", repo.Path, prsource.ErrPageCap)
+			// Not ErrPageCap: the cursor remedy does not apply here.
+			return nil, fmt.Errorf("project %s has more than %d members; the trusted-author check cannot complete, so it is skipped", repo.Path, maxPages*perPage)
 		}
 		out, err := c.api(ctx, repo, "/members/all", pageQuery(page))
 		if err != nil {

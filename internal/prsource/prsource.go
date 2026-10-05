@@ -29,11 +29,15 @@ const (
 // remote came from — Name is the canonical identifier used for the cursor
 // file and the memory record's repo field.
 type RepoRef struct {
-	Provider  Provider
-	Org       string
-	Project   string
-	Name      string
-	LocalPath string
+	Provider Provider
+	Org      string
+	Project  string
+	Name     string
+	// RemoteName is the repo name parsed from the origin URL (Name is the
+	// local directory's basename once ingest-pr sets it). Azure DevOps API
+	// calls use it.
+	RemoteName string
+	LocalPath  string
 	// Remote is the origin URL with userinfo removed (safe to log).
 	Remote string
 	// Host (lower-case, no port) and Path (all segments, no ".git") come

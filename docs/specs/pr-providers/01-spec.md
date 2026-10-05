@@ -263,7 +263,7 @@ skipped; a self-hosted GitLab repo needs `pr_ingest: {provider: gitlab}`.
   stripping and caps; `PRIngestProblems` with `Resolve` intact; install
   re-render keeps `pr_ingest`; routing/cursor keys; scrub → cap → head-first
   truncation; doctor rows incl. internal timeout.
-- Fixtures: GitHub captured once via `gh api` (trimmed, anonymised); GitLab hand-written from the REST docs.
+- Fixtures: GitHub and GitLab both hand-written from the REST API docs (not captured); live GitHub verification is the owner-manual check below.
 - Manual (owner, GitHub only): `ingest-pr --dry-run`, one real run, re-run
   no-op, `git merge-base --is-ancestor <commit_sha> origin/<default>` on a
   squash PR, `doctor` shows `tools.gh: logged in`.

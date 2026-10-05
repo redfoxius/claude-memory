@@ -1,6 +1,8 @@
 package namespace
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -128,5 +130,60 @@ func TestAddKeepsPRIngest(t *testing.T) {
 	}
 	if p, _ := c.PRIngestFor("s"); p.IsEnabled() {
 		t.Error("Add dropped pr_ingest")
+	}
+}
+
+func TestMalformedPRIngestIsNeverRewritten(t *testing.T) {
+	for name, pr := range map[string]string{
+		"false":         "pr_ingest: false",
+		"enabled maybe": "pr_ingest: {enabled: maybe}",
+		"provider list": "pr_ingest: {provider: [gitlab]}",
+		"unknown":       "pr_ingest: {provider: bitbucket}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := "namespaces:\n  - namespace: s\n    paths: [\"/s\"]\n    " + pr + "\n"
+			path := filepath.Join(t.TempDir(), "ns.yaml")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// Before: skipped by ingest-pr (problem reported).
+			c, _ := Load(path)
+			if _, prob := c.PRIngestFor("s"); prob == "" {
+				t.Fatal("must be a problem before")
+			}
+			if _, err := Marshal(c); err == nil {
+				t.Error("Marshal must refuse")
+			}
+			for _, op := range []func() error{
+				func() error { return Add(path, "s", "/more") },
+				func() error { return Add(path, "other", "/o") },
+				func() error { return Save(path, c) },
+			} {
+				err := op()
+				if err == nil || !strings.Contains(err.Error(), "fix pr_ingest in "+path+" first") {
+					t.Errorf("want clear refusal, got %v", err)
+				}
+			}
+			if got, _ := os.ReadFile(path); string(got) != body {
+				t.Errorf("file changed:\n%s", got)
+			}
+			// After (nothing written): still skipped.
+			c2, _ := Load(path)
+			if _, prob := c2.PRIngestFor("s"); prob == "" {
+				t.Error("must stay skipped after the refused rewrite")
+			}
+		})
+	}
+}
+
+func TestValidPRIngestStillRoundTripsThroughAdd(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ns.yaml")
+	_ = os.WriteFile(path, []byte("namespaces:\n  - namespace: s\n    paths: [\"/s\"]\n    pr_ingest: {enabled: false}\n"), 0o600)
+	if err := Add(path, "s", "/more"); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := Load(path)
+	if p, prob := c.PRIngestFor("s"); prob != "" || p.IsEnabled() {
+		t.Errorf("lost opt-out: %+v %q", p, prob)
 	}
 }

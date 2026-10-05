@@ -11,6 +11,16 @@ import (
 // reaching the cursor; ingest-pr adds the remedy naming the cursor file.
 var ErrPageCap = errors.New("too many PRs since the cursor (page cap reached)")
 
+// ChildEnvDrop lists the variables removed from the environment of every
+// gh/glab child (ingest-pr and the doctor check alike): credentials, host
+// redirects and debug switches. The CLIs must use their own keyring login.
+var ChildEnvDrop = []string{
+	"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN",
+	"GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN", "CI_JOB_TOKEN",
+	"GLAB_ENABLE_CI_AUTOLOGIN", "GITLAB_URI", "GITLAB_HOST", "GH_HOST",
+	"GLAB_DEBUG", "GH_DEBUG",
+}
+
 var (
 	segmentRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 	hostRE    = regexp.MustCompile(`^[a-z0-9.-]+$`)

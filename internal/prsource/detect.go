@@ -39,7 +39,7 @@ func Detect(remoteURL string) (Provider, RepoRef, error) {
 	switch {
 	case isAzureHost(hostLower):
 		provider, ref = ProviderAzureDevOps, parseAzureRef(hostLower, path, safe)
-	case isGitHubHost(hostLower):
+	case IsGitHubHost(hostLower):
 		provider, ref = ProviderGitHub, parseTwoSegmentRef(path, safe)
 	case hostLower == "gitlab.com":
 		provider, ref = ProviderGitLab, parseTwoSegmentRef(path, safe)
@@ -47,6 +47,7 @@ func Detect(remoteURL string) (Provider, RepoRef, error) {
 		return ProviderUnknown, RepoRef{Remote: safe}, nil
 	}
 	ref.Provider = provider
+	ref.RemoteName = ref.Name
 	ref.Host = hostLower
 	ref.Path = path
 	return provider, ref, nil
@@ -73,9 +74,18 @@ func RedactRemote(remote string) string {
 	remote = strings.TrimSpace(remote)
 	if strings.Contains(remote, "://") {
 		if u, err := url.Parse(remote); err == nil {
-			u.User = nil
+			u.User, u.RawQuery, u.Fragment, u.ForceQuery = nil, "", "", false
 			return u.String()
 		}
+	}
+	if cut := strings.IndexAny(remote, "?#"); cut >= 0 {
+		remote = remote[:cut]
+	}
+	if colon := strings.Index(remote, ":"); colon >= 0 {
+		if at := strings.Index(remote[:colon], "@"); at >= 0 {
+			return remote[at+1:]
+		}
+		return remote
 	}
 	if i := strings.LastIndex(remote, "@"); i >= 0 {
 		return remote[i+1:]
@@ -83,7 +93,8 @@ func RedactRemote(remote string) string {
 	return remote
 }
 
-func isGitHubHost(host string) bool {
+// IsGitHubHost reports whether host is one of the GitHub cloud hosts.
+func IsGitHubHost(host string) bool {
 	return host == "github.com" || host == "www.github.com" || host == "ssh.github.com"
 }
 
@@ -104,15 +115,17 @@ func splitHostPath(remote string) (host, path string, ok bool) {
 		return u.Hostname(), u.Path, true
 	}
 
-	rest := remote
-	if idx := strings.LastIndex(rest, "@"); idx >= 0 {
-		rest = rest[idx+1:]
-	}
-	idx := strings.Index(rest, ":")
-	if idx < 0 {
+	// SCP-style, with git's semantics: the user ends at the first "@" that
+	// precedes the first ":" ("evil.com:x@github.com:a/b" has host evil.com).
+	colon := strings.Index(remote, ":")
+	if colon < 0 {
 		return "", "", false
 	}
-	return rest[:idx], rest[idx+1:], true
+	host = remote[:colon]
+	if at := strings.Index(host, "@"); at >= 0 {
+		host = host[at+1:]
+	}
+	return host, remote[colon+1:], true
 }
 
 // parseAzureRef parses an Azure DevOps path into org/project/repo.

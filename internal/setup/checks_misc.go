@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"claude-memory/internal/namespace"
+	"claude-memory/internal/prsource"
 )
 
 // Doctor checks binary.version, tools.*, namespaces, jobs, dirs.state,
@@ -80,9 +81,9 @@ func (d *doctor) checkToolAz(context.Context) (Status, string, string) {
 }
 
 // loginCheckTimeout bounds the network `auth status` of tools.gh/tools.glab;
-// it stays below DefaultCheckTimeout so a slow network reads "could not
+// plus the runner's 1 s WaitDelay it stays below DefaultCheckTimeout so a slow network reads "could not
 // check" instead of a framework timeout turning the row into a fail.
-const loginCheckTimeout = 2 * time.Second
+const loginCheckTimeout = 1500 * time.Millisecond
 
 func (d *doctor) checkToolGh(ctx context.Context) (Status, string, string) {
 	return d.checkLoginTool(ctx, "gh", []string{"gh", "auth", "status", "--hostname", "github.com"}, "gh auth login")
@@ -102,7 +103,7 @@ func (d *doctor) checkLoginTool(ctx context.Context, tool string, argv []string,
 	}
 	cctx, cancel := context.WithTimeout(ctx, loginCheckTimeout)
 	defer cancel()
-	res, err := d.Runner.Run(cctx, Cmd{Argv: argv})
+	res, err := d.Runner.Run(cctx, Cmd{Argv: argv, DropEnv: prsource.ChildEnvDrop})
 	if err != nil {
 		return StatusInfo, p + ": could not check login (" + d.redact(err.Error()) + ")", ""
 	}

@@ -4,6 +4,10 @@
 // github.com. Only trusted authors' PRs and comments (OWNER, MEMBER,
 // COLLABORATOR; no bots) are used, since PR text from strangers would
 // otherwise become memory records (prompt injection).
+//
+// The tests use hand-written fixtures (not captured from a live repo); live
+// verification against GitHub is the owner's manual step (`ingest-pr
+// --dry-run`, then one real run).
 package github
 
 import (

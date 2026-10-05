@@ -148,6 +148,12 @@ func analyzeNamespaces(rfs ReadFS, p Paths, st *RunState) (nsAnalysis, error) {
 			return a, nil
 		}
 		a.cfg = cfg
+		if len(cfg.PRIngestProblems) > 0 {
+			// Re-rendering would drop the malformed value and turn an
+			// opt-out into "enabled": treat it like an unparseable file.
+			a.parseErr = fmt.Errorf("fix pr_ingest in %s first: %w", a.path, &namespace.PRIngestError{Problems: cfg.PRIngestProblems})
+			return a, nil
+		}
 	} else {
 		a.cfg = &namespace.Config{Default: namespace.Fallback, Namespaces: []namespace.Rule{}}
 	}

@@ -57,7 +57,9 @@ batch succeeds, so re-running after a failure is safe.
 - **GitLab is auto-detected for `gitlab.com` only.** A self-hosted GitLab
   needs an explicit opt-in on its namespace (see below). The GitLab adapter
   is **not verified against a live GitLab** (tested with fixtures written
-  from the API docs): start with `--dry-run`.
+  from the API docs): start with `--dry-run`. The GitHub adapter is also
+  tested with hand-written fixtures; live GitHub verification is a manual
+  step (`--dry-run`, then one real run).
 - **Only trusted authors are ingested** (GitHub: `OWNER`/`MEMBER`/
   `COLLABORATOR`; GitLab: Developer or higher), and bots are skipped. PR text
   from strangers on a public repo would otherwise become memory records that

@@ -1,6 +1,6 @@
 # Claude Memory — GitHub & GitLab PR Ingest — Plan
 
-**Status:** v0.2, not started — Opus plan review PASS WITH FIXES, fixes
+**Status:** v0.2, implemented (WI-1..WI-9 plus review fixes) — Opus plan review PASS WITH FIXES, fixes
 applied. Spec: `docs/specs/pr-providers/01-spec.md` (v0.2, AC-1..AC-34;
 AC-9 withdrawn). v0.2 delta: security hardening in WI-1/2/3/4/7, lenient
 `pr_ingest` parsing (WI-6), cursor re-key and env-only repos (WI-7),
@@ -92,7 +92,7 @@ reviews/files/diffs, list column, rich dry run, error classes.
   non-empty bodies only; no identity fields.
 - Args `api --hostname github.com -X GET repos/<Path>/… -f k=v`; `Path`
   pre-validated by WI-1 (checked again in `New`'s calls, defence in depth).
-- Fixtures (`testdata/`, captured once via `gh api`, trimmed, anonymised):
+- Fixtures (`testdata/`, hand-written from the GitHub REST docs (acme/widgets), not captured):
   pulls pages (merged, closed-unmerged, bot, `NONE` author, a duplicate),
   one PR, issue comments, review comments.
 - Tests: fake Runner keyed by argv; stop, short page, cap error, de-dup,

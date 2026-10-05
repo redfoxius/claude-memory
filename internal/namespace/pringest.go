@@ -3,6 +3,7 @@ package namespace
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -98,6 +99,26 @@ func (c *Config) PRIngestFor(ns string) (p PRIngest, problem string) {
 		}
 	}
 	return p, ""
+}
+
+// PRIngestError is returned by Marshal (and so Save, Add, Init) when a
+// pr_ingest section is unusable; the file must be fixed by hand first.
+type PRIngestError struct{ Problems []PRIngestProblem }
+
+func (e *PRIngestError) Error() string {
+	var parts []string
+	for _, p := range e.Problems {
+		parts = append(parts, p.Namespace+": "+p.Reason)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (c *Config) pringestError() error {
+	c.collectPRIngestProblems()
+	if len(c.PRIngestProblems) == 0 {
+		return nil
+	}
+	return &PRIngestError{Problems: c.PRIngestProblems}
 }
 
 // collectPRIngestProblems fills PRIngestProblems, one entry per affected

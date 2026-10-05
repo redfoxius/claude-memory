@@ -254,3 +254,15 @@ func TestGetNotesFailureDegradesDetailFailureFails(t *testing.T) {
 		t.Error("non-numeric id accepted")
 	}
 }
+
+func TestMembersOverCapHasOwnErrorNotPageCap(t *testing.T) {
+	var items []string
+	for i := 0; i < 100; i++ {
+		items = append(items, `{"id":1,"username":"a","access_level":30}`)
+	}
+	r := &fakeRunner{answers: map[string][]byte{"/members/all": []byte("[" + strings.Join(items, ",") + "]")}}
+	_, err := New(r).ListCompleted(context.Background(), repo, time.Now())
+	if err == nil || errors.Is(err, prsource.ErrPageCap) || !strings.Contains(err.Error(), "members") {
+		t.Fatalf("err = %v", err)
+	}
+}

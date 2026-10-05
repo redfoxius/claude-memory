@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestMain doubles as the child process: with CLIEXEC_HELPER set the test
@@ -23,6 +25,17 @@ func TestMain(m *testing.M) {
 		for i := 0; i < 40; i++ {
 			fmt.Print(chunk)
 		}
+		os.Exit(0)
+	case "sleep":
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	case "fork":
+		// A wrapper that leaves a grandchild holding the stdout pipe.
+		c := osexec.Command(os.Args[0])
+		c.Env = append(os.Environ(), "CLIEXEC_HELPER=sleep")
+		c.Stdout = os.Stdout
+		_ = c.Start()
+		time.Sleep(30 * time.Second)
 		os.Exit(0)
 	case "fail":
 		fmt.Fprint(os.Stderr, "token ghp_SECRET boom "+strings.Repeat("y", 2000))
@@ -86,5 +99,28 @@ func TestMissingBinary(t *testing.T) {
 	_, err := Runner{Bin: "definitely-not-a-real-cli-xyz"}.Run(context.Background(), "", []string{"api"})
 	if err == nil || !strings.Contains(err.Error(), "not installed") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestTimeoutKillsStalledAndForkingCLI(t *testing.T) {
+	for _, mode := range []string{"sleep", "fork"} {
+		start := time.Now()
+		_, err := helper(t, mode, Runner{Timeout: 300 * time.Millisecond}).Run(context.Background(), "", []string{"api"})
+		if err == nil || !strings.Contains(err.Error(), "timed out") {
+			t.Errorf("%s: want timeout error, got %v", mode, err)
+		}
+		if el := time.Since(start); el > 5*time.Second {
+			t.Errorf("%s: Run hung for %s", mode, el)
+		}
+	}
+}
+
+func TestRemedyKeyedByCLIAndHost(t *testing.T) {
+	r := Runner{Bin: "glab"}
+	if got := r.remedy([]string{"api", "--hostname=git.corp", "x"}); got != "glab auth login --hostname=git.corp" {
+		t.Errorf("got %q", got)
+	}
+	if got := (Runner{Bin: "gh"}).remedy([]string{"api", "--hostname", "github.com"}); got != "gh auth login" {
+		t.Errorf("got %q", got)
 	}
 }

@@ -78,7 +78,7 @@ func TestIngestGitHubRoutesAndKeysCursorByRemotePath(t *testing.T) {
 	if len(src.getCalls) != 1 {
 		t.Errorf("Get calls = %v", src.getCalls)
 	}
-	if _, ok := store.Load("github", "example-user_pet-game"); !ok {
+	if _, ok := store.Load("github", cursorKey(prsource.ProviderGitHub, "github.com", "example-user/pet-game")); !ok {
 		t.Error("cursor must be keyed by provider + remote path with / -> _")
 	}
 	if _, ok := store.Load("github", filepath.Base(repo)); ok {
@@ -91,7 +91,7 @@ func TestIngestTwoClonesWithSameBasenameGetSeparateCursors(t *testing.T) {
 	for _, remote := range []string{"git@github.com:alice/app.git", "git@github.com:bob/app.git"} {
 		ingestOneRepo(context.Background(), mock.NewMemoryService(), sourcePorts(store, prsource.ProviderGitHub, listing(goodPR("1"))), testConfig(), setupGitRepoWithRemote(t, remote), false)
 	}
-	for _, key := range []string{"alice_app", "bob_app"} {
+	for _, key := range []string{cursorKey(prsource.ProviderGitHub, "github.com", "alice/app"), cursorKey(prsource.ProviderGitHub, "github.com", "bob/app")} {
 		if _, ok := store.Load("github", key); !ok {
 			t.Errorf("missing cursor %s", key)
 		}
@@ -107,7 +107,7 @@ func TestIngestGitLabComAndSelfHostedNeedsOverride(t *testing.T) {
 	if len(src.refs) != 1 || src.refs[0].Path != "group/sub/proj" || src.refs[0].Host != "gitlab.com" {
 		t.Fatalf("gitlab.com refs = %+v", src.refs)
 	}
-	if _, ok := store.Load("gitlab", "group_sub_proj"); !ok {
+	if _, ok := store.Load("gitlab", cursorKey(prsource.ProviderGitLab, "gitlab.com", "group/sub/proj")); !ok {
 		t.Error("gitlab cursor key")
 	}
 
@@ -199,7 +199,7 @@ func TestIngestBotAndUntrustedPRsAdvanceCursorWithoutGet(t *testing.T) {
 	if len(src.getCalls) != 0 {
 		t.Errorf("Get called for bot/untrusted PRs: %v", src.getCalls)
 	}
-	cur, ok := store.Load("github", "a_b")
+	cur, ok := store.Load("github", cursorKey(prsource.ProviderGitHub, "github.com", "a/b"))
 	if !ok || !cur.Since.Equal(later) {
 		t.Errorf("cursor must pass skipped PRs: %+v ok=%v", cur, ok)
 	}
@@ -260,7 +260,7 @@ func TestIngestPageCapErrorNamesCursorFile(t *testing.T) {
 	store := prcursor.NewStore(t.TempDir())
 	src := &fakeSource{listErr: errors.Join(prsource.ErrPageCap)}
 	ingestOneRepo(context.Background(), mock.NewMemoryService(), sourcePorts(store, prsource.ProviderGitHub, src), testConfig(), setupGitRepoWithRemote(t, "git@github.com:a/b.git"), false)
-	want := store.File("github", "a_b")
+	want := store.File("github", cursorKey(prsource.ProviderGitHub, "github.com", "a/b"))
 	if !strings.Contains(logs.String(), want) || !strings.Contains(logs.String(), "MEMORY_PR_INGEST_LOOKBACK") {
 		t.Errorf("remedy must name the cursor file %s:\n%s", want, logs)
 	}
@@ -291,5 +291,56 @@ func TestRunIngestPRAcrossRepos(t *testing.T) {
 	}
 	if scoped["ns-one"] != 1 || scoped["ns-two"] != 1 {
 		t.Errorf("each repo must be written under its own namespace: %v", scoped)
+	}
+}
+
+func TestCursorKeyIsCollisionFree(t *testing.T) {
+	gh, gl := prsource.ProviderGitHub, prsource.ProviderGitLab
+	keys := map[string]string{}
+	for _, c := range []struct {
+		p          prsource.Provider
+		host, path string
+	}{
+		{gh, "github.com", "a_b/c"}, {gh, "github.com", "a/b_c"}, {gh, "github.com", "a_/b"}, {gh, "github.com", "a/_b"},
+		{gl, "gitlab.com", "x/y"}, {gl, "gitlab.corp", "x/y"}, {gl, "gitlab.com", "x_y/z"}, {gl, "gitlab.com", "x/y_z"},
+	} {
+		k := cursorKey(c.p, c.host, c.path)
+		id := string(c.p) + c.host + c.path
+		if prev, dup := keys[k]; dup {
+			t.Errorf("collision: %q and %q -> %s", prev, id, k)
+		}
+		keys[k] = id
+		if strings.ContainsAny(k, "/\\: ") {
+			t.Errorf("unsafe key %q", k)
+		}
+	}
+	if cursorKey(gh, "github.com", "a/b") != cursorKey(gh, "www.github.com", "a/b") {
+		t.Error("GitHub key must not depend on the host")
+	}
+}
+
+func TestIngestGitHubOverrideOnNonGitHubHostIsSkipped(t *testing.T) {
+	store := prcursor.NewStore(t.TempDir())
+	src := listing(goodPR("1"))
+	d := sourcePorts(store, prsource.ProviderGitHub, src)
+	d.Settings = func(string) (string, namespace.PRIngest, string) {
+		return "x", namespace.PRIngest{Provider: "github"}, ""
+	}
+	out := captureStdout(t, func() {
+		ingestOneRepo(context.Background(), nil, d, testConfig(), setupGitRepoWithRemote(t, "https://git.example.org/OWNER/repo.git"), true)
+	})
+	if src.listCalls != 0 || !strings.Contains(out, "skipped (unsupported provider)") {
+		t.Errorf("calls=%d out=%q", src.listCalls, out)
+	}
+}
+
+func TestDryRunCountExcludesBotAndUntrusted(t *testing.T) {
+	store := prcursor.NewStore(t.TempDir())
+	src := listing(goodPR("1"), prsource.PR{ID: "2", Bot: true}, prsource.PR{ID: "3"})
+	out := captureStdout(t, func() {
+		ingestOneRepo(context.Background(), nil, sourcePorts(store, prsource.ProviderGitHub, src), testConfig(), setupGitRepoWithRemote(t, "git@github.com:a/b.git"), true)
+	})
+	if !strings.Contains(out, "1 PR(s) would be ingested, 2 skipped (bot/untrusted)") {
+		t.Errorf("out = %q", out)
 	}
 }
