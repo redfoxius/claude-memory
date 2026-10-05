@@ -4,3 +4,7 @@ deploy/.env
 /claude-memory
 *.test
 .idea/
+
+# docs site build output
+/site/_src/
+/site/_site/
