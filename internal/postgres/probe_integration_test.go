@@ -112,6 +112,22 @@ func createRole(t *testing.T, ctx context.Context, admin *pgx.Conn, name, passwo
 	})
 }
 
+// skipIfPasswordRequired skips the test when the server demands a password
+// from a password-less role (e.g. a Docker-published port, where connections
+// arrive from the bridge address and hit a scram-sha-256 rule): those tests
+// need a trust-authenticated server, like the all-trust note in the header.
+func skipIfPasswordRequired(t *testing.T, ctx context.Context, roleDSN string) {
+	t.Helper()
+	c, err := pgx.Connect(ctx, roleDSN)
+	if err == nil {
+		_ = c.Close(ctx)
+		return
+	}
+	if strings.Contains(err.Error(), "28P01") {
+		t.Skip("the server requires a password for password-less test roles (needs a trust pg_hba.conf for them)")
+	}
+}
+
 func dbName(t *testing.T, dsn string) string {
 	t.Helper()
 	u, err := url.Parse(dsn)
@@ -237,6 +253,7 @@ func TestProbeIntegrationMigrateNeedsSuperuserForExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 	appDSN := withURL(t, adminDB, role, "", "", false)
+	skipIfPasswordRequired(t, ctx, appDSN)
 
 	err := Prober{}.Migrate(ctx, appDSN)
 	if err == nil {
@@ -450,6 +467,7 @@ func TestProbeIntegrationMakesNoWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	roDSN := withURL(t, dsn, role, "", "", false)
+	skipIfPasswordRequired(t, ctx, roDSN)
 
 	before := catalogFingerprint(t, ctx, dsn)
 	st, err := Prober{}.Probe(ctx, roDSN)
