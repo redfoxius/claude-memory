@@ -1,0 +1,18 @@
+{
+ "type": "result",
+ "subtype": "success",
+ "is_error": false,
+ "api_error_status": null,
+ "duration_ms": 1441,
+ "num_turns": 1,
+ "result": "[]",
+ "stop_reason": "end_turn",
+ "session_id": "00000000-0000-0000-0000-000000000000",
+ "total_cost_usd": 0.01847,
+ "terminal_reason": "completed",
+ "uuid": "00000000-0000-0000-0000-000000000000",
+ "usage": {
+  "input_tokens": 9,
+  "output_tokens": 100
+ }
+}
