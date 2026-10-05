@@ -13,10 +13,20 @@ import (
 	"os/exec"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"claude-memory/internal/prsource"
 )
+
+// azureDevOpsResource is the Azure AD application id of Azure DevOps. `az rest`
+// cannot derive the token resource from a dev.azure.com URL: without an
+// explicit --resource it warns, sends no token, and Azure DevOps answers with
+// an HTML sign-in page instead of JSON.
+const azureDevOpsResource = "499b84ac-1321-427f-aa17-267ca6975798"
+
+// maxBodyPrefix caps how much of a non-JSON response body is echoed in errors.
+const maxBodyPrefix = 80
 
 // Runner is the port azuredevops needs to invoke the `az` CLI, declared
 // here by the consumer so tests can fake a run without shelling out to a
@@ -212,11 +222,21 @@ func (c *Client) reviewComments(ctx context.Context, repo prsource.RepoRef, id s
 		"https://dev.azure.com/%s/%s/_apis/git/repositories/%s/pullRequests/%s/threads?api-version=7.1",
 		repo.Org, repo.Project, apiName(repo), id,
 	)
-	args := []string{"rest", "--method", "get", "--url", url, "--output", "json"}
+	args := []string{"rest", "--method", "get", "--url", url, "--resource", azureDevOpsResource, "--output", "json"}
 
 	out, err := c.runner.Run(ctx, repo.LocalPath, args)
 	if err != nil {
 		return nil, fmt.Errorf("az rest (pr threads): %w", err)
+	}
+
+	trimmed := bytes.TrimSpace(out)
+	if len(trimmed) == 0 || trimmed[0] == '<' {
+		prefix := string(trimmed)
+		if len(prefix) > maxBodyPrefix {
+			prefix = prefix[:maxBodyPrefix]
+		}
+		return nil, fmt.Errorf("az rest (pr threads) returned a non-JSON response (likely an HTML sign-in page: az did not obtain a token); "+
+			"check with `az account get-access-token --resource %s` (body prefix: %q)", azureDevOpsResource, strings.TrimSpace(prefix))
 	}
 
 	var resp threadsResponse

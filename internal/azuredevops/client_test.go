@@ -3,6 +3,7 @@ package azuredevops
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -159,5 +160,55 @@ func TestAzureCallsUseRemoteRepoNameNotLocalBasename(t *testing.T) {
 	}
 	if !strings.Contains(all, "--repository real-repo") || !strings.Contains(all, "/repositories/real-repo/") || strings.Contains(all, "local-clone-dir") {
 		t.Errorf("calls:\n%s", all)
+	}
+}
+
+func TestReviewCommentsPassesResourceFlag(t *testing.T) {
+	runner := &fakeRunner{responses: map[string]fakeResponse{
+		"rest --method": {output: []byte(`{"value":[]}`)},
+	}}
+	repo := prsource.RepoRef{Org: "o", Project: "p", Name: "r", LocalPath: "/x"}
+	if _, err := New(runner).reviewComments(context.Background(), repo, "5"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"rest", "--method", "get",
+		"--url", "https://dev.azure.com/o/p/_apis/git/repositories/r/pullRequests/5/threads?api-version=7.1",
+		"--resource", azureDevOpsResource,
+		"--output", "json",
+	}
+	if len(runner.calls) != 1 || !reflect.DeepEqual(runner.calls[0], want) {
+		t.Errorf("args = %v, want %v", runner.calls, want)
+	}
+	if azureDevOpsResource != "499b84ac-1321-427f-aa17-267ca6975798" {
+		t.Errorf("unexpected resource id %s", azureDevOpsResource)
+	}
+}
+
+func TestGetNonJSONThreadsIsClearErrorAndNonFatal(t *testing.T) {
+	html := "<!DOCTYPE html><html>" + strings.Repeat("sign in ", 100) + "</html>"
+	runner := &fakeRunner{responses: map[string]fakeResponse{
+		"repos pr":      {output: []byte(`{"pullRequestId": 1, "title": "t", "closedDate": "2026-09-01T10:00:00Z"}`)},
+		"rest --method": {output: []byte(html)},
+	}}
+	repo := prsource.RepoRef{Org: "o", Project: "p", Name: "r", LocalPath: "/x"}
+	c := New(runner)
+
+	_, err := c.reviewComments(context.Background(), repo, "1")
+	if err == nil || !strings.Contains(err.Error(), "get-access-token --resource "+azureDevOpsResource) {
+		t.Fatalf("expected clear token error, got %v", err)
+	}
+	if len(err.Error()) > 500 {
+		t.Errorf("error echoes too much body: %d chars", len(err.Error()))
+	}
+
+	pr, err := c.Get(context.Background(), repo, "1")
+	if err != nil || pr.Title != "t" || pr.ReviewComments != nil {
+		t.Errorf("Get must stay non-fatal: %+v %v", pr, err)
+	}
+
+	runner.responses["rest --method"] = fakeResponse{output: []byte("  \n")}
+	if _, err := c.reviewComments(context.Background(), repo, "1"); err == nil {
+		t.Error("empty body must error")
 	}
 }
