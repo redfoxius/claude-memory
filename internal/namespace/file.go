@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -74,14 +75,14 @@ func Init(path, def string, rules []Rule, force bool) error {
 	if def == "" {
 		def = Fallback
 	}
+	if !ValidName(def) {
+		return fmt.Errorf("invalid default namespace %q", def)
+	}
 	c := &Config{Default: def, Namespaces: []Rule{}}
 	for _, r := range rules {
 		if err := c.Add(r.Namespace, r.Paths...); err != nil {
 			return err
 		}
-	}
-	if !ValidName(def) {
-		return fmt.Errorf("invalid default namespace %q", def)
 	}
 	return Save(path, c)
 }
@@ -108,6 +109,11 @@ func (c *Config) Add(name string, globs ...string) error {
 	if len(globs) == 0 {
 		return fmt.Errorf("namespace %q needs at least one path", name)
 	}
+	for _, g := range globs {
+		if err := validateGlob(g); err != nil {
+			return err
+		}
+	}
 	for i := range c.Namespaces {
 		if c.Namespaces[i].Namespace == name {
 			for _, g := range globs {
@@ -119,6 +125,24 @@ func (c *Config) Add(name string, globs ...string) error {
 		}
 	}
 	c.Namespaces = append(c.Namespaces, Rule{Namespace: name, Paths: append([]string(nil), globs...)})
+	return nil
+}
+
+// validateGlob rejects globs that could never match: empty ones and ones
+// with a malformed segment pattern (e.g. an unclosed "["), which match()
+// would otherwise treat as "no match" silently.
+func validateGlob(g string) error {
+	if strings.TrimSpace(g) == "" {
+		return fmt.Errorf("empty path glob")
+	}
+	for _, seg := range strings.Split(g, "/") {
+		if seg == "**" {
+			continue
+		}
+		if _, err := filepath.Match(seg, ""); err != nil {
+			return fmt.Errorf("invalid path glob %q: %w", g, err)
+		}
+	}
 	return nil
 }
 

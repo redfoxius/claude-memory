@@ -57,6 +57,7 @@ func TestNamespace_ListIsConfinedToOwnNamespace(t *testing.T) {
 func TestNamespace_IDLookupsHideOtherNamespaces(t *testing.T) {
 	recs := map[string]*record.Record{
 		"mine":   {ID: "mine", Namespace: "pet-game", Status: record.StatusActive},
+		"mine2":  {ID: "mine2", Namespace: "pet-game", Status: record.StatusActive},
 		"global": {ID: "global", Namespace: "global", Status: record.StatusActive},
 		"theirs": {ID: "theirs", Namespace: "acme", Status: record.StatusActive},
 	}
@@ -130,5 +131,43 @@ func TestNamespace_StoreRejectsForeignNamespace(t *testing.T) {
 	req.Namespace = "acme"
 	if _, err := nsService(&mockStore{}, "pet-game").Store(context.Background(), req); err == nil {
 		t.Fatal("expected an error for writing to another namespace")
+	}
+}
+
+func TestNamespace_DeprecateSupersededByMustBeAccessible(t *testing.T) {
+	recs := map[string]*record.Record{
+		"mine":   {ID: "mine", Namespace: "pet-game", Status: record.StatusActive},
+		"mine2":  {ID: "mine2", Namespace: "pet-game", Status: record.StatusActive},
+		"global": {ID: "global", Namespace: "global", Status: record.StatusActive},
+		"theirs": {ID: "theirs", Namespace: "acme", Status: record.StatusActive},
+	}
+	store := &mockStore{
+		GetFunc: func(ctx context.Context, id string) (*record.Record, error) {
+			if r, ok := recs[id]; ok {
+				return r, nil
+			}
+			return nil, ErrNotFound
+		},
+		UpdateFunc: func(ctx context.Context, id string, u map[string]interface{}) (*record.Record, error) {
+			return recs[id], nil
+		},
+	}
+	svc := nsService(store, "pet-game")
+	ctx := context.Background()
+	for _, id := range []string{"mine2", "global"} {
+		by := id
+		if _, err := svc.DeprecateRecord(ctx, &DeprecateRequest{ID: "mine", Reason: "x", SupersededBy: &by}); err != nil {
+			t.Errorf("superseded_by %s: %v", id, err)
+		}
+	}
+	for _, id := range []string{"theirs", "missing"} {
+		by := id
+		if _, err := svc.DeprecateRecord(ctx, &DeprecateRequest{ID: "mine", Reason: "x", SupersededBy: &by}); !errors.Is(err, ErrNotFound) {
+			t.Errorf("superseded_by %s: err = %v, want ErrNotFound", id, err)
+		}
+	}
+	self := "mine"
+	if _, err := svc.DeprecateRecord(ctx, &DeprecateRequest{ID: "mine", Reason: "x", SupersededBy: &self}); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("superseded_by self: err = %v, want ErrInvalidRequest", err)
 	}
 }

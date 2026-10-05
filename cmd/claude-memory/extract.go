@@ -144,6 +144,8 @@ func runExtract(cfg *config.Config, transcriptPath string) error {
 	if tr, perr := transcript.Parse(transcriptPath, transcript.Config{CharBudget: cfg.MaxContentChars}); perr == nil && tr.Cwd != "" {
 		svc, extractionRepo = scopeSessionService(ctx, svc, newCodeHistory(), cfg, tr.Cwd)
 	} else {
+		// No cwd to map: the namespace falls back to the default, so say so.
+		slog.Warn("extract --run: transcript has no cwd; using the fallback namespace", "transcript", transcriptPath)
 		svc = svc.WithNamespace(resolveNamespace(""))
 	}
 

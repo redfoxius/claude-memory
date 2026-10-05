@@ -17,12 +17,12 @@
 serve/hook/extract/ingest-pr, `namespaces init|add|which`, install docs,
 migration 0002, reviews `namespaces/03` and `04`. The integration isolation
 tests pass on a local Postgres+pgvector (`make test-integration`).
-**Open (from `namespaces/04-implementation-review.md`):** tests for migration
-backfill/idempotency and cross-namespace lock; ingest-pr routing test (two
-repos → two writers) and per-subcommand namespace tests; warn when
-`extract --run` has no `cwd`; `eval-retrieval` ignores `MEMORY_NAMESPACE`;
-glob validation in `namespaces init|add`; `SupersededBy` not checked for
-namespace accessibility; per-namespace `pr_ingest` config (item 4).
+**Follow-ups done (2026-10-05):** glob validation in `namespaces init|add`;
+`eval-retrieval` honours `MEMORY_NAMESPACE`; migration 0002 backfill/idempotency
+and per-namespace advisory-lock integration tests; ingest-pr two-repo routing,
+hook payload-cwd and eval scope tests; `extract --run` warns when the
+transcript has no `cwd`; `SupersededBy` must be an accessible record.
+**Still open:** per-namespace `pr_ingest` config (item 4).
 
 
 Input for `spec-creator` (agreed with the owner 2026-10-01, not yet a spec):
