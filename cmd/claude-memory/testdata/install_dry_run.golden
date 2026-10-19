@@ -259,7 +259,7 @@ CLAUDE.md section
   diff $HOME/.claude/CLAUDE.md
     --- /dev/null
     +++ $HOME/.claude/CLAUDE.md
-    @@ -0,0 +1,68 @@
+    @@ -0,0 +1,90 @@
     +<!-- BEGIN claude-memory -->
     +## Shared semantic memory (`claude-memory`)
     +
@@ -277,6 +277,21 @@ CLAUDE.md section
     +a decision among alternatives together with its reason, an infra/CI/
     +third-party gotcha, or a reusable snippet.
     +
+    +Memory exists to spread expertise and keep decisions already made from
+    +being re-made, not to log what happened: specifics can always be recovered
+    +from git, logs and docs. Store a record only if it passes all of:
+    +
+    +- **Search test:** you can name the situation in which someone would search
+    +  for it ("want to change volume", "CI fails on SKIP"). If not, don't store.
+    +- **Recoverability test:** if the answer is in code, git history, status
+    +  docs, plans or the backlog, store only the WHY and how to verify, not WHAT
+    +  was done.
+    +- **Lifetime test:** no status snapshots, merge orders, PR/ticket numbers,
+    +  per-item constants or measurements.
+    +- **Shape:** the title names the situation or decision in generic words (not
+    +  "about weapons"); the body is decision, mechanism (why), how to apply or
+    +  verify, and limits. One topic per record; do not bundle unrelated items.
+    +
     +**Never call `memory_store` for:**
     +1. Content derivable from the code or git history itself (if `git log`
     +   or reading the file would tell the same story, it does not belong in
@@ -285,6 +300,13 @@ CLAUDE.md section
     +   true only for the current task).
     +3. Content already present in that repo's own `CLAUDE.md` (do not
     +   duplicate a rule that is already written down locally).
+    +4. Session summaries, copies of plan or spec tables, one-commit details, or
+    +   trivia anyone can look up.
+    +5. Open bugs and deferred work: they belong in the project's backlog.
+    +
+    +Zero records is a valid outcome. Never batch "everything from this session"
+    +at the end; capture a record when its trigger happens, if it passes the
+    +tests above.
     +
     +### Before relying on memory (read path)
     +
