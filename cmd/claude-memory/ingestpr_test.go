@@ -136,7 +136,7 @@ const azureRemote = "git@ssh.dev.azure.com:v3/acme/Marketplace/test-repo"
 func TestIngestOneRepoFirstRunUsesLookbackAndPersistsCursor(t *testing.T) {
 	cursorStore := prcursor.NewStore(t.TempDir())
 
-	completedAt := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	completedAt := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Second)
 	src := &fakeSource{
 		listResult: []prsource.PR{{ID: "1", Title: "t", CompletedAt: completedAt, URL: "https://example/1", Trusted: true}},
 		getResults: map[string]*prsource.PR{"1": {ID: "1", Title: "t", Description: "d", CompletedAt: completedAt, Trusted: true}},

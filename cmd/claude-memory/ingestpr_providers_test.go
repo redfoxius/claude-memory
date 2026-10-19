@@ -19,7 +19,8 @@ import (
 	"github.com/redfoxius/claude-memory/internal/prsource"
 )
 
-var t0 = time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+// t0 is relative to now so it stays inside the first-run PR lookback window.
+var t0 = time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Second)
 
 func goodPR(id string) prsource.PR {
 	return prsource.PR{ID: id, Title: "t" + id, CompletedAt: t0, Trusted: true}
